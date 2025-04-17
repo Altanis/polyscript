@@ -1,3 +1,5 @@
+use colored::*;
+
 pub const NEGATE_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
 pub const ADD_TOKEN: char = '+';
@@ -14,7 +16,39 @@ pub const LESS_THAN_TOKEN: char = '<';
 
 pub const COMMENT_TOKEN: char = '#';
 
-#[derive(Debug)]
+pub const INT_TYPE: &str = "int";
+pub const FLOAT_TYPE: &str = "float";
+pub const BOOL_TYPE: &str = "bool";
+pub const STRING_TYPE: &str = "string";
+pub const VOID_TYPE: &str = "void";
+
+pub const LET_KEYWORD: &str = "let";
+pub const CONST_KEYWORD: &str = "const";
+pub const CLASS_KEYWORD: &str = "class";
+pub const OVERRIDE_KEYWORD: &str = "override";
+pub const TRUE_KEYWORD: &str = "true";
+pub const FALSE_KEYWORD: &str = "false";
+pub const FN_KEYWORD: &str = "fn";
+pub const FOR_KEYWORD: &str = "for";
+pub const WHILE_KEYWORD: &str = "while";
+pub const RETURN_KEYWORD: &str = "return";
+pub const BREAK_KEYWORD: &str = "break";
+pub const CONTINUE_KEYWORD: &str = "continue";
+pub const IF_KEYWORD: &str = "if";
+pub const ELSE_KEYWORD: &str = "else";
+pub const THROW_KEYWORD: &str = "throw";
+
+pub const END_OF_LINE: char = ';';
+pub const OPEN_PARENTHESIS: char = '(';
+pub const CLOSE_PARENTHESIS: char = ')';
+pub const OPEN_BRACKET: char = '[';
+pub const CLOSE_BRACKET: char = ']';
+pub const OPEN_CURLY_BRACKET: char = '{';
+pub const CLOSE_CURLY_BRACKET: char = '}';
+pub const COMMA: char = ',';
+pub const COLON: char = ':';
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operation {
     // UNARY
     Negate,
@@ -51,8 +85,8 @@ pub enum Operation {
     Equivalence
 }
 
-#[derive(Debug)]
-pub enum NumberType {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumberKind {
     // INTEGERS
     Decimal,
     Binary,
@@ -63,13 +97,55 @@ pub enum NumberType {
     Float
 }
 
-#[derive(Debug)]
-pub enum TokenType {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoopKind {
+    For,
+    While
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ControlFlowKind {
+    Return,
+    Break,
+    Continue,
+    Throw
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TokenKind {
     Identifier,
     Unary(Operation),
     Binary(Operation),
     Conditional(Operation),
-    Numeric(NumberType)
+    Numeric(NumberKind),
+    Kind,
+    VariableDeclaration(bool),
+    ClassDeclaration,
+    Override,
+    Boolean,
+    FunctionDeclaration,
+    Loop(LoopKind),
+    ControlFlow(ControlFlowKind),
+    If,
+    Else,
+    EndOfLine,
+    OpenParenthesis,
+    CloseParenthesis,
+    OpenBracket,
+    CloseBracket,
+    OpenCurlyBracket,
+    CloseCurlyBracket,
+    Comma,
+    Colon,
+    EOF
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug)]
@@ -77,11 +153,66 @@ pub struct Token {
     /// The true value in source.
     value: String,
     /// The type of token.
-    token_type: TokenType
+    token_kind: TokenKind,
+    /// Details about the token's placement in source.
+    span: Span
 }
 
 impl Token {
-    pub fn new(value: String, token_type: TokenType) -> Token {
-        Token { value, token_type }
+    pub fn new(value: String, token_type: TokenKind, span: Span) -> Token {
+        Token { value, token_kind: token_type, span }
+    }
+
+    pub fn get_token_kind(&self) -> TokenKind {
+        self.token_kind
+    }
+
+    pub fn get_span(&self) -> &Span {
+        &self.span
+    }
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let token_type_str = match &self.token_kind {
+            TokenKind::Identifier => "Identifier".cyan(),
+            TokenKind::Unary(op) => format!("Unary::{:?}", op).bright_yellow(),
+            TokenKind::Binary(op) => format!("Binary::{:?}", op).yellow(),
+            TokenKind::Conditional(op) => format!("Conditional::{:?}", op).bright_magenta(),
+            TokenKind::Numeric(n) => format!("Number::{:?}", n).blue(),
+            TokenKind::Kind => "Kind".bright_blue(),
+            TokenKind::VariableDeclaration(true) => "Let Declaration".bright_green(),
+            TokenKind::VariableDeclaration(false) => "Const Declaration".green(),
+            TokenKind::ClassDeclaration => "Class Declaration".bright_cyan(),
+            TokenKind::Override => "Override".bright_black(),
+            TokenKind::Boolean => "Boolean".magenta(),
+            TokenKind::FunctionDeclaration => "Function".bright_red(),
+            TokenKind::Loop(LoopKind::For) => "Loop::For".bright_white(),
+            TokenKind::Loop(LoopKind::While) => "Loop::While".white(),
+            TokenKind::ControlFlow(cf) => format!("Control::{:?}", cf).bright_red(),
+            TokenKind::If => "If".purple(),
+            TokenKind::Else => "Else".purple(),
+            TokenKind::EndOfLine => "EndOfLine".dimmed(),
+            TokenKind::OpenParenthesis => "OpenParen".dimmed(),
+            TokenKind::CloseParenthesis => "CloseParen".dimmed(),
+            TokenKind::OpenBracket => "OpenBracket".dimmed(),
+            TokenKind::CloseBracket => "CloseBracket".dimmed(),
+            TokenKind::OpenCurlyBracket => "OpenCurly".dimmed(),
+            TokenKind::CloseCurlyBracket => "CloseCurly".dimmed(),
+            TokenKind::Comma => "Comma".dimmed(),
+            TokenKind::Colon => "Colon".dimmed(),
+            TokenKind::EOF => "END OF FILE".into()
+        };
+
+        write!(
+            f,
+            "{} ({}) at [line {}, col {} | span {}..{}]",
+            self.value.bold(),
+            token_type_str,
+            self.span.line,
+            self.span.column,
+            self.span.start,
+            self.span.end
+        )
     }
 }

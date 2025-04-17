@@ -1,3 +1,46 @@
-0b01 + 0b10
-==
-0b2
+# This is a test script for the lexer
+
+let x: int = 4c2;
+const y: float = 3.14;
+let bin: int = 0b1010;
+let oct: int = 0o7373;
+let hex: int = 0xFF;
+let sci: float = 314e-2;
+
+x += 1;
+y -= 2;
+x *= 3;
+y /= 4;
+x %= 5;
+
+++x;
+--y;
+
+let result = x + y - 2 * 3 / 6 % 2 ** 3;
+
+if (x == y) {
+    return;
+} else {
+    throw;
+}
+
+while (x < 100 && y >= 10) {
+    x = x << 1;
+    y = y >> 1;
+    break;
+}
+
+fn compute(a: int, b: float): float {
+    return a * b;
+}
+
+class Dog : Animal {
+    override fn speak(): void {
+        # Dog speaks
+    }
+}
+
+true;
+false;
+
+() {} , : ;

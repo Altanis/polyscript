@@ -4,12 +4,12 @@
 
 use std::fs;
 
-mod processor;
+mod frontend;
 mod utils;
 
 fn main() {
-    let program = fs::read_to_string("scripts/main.ls").expect("Invalid source file.");
-    let mut lexer = processor::lexer::Lexer::new(program);
+    let program = fs::read_to_string("scripts/main.ps").expect("Invalid source file.");
+    let mut lexer = frontend::lexer::Lexer::new(program);
     let tokens = lexer.tokenize();
 
     if let Err(e) = tokens {
@@ -17,7 +17,7 @@ fn main() {
     } else {
         println!("Compiling finished! {} tokens produced... reading all:", lexer.get_tokens().len());
         for token in lexer.get_tokens().iter() {
-            println!("{:?}", token);
+            println!("{}", token);
         }
     }
 }
