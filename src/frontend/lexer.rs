@@ -25,53 +25,35 @@ pub struct Lexer {
     /// The line the lexer is reading.
     line: usize,
     /// The index in the line the lexer is reading.
-    char: usize,
+    column: usize,
     /// The index in the source the lexer is reading.
     index: usize,
     /// The tokens collected from the source.
-    tokens: Vec<Token>,
-    /// A temporary span used while parsing a token.
-    temp_span: Span
+    tokens: Vec<Token>
 }
 
 impl Lexer {
     /// Goes to the next line.
     fn next_line(&mut self) {
         self.line += 1;
-        self.char = 1;
+        self.column = 1;
     }
 
     /// Goes to the next index.
     fn next_index(&mut self) {
         self.index += 1;
-        self.char += 1;
+        self.column += 1;
     }
 
     /// Peeks at the next character.
     fn peek(&self) -> Result<char, LexerError> {
-        self.source.get(self.index + 1).ok_or(LexerError::UnexpectedEOF(self.line, self.char)).copied()
+        self.source.get(self.index + 1).ok_or(LexerError::UnexpectedEOF(self.line, self.column)).copied()
     }
 
     /// Consumes the next character.
     fn consume(&mut self) -> Result<char, LexerError> {
         self.next_index();
-        self.source.get(self.index).ok_or(LexerError::UnexpectedEOF(self.line, self.char)).copied()
-    }
-
-    /// Creates a new temporary span.
-    fn create_span(&mut self) {
-        self.temp_span = Span {
-            start: self.index,
-            end: 0,
-            line: self.line,
-            column: self.char
-        }
-    }
-
-    /// Finalizes the span.
-    fn finalize_span(&mut self) -> Span {
-        self.temp_span.end = self.index;
-        self.temp_span.clone()
+        self.source.get(self.index).ok_or(LexerError::UnexpectedEOF(self.line, self.column)).copied()
     }
 }
 
@@ -79,11 +61,19 @@ impl Lexer {
     /// Parses an operation.
     fn parse_operator(&mut self) -> Result<Token, LexerError> {
         let mut operator = self.source[self.index].to_string();
-        self.create_span();
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column
+            },
+            end_pos: Position::default()
+        };
 
         match operator.chars().next().unwrap() {
-            NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::Negate), self.finalize_span())),
-            BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::BitwiseNegate), self.finalize_span())),
+            NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::Negate), span.set_end_from_values(self.index, self.line, self.column))),
+            BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
             ADD_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
@@ -97,7 +87,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Add),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             SUB_TOKEN => {
                 let token_type = match self.peek() {
@@ -112,7 +102,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Sub),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             MUL_TOKEN => {
                 let token_type = match self.peek() {
@@ -127,7 +117,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Mul),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             DIV_TOKEN => {
                 let token_type = match self.peek() {
@@ -138,7 +128,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Div),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             MOD_TOKEN => {
                 let token_type = match self.peek() {
@@ -149,7 +139,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Mod),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             BITWISE_AND_TOKEN => {
                 let token_type = match self.peek() {
@@ -160,7 +150,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::BitwiseAnd),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             BITWISE_OR_TOKEN => {
                 let token_type = match self.peek() {
@@ -171,9 +161,9 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::BitwiseOr),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
-            BITWISE_XOR_TOKEN => Ok(Token::new(operator, TokenKind::Binary(Operation::BitwiseXor), self.finalize_span())),
+            BITWISE_XOR_TOKEN => Ok(Token::new(operator, TokenKind::Binary(Operation::BitwiseXor), span.set_end_from_values(self.index, self.line, self.column))),
             ASSIGNMENT_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
@@ -183,7 +173,7 @@ impl Lexer {
                     _ => TokenKind::Binary(Operation::Assign),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             GREATER_THAN_TOKEN => {
                 let token_type = match self.peek() {
@@ -198,7 +188,7 @@ impl Lexer {
                     _ => TokenKind::Conditional(Operation::GreaterThan),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
             LESS_THAN_TOKEN => {
                 let token_type = match self.peek() {
@@ -213,16 +203,24 @@ impl Lexer {
                     _ => TokenKind::Conditional(Operation::LessThan),
                 };
                 
-                Ok(Token::new(operator, token_type, self.finalize_span()))                
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
-            _ => Err(LexerError::UnidentifiedError(self.line, self.char, operator))
+            _ => Err(LexerError::UnidentifiedError(self.line, self.column, operator))
         }
     }
 
     /// Parses a word.
     fn parse_word(&mut self) -> Result<Token, LexerError> {
         let mut word = self.source[self.index].to_string();
-        self.create_span();
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column
+            },
+            end_pos: Position::default()
+        };
 
         while let Ok(char) = self.peek() && (char.is_alphanumeric() || char == '_') {
             self.next_index();
@@ -231,23 +229,23 @@ impl Lexer {
 
         match word.as_str() {
             INT_TYPE | FLOAT_TYPE | BOOL_TYPE | STRING_TYPE | VOID_TYPE => {
-                Ok(Token::new(word, TokenKind::Kind, self.finalize_span()))
+                Ok(Token::new(word, TokenKind::Type, span.set_end_from_values(self.index, self.line, self.column)))
             }
-            LET_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(true), self.finalize_span())),
-            CONST_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(false), self.finalize_span())),
-            CLASS_KEYWORD => Ok(Token::new(word, TokenKind::ClassDeclaration, self.finalize_span())),
-            OVERRIDE_KEYWORD => Ok(Token::new(word, TokenKind::Override, self.finalize_span())),
-            TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::Boolean, self.finalize_span())),
-            FN_KEYWORD => Ok(Token::new(word, TokenKind::FunctionDeclaration, self.finalize_span())),
-            FOR_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::For), self.finalize_span())),
-            WHILE_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::While), self.finalize_span())),
-            RETURN_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Return), self.finalize_span())),
-            BREAK_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Break), self.finalize_span())),
-            CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Continue), self.finalize_span())),
-            THROW_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Throw), self.finalize_span())),
-            IF_KEYWORD => Ok(Token::new(word, TokenKind::If, self.finalize_span())),
-            ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Else, self.finalize_span())),
-            _ => Ok(Token::new(word, TokenKind::Identifier, self.finalize_span()))   
+            LET_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(true), span.set_end_from_values(self.index, self.line, self.column))),
+            CONST_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(false), span.set_end_from_values(self.index, self.line, self.column))),
+            CLASS_KEYWORD => Ok(Token::new(word, TokenKind::ClassDeclaration, span.set_end_from_values(self.index, self.line, self.column))),
+            OVERRIDE_KEYWORD => Ok(Token::new(word, TokenKind::Override, span.set_end_from_values(self.index, self.line, self.column))),
+            TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::Boolean, span.set_end_from_values(self.index, self.line, self.column))),
+            FN_KEYWORD => Ok(Token::new(word, TokenKind::FunctionDeclaration, span.set_end_from_values(self.index, self.line, self.column))),
+            FOR_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::For), span.set_end_from_values(self.index, self.line, self.column))),
+            WHILE_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::While), span.set_end_from_values(self.index, self.line, self.column))),
+            RETURN_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Return), span.set_end_from_values(self.index, self.line, self.column))),
+            BREAK_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Break), span.set_end_from_values(self.index, self.line, self.column))),
+            CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Continue), span.set_end_from_values(self.index, self.line, self.column))),
+            THROW_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Throw), span.set_end_from_values(self.index, self.line, self.column))),
+            IF_KEYWORD => Ok(Token::new(word, TokenKind::If, span.set_end_from_values(self.index, self.line, self.column))),
+            ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Else, span.set_end_from_values(self.index, self.line, self.column))),
+            _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }
 
@@ -259,8 +257,16 @@ impl Lexer {
     
         let first_char = self.source[self.index];
         number_str.push(first_char);
-        self.create_span();
-    
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column
+            },
+            end_pos: Position::default()
+        };
+
         if first_char == '0' {
             if let Ok(next_char) = self.peek() {
                 if let Some(base) = match next_char.to_ascii_lowercase() {
@@ -283,7 +289,7 @@ impl Lexer {
 
                     if !has_digits {
                         let invalid_char = self.peek().unwrap_or('\0');
-                        return Err(LexerError::InvalidDigit(self.line, self.char, invalid_char));
+                        return Err(LexerError::InvalidDigit(self.line, self.column, invalid_char));
                     }
 
                     let number_type = match base {
@@ -293,7 +299,7 @@ impl Lexer {
                         _ => unreachable!(),
                     };
 
-                    return Ok(Token::new(number_str, TokenKind::Numeric(number_type), self.finalize_span()));
+                    return Ok(Token::new(number_str, TokenKind::Numeric(number_type), span.set_end_from_values(self.index, self.line, self.column)));
                 }
             }
         }
@@ -336,7 +342,7 @@ impl Lexer {
 
                 if !exponent_digit_found {
                     let invalid_char = self.peek().unwrap_or('\0');
-                    return Err(LexerError::InvalidDigit(self.line, self.char, invalid_char));
+                    return Err(LexerError::InvalidDigit(self.line, self.column, invalid_char));
                 }
             } else {
                 break;
@@ -349,24 +355,32 @@ impl Lexer {
             NumberKind::Decimal
         };
     
-        Ok(Token::new(number_str, TokenKind::Numeric(number_type), self.finalize_span()))
+        Ok(Token::new(number_str, TokenKind::Numeric(number_type), span.set_end_from_values(self.index, self.line, self.column)))
     }
 
     fn parse_symbol(&mut self) -> Result<Token, LexerError> {
         let symbol = self.source[self.index];
-        self.create_span();
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column
+            },
+            end_pos: Position::default()
+        };
 
         match symbol {
-            END_OF_LINE => Ok(Token::new(symbol.to_string(), TokenKind::EndOfLine, self.finalize_span())),
-            OPEN_PARENTHESIS => Ok(Token::new(symbol.to_string(), TokenKind::OpenParenthesis, self.finalize_span())),
-            CLOSE_PARENTHESIS => Ok(Token::new(symbol.to_string(), TokenKind::CloseParenthesis, self.finalize_span())),
-            OPEN_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::OpenBracket, self.finalize_span())),
-            CLOSE_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::CloseBracket, self.finalize_span())),
-            OPEN_CURLY_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::OpenCurlyBracket, self.finalize_span())),
-            CLOSE_CURLY_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::CloseCurlyBracket, self.finalize_span())),
-            COMMA => Ok(Token::new(symbol.to_string(), TokenKind::Comma, self.finalize_span())),
-            COLON => Ok(Token::new(symbol.to_string(), TokenKind::Colon, self.finalize_span())),
-            _ => Err(LexerError::UnidentifiedError(self.line, self.char, symbol.to_string()))
+            END_OF_LINE => Ok(Token::new(symbol.to_string(), TokenKind::EndOfLine, span.set_end_from_values(self.index, self.line, self.column))),
+            OPEN_PARENTHESIS => Ok(Token::new(symbol.to_string(), TokenKind::OpenParenthesis, span.set_end_from_values(self.index, self.line, self.column))),
+            CLOSE_PARENTHESIS => Ok(Token::new(symbol.to_string(), TokenKind::CloseParenthesis, span.set_end_from_values(self.index, self.line, self.column))),
+            OPEN_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::OpenBracket, span.set_end_from_values(self.index, self.line, self.column))),
+            CLOSE_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::CloseBracket, span.set_end_from_values(self.index, self.line, self.column))),
+            OPEN_CURLY_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::OpenCurlyBracket, span.set_end_from_values(self.index, self.line, self.column))),
+            CLOSE_CURLY_BRACKET => Ok(Token::new(symbol.to_string(), TokenKind::CloseCurlyBracket, span.set_end_from_values(self.index, self.line, self.column))),
+            COMMA => Ok(Token::new(symbol.to_string(), TokenKind::Comma, span.set_end_from_values(self.index, self.line, self.column))),
+            COLON => Ok(Token::new(symbol.to_string(), TokenKind::Colon, span.set_end_from_values(self.index, self.line, self.column))),
+            _ => Err(LexerError::UnidentifiedError(self.line, self.column, symbol.to_string()))
         }
     }
 }
@@ -376,17 +390,18 @@ impl Lexer {
         Lexer {
             source: program.chars().collect(),
             line: 1,
-            char: 1,
+            column: 1,
             index: 0,
-            tokens: vec![],
-            temp_span: Span::default()
+            tokens: vec![]
         }
     }
     
     pub fn tokenize(&mut self) -> Result<(), LexerError> {
         while let Some(&char) = self.source.get(self.index) {
+            let mut next_line = false;
+
             if char.is_whitespace() {
-                if char == '\n' { self.next_line(); }
+                next_line = char == '\n';
             } else if char == COMMENT_TOKEN {
                 while let Ok(c) = self.peek() {
                     if c == '\n' { break; }
@@ -407,14 +422,27 @@ impl Lexer {
             }
 
             self.next_index();
+
+            if next_line {
+                self.next_line();
+            }
         }
 
-        self.tokens.push(Token::new("".to_string(), TokenKind::EOF, Span::default()));
+        self.tokens.push(Token::new("".to_string(), TokenKind::EndOfFile, Span {
+            start: self.index,
+            end: self.index,
+            start_pos: Position { line: self.line, column: self.column },
+            end_pos: Position { line: self.line, column: self.column }
+        }));
 
         Ok(())
     }
 
     pub fn get_tokens(&self) -> &Vec<Token> {
         &self.tokens
+    }
+
+    pub fn take_tokens(self) -> Vec<Token> {
+        self.tokens
     }
 }

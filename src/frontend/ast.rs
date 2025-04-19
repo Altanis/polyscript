@@ -11,7 +11,7 @@ pub enum NodeKind {
     // VARIABLES //
     Identifier(String),
     VariableDeclaration {
-        is_mutable: bool,
+        mutable: bool,
         name: String,
         type_annotation: Option<Box<Node>>,
         initializer: Option<Box<Node>>,

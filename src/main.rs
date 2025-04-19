@@ -7,6 +7,9 @@ use std::fs;
 mod frontend;
 mod utils;
 
+pub const READ_TOKENS: bool = false;
+pub const PARSE_TOKENS: bool = true;
+
 fn main() {
     let program = fs::read_to_string("scripts/main.ps").expect("Invalid source file.");
     let mut lexer = frontend::lexer::Lexer::new(program);
@@ -14,10 +17,32 @@ fn main() {
 
     if let Err(e) = tokens {
         eprintln!("{}", e);
-    } else {
-        println!("Compiling finished! {} tokens produced... reading all:", lexer.get_tokens().len());
+        std::process::exit(1);
+    }
+
+    println!("Lexing finished! {} tokens produced.", lexer.get_tokens().len());
+
+    if READ_TOKENS {
+        println!("Reading tokens...");
         for token in lexer.get_tokens().iter() {
             println!("{}", token);
+        }
+    }
+
+    if PARSE_TOKENS {
+        let mut parser = frontend::parser::Parser::new(lexer.take_tokens());
+        
+        match parser.parse() {
+            Ok(program) => {
+                println!("Parsing finished!");
+                dbg!(program);
+            },
+            Err(errs) => {
+                println!("{} errors emitted... printing:", errs.len());
+                for err in errs {
+                    eprintln!("{}", err);
+                }
+            }
         }
     }
 }

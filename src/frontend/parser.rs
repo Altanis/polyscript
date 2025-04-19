@@ -1,16 +1,17 @@
-use crate::utils::{error::ParserError, token::{Token, TokenKind, Span}};
+use crate::utils::{error::ParserError, token::{Operation, Position, Span, Token, TokenKind}};
 
 use super::ast::{Node, NodeKind};
 
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
-    errors: Vec<ParserError>
+    errors: Vec<ParserError>,
+    temp_span: Span
 }
 
 impl Parser {
     fn is_at_end(&self) -> bool {
-        self.peek().get_token_kind() == TokenKind::EOF
+        self.peek().get_token_kind() == TokenKind::EndOfFile
     }
     
     fn peek(&self) -> &Token {
@@ -46,21 +47,46 @@ impl Parser {
         }
     }
     
-    fn consume(&mut self, token_type: TokenKind, error_msg: &str) -> Result<&Token, String> {
+    fn consume(&mut self, token_type: TokenKind, error_msg: &str) -> Result<&Token, ParserError> {
         if self.check(token_type) {
             Ok(self.advance())
         } else {
-            Err(format!("{} Found {:?}", error_msg, self.peek().get_token_kind()))
+            let position = self.peek().get_span().start_pos;
+            Err(ParserError::UnexpectedToken(position.line, position.column, format!("{error_msg}, instead found {:?}.", self.peek().get_token_kind())))
         }
     }
 
-    fn generate_span(&mut self) -> Span {
-        Span::default()
+    fn synchronize(&mut self) {
+        self.advance();
+        
+        while !self.is_at_end() {
+            if self.previous().get_token_kind() == TokenKind::EndOfLine {
+                return;
+            }
+            
+            match self.peek().get_token_kind() {
+                TokenKind::VariableDeclaration(_) |
+                TokenKind::FunctionDeclaration |
+                TokenKind::ClassDeclaration |
+                TokenKind::If |
+                TokenKind::Loop(_) => return,
+                _ => {},
+            }
+            
+            self.advance();
+        }
     }
-}
 
-impl Parser {
+    fn create_span_from_current_token(&self) -> Span {
+        let previous_span = self.peek().get_span();
 
+        Span {
+            start: previous_span.start,
+            start_pos: previous_span.start_pos,
+            end: 0,
+            end_pos: Position::default()
+        }
+    }
 }
 
 impl Parser {
@@ -68,7 +94,8 @@ impl Parser {
         Parser { 
             tokens, 
             current: 0, 
-            errors: vec![]
+            errors: vec![],
+            temp_span: Span::default()
         }
     }
 
@@ -98,9 +125,12 @@ impl Parser {
             kind: NodeKind::Program(statements),
             span: Span {
                 start: 0,
-                end: self.tokens.len(),
-                line: 0,
-                column: 0,
+                end: self.tokens.last().unwrap().get_span().end,
+                start_pos: Position::default(),
+                end_pos: Position {
+                    line: self.tokens.last().unwrap().get_span().end_pos.line,
+                    column: self.tokens.last().unwrap().get_span().end_pos.column,
+                }
             },
         }
     }
@@ -108,29 +138,54 @@ impl Parser {
     fn parse_statement(&mut self) -> Result<Node, ParserError> {
         let token = self.peek();
         match token.get_token_kind() {
-
+            TokenKind::VariableDeclaration(mutable) => self.parse_variable_declaration(mutable),
             _ => todo!()
         }
     }
 
-    fn synchronize(&mut self) {
+    fn parse_variable_declaration(&mut self, mutable: bool) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
         self.advance();
-        
-        while !self.is_at_end() {
-            if self.previous().get_token_kind() == TokenKind::EndOfLine {
-                return;
-            }
-            
-            match self.peek().get_token_kind() {
-                TokenKind::VariableDeclaration(_) |
-                TokenKind::FunctionDeclaration |
-                TokenKind::ClassDeclaration |
-                TokenKind::If |
-                TokenKind::Loop(_) => return,
-                _ => {},
-            }
-            
-            self.advance();
+
+        let identifier = self.consume(TokenKind::Identifier, "Expected a variable name")?;
+        let name = identifier.get_value().to_string();
+
+        let mut type_annotation = None;
+        if self.match_token(TokenKind::Colon) {
+            type_annotation = Some(Box::new(self.parse_type()?));
         }
+
+        let mut initializer = None;
+        if self.match_token(TokenKind::Binary(Operation::Assign)) {
+            initializer = Some(Box::new(self.parse_expression()?));
+        }
+
+        self.consume(TokenKind::EndOfLine, "Expected ';' after variable declaration")?;
+
+        Ok(Node {
+            kind: NodeKind::VariableDeclaration {
+                mutable,
+                name,
+                type_annotation,
+                initializer,
+            },
+            span: span.set_end_from_span(dbg!(self.previous().get_span()))
+        })
+    }
+
+    fn parse_type(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
+        let type_reference = self.consume(TokenKind::Type, "Expected a type annotation")?;
+        
+        Ok(Node {
+            kind: NodeKind::TypeReference(type_reference.get_value().clone()),
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_expression(&mut self) -> Result<Node, ParserError> {
+        todo!()
     }
 }

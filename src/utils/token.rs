@@ -118,7 +118,7 @@ pub enum TokenKind {
     Binary(Operation),
     Conditional(Operation),
     Numeric(NumberKind),
-    Kind,
+    Type,
     VariableDeclaration(bool),
     ClassDeclaration,
     Override,
@@ -137,15 +137,43 @@ pub enum TokenKind {
     CloseCurlyBracket,
     Comma,
     Colon,
-    EOF
+    EndOfFile
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Copy)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Position { line: 1, column: 1 }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
-    pub line: usize,
-    pub column: usize,
+    pub start_pos: Position,
+    pub end_pos: Position
+}
+
+impl Span {
+    pub fn set_end_from_values(mut self, index: usize, line: usize, column: usize) -> Span {
+        self.end = index;
+        self.end_pos = Position { line, column };
+        
+        self
+    }
+
+    pub fn set_end_from_span(mut self, span: Span) -> Span {
+        self.end = span.end;
+        self.end_pos = span.end_pos;
+        
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -163,12 +191,16 @@ impl Token {
         Token { value, token_kind: token_type, span }
     }
 
+    pub fn get_value(&self) -> &String {
+        &self.value
+    }
+
     pub fn get_token_kind(&self) -> TokenKind {
         self.token_kind
     }
 
-    pub fn get_span(&self) -> &Span {
-        &self.span
+    pub fn get_span(&self) -> Span {
+        self.span
     }
 }
 
@@ -180,7 +212,7 @@ impl std::fmt::Display for Token {
             TokenKind::Binary(op) => format!("Binary::{:?}", op).yellow(),
             TokenKind::Conditional(op) => format!("Conditional::{:?}", op).bright_magenta(),
             TokenKind::Numeric(n) => format!("Number::{:?}", n).blue(),
-            TokenKind::Kind => "Kind".bright_blue(),
+            TokenKind::Type => "Kind".bright_blue(),
             TokenKind::VariableDeclaration(true) => "Let Declaration".bright_green(),
             TokenKind::VariableDeclaration(false) => "Const Declaration".green(),
             TokenKind::ClassDeclaration => "Class Declaration".bright_cyan(),
@@ -201,18 +233,20 @@ impl std::fmt::Display for Token {
             TokenKind::CloseCurlyBracket => "CloseCurly".dimmed(),
             TokenKind::Comma => "Comma".dimmed(),
             TokenKind::Colon => "Colon".dimmed(),
-            TokenKind::EOF => "END OF FILE".into()
+            TokenKind::EndOfFile => "END OF FILE".into()
         };
 
         write!(
             f,
-            "{} ({}) at [line {}, col {} | span {}..{}]",
+            "{} ({}) at [starting line {}, starting col {} | span {}..{} | ending line {}, ending col {}]",
             self.value.bold(),
             token_type_str,
-            self.span.line,
-            self.span.column,
+            self.span.start_pos.line,
+            self.span.start_pos.column,
             self.span.start,
-            self.span.end
+            self.span.end,
+            self.span.end_pos.line,
+            self.span.end_pos.column
         )
     }
 }
