@@ -72,19 +72,19 @@ impl Lexer {
         };
 
         match operator.chars().next().unwrap() {
-            NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::Negate), span.set_end_from_values(self.index, self.line, self.column))),
-            BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Unary(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
+            NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::Negate), span.set_end_from_values(self.index, self.line, self.column))),
+            BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
             ADD_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::AddEq)
+                        TokenKind::Operator(Operation::PlusEq)
                     },
                     Ok(c) if c == ADD_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Unary(Operation::Increment)
+                        TokenKind::Operator(Operation::Increment)
                     },
-                    _ => TokenKind::Binary(Operation::Add),
+                    _ => TokenKind::Operator(Operation::Plus),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -93,13 +93,13 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::SubEq)
+                        TokenKind::Operator(Operation::MinusEq)
                     },
                     Ok(c) if c == SUB_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Unary(Operation::Decrement)
+                        TokenKind::Operator(Operation::Decrement)
                     },
-                    _ => TokenKind::Binary(Operation::Sub),
+                    _ => TokenKind::Operator(Operation::Minus),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -108,13 +108,13 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::MulEq)
+                        TokenKind::Operator(Operation::MulEq)
                     },
                     Ok(c) if c == MUL_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::Exp)
+                        TokenKind::Operator(Operation::Exp)
                     },
-                    _ => TokenKind::Binary(Operation::Mul),
+                    _ => TokenKind::Operator(Operation::Mul),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -123,9 +123,9 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::DivEq)
+                        TokenKind::Operator(Operation::DivEq)
                     },
-                    _ => TokenKind::Binary(Operation::Div),
+                    _ => TokenKind::Operator(Operation::Div),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -134,9 +134,9 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::ModEq)
+                        TokenKind::Operator(Operation::ModEq)
                     },
-                    _ => TokenKind::Binary(Operation::Mod),
+                    _ => TokenKind::Operator(Operation::Mod),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -145,9 +145,9 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == BITWISE_AND_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Conditional(Operation::And)
+                        TokenKind::Operator(Operation::And)
                     },
-                    _ => TokenKind::Binary(Operation::BitwiseAnd),
+                    _ => TokenKind::Operator(Operation::BitwiseAnd),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -156,21 +156,21 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == BITWISE_OR_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Conditional(Operation::Or)
+                        TokenKind::Operator(Operation::Or)
                     },
-                    _ => TokenKind::Binary(Operation::BitwiseOr),
+                    _ => TokenKind::Operator(Operation::BitwiseOr),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
             },
-            BITWISE_XOR_TOKEN => Ok(Token::new(operator, TokenKind::Binary(Operation::BitwiseXor), span.set_end_from_values(self.index, self.line, self.column))),
+            BITWISE_XOR_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::BitwiseXor), span.set_end_from_values(self.index, self.line, self.column))),
             ASSIGNMENT_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Conditional(Operation::Equivalence)
+                        TokenKind::Operator(Operation::Equivalence)
                     },
-                    _ => TokenKind::Binary(Operation::Assign),
+                    _ => TokenKind::Operator(Operation::Assign),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -179,13 +179,13 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Conditional(Operation::Geq)
+                        TokenKind::Operator(Operation::Geq)
                     },
                     Ok(c) if c == GREATER_THAN_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::RightBitShift)
+                        TokenKind::Operator(Operation::RightBitShift)
                     },
-                    _ => TokenKind::Conditional(Operation::GreaterThan),
+                    _ => TokenKind::Operator(Operation::GreaterThan),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -194,13 +194,13 @@ impl Lexer {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Conditional(Operation::Leq)
+                        TokenKind::Operator(Operation::Leq)
                     },
                     Ok(c) if c == LESS_THAN_TOKEN => {
                         operator.push(self.consume()?);
-                        TokenKind::Binary(Operation::LeftBitShift)
+                        TokenKind::Operator(Operation::LeftBitShift)
                     },
-                    _ => TokenKind::Conditional(Operation::LessThan),
+                    _ => TokenKind::Operator(Operation::LessThan),
                 };
                 
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))                
@@ -228,9 +228,11 @@ impl Lexer {
         }
 
         match word.as_str() {
-            INT_TYPE | FLOAT_TYPE | BOOL_TYPE | STRING_TYPE | VOID_TYPE => {
-                Ok(Token::new(word, TokenKind::Type, span.set_end_from_values(self.index, self.line, self.column)))
-            }
+            INT_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Int), span.set_end_from_values(self.index, self.line, self.column))),
+            FLOAT_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
+            BOOL_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
+            STRING_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::String), span.set_end_from_values(self.index, self.line, self.column))),
+            VOID_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Void), span.set_end_from_values(self.index, self.line, self.column))),
             LET_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(true), span.set_end_from_values(self.index, self.line, self.column))),
             CONST_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(false), span.set_end_from_values(self.index, self.line, self.column))),
             CLASS_KEYWORD => Ok(Token::new(word, TokenKind::ClassDeclaration, span.set_end_from_values(self.index, self.line, self.column))),
@@ -429,10 +431,10 @@ impl Lexer {
         }
 
         self.tokens.push(Token::new("".to_string(), TokenKind::EndOfFile, Span {
-            start: self.index,
-            end: self.index,
-            start_pos: Position { line: self.line, column: self.column },
-            end_pos: Position { line: self.line, column: self.column }
+            start: self.index - 1,
+            end: self.index - 1,
+            start_pos: Position { line: self.line, column: if self.column == 1 { 1 } else { self.column - 1 } },
+            end_pos: Position { line: self.line, column: if self.column == 1 { 1 } else { self.column - 1 } }
         }));
 
         Ok(())

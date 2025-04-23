@@ -72,6 +72,32 @@ Symbols:
         let x: int = 5;
         class Dog : Animal { ... }
 
+Example Grammar Templates:
+    Variable Declaration:
+        ```
+        let a = "Hello, world!"; # implicit types should be fine
+        let b: int = 5;
+        const c: float = 3.0;
+        let d; # maybe dont allow for no expr.
+        ```
+    Function Declaration:
+        ```
+        fn name(x: int): void { .. }
+        fn name(x: int, y: int): int { .. }
+        fn name(x: int = 3, y: int): float { .. }
+        ```
+    Blocks:
+        ```
+        {
+            let x: int = 5;
+        }
+
+        # x is not accessible here by scoping
+        # maybe let blocks return a value?
+        ```
+
+### todo
+- fix error messages to be better
 
 ### notes
 most complicated features would be functions/closures, classes/inheritance, imports/exports, async, and a stdlib that supports i/o function (printing, reading files, sockets, event loop, etc.)

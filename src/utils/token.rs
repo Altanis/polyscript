@@ -49,22 +49,31 @@ pub const COMMA: char = ',';
 pub const COLON: char = ':';
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TypeKind {
+    Int,
+    Float,
+    Bool,
+    String,
+    Void
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operation {
     // UNARY
-    Negate,
+    Negate, // !
     BitwiseNegate,
     Increment,
     Decrement,
 
     // BINARY
-    Add,
-    Sub,
+    Plus,
+    Minus,
     Mul,
     Exp,
     Div,
     Mod,
-    AddEq,
-    SubEq,
+    PlusEq,
+    MinusEq,
     MulEq,
     DivEq,
     ModEq,
@@ -83,6 +92,97 @@ pub enum Operation {
     LessThan,
     Leq, // ≤
     Equivalence
+}
+
+impl Operation {
+    pub fn is_postfix(&self) -> bool {
+        matches!(self, Operation::Increment | Operation::Decrement)
+    }
+
+    pub fn is_unary(&self) -> bool {
+        matches!(
+            self,
+            Operation::Negate
+                | Operation::BitwiseNegate
+                | Operation::Increment
+                | Operation::Decrement
+                | Operation::Plus
+                | Operation::Minus
+        )
+    }
+
+    pub fn is_binary(&self) -> bool {
+        matches!(
+            self,
+            Operation::Plus
+                | Operation::Minus
+                | Operation::Mul
+                | Operation::Exp
+                | Operation::Div
+                | Operation::Mod
+                | Operation::PlusEq
+                | Operation::MinusEq
+                | Operation::MulEq
+                | Operation::DivEq
+                | Operation::ModEq
+                | Operation::BitwiseAnd
+                | Operation::BitwiseOr
+                | Operation::BitwiseXor
+                | Operation::RightBitShift
+                | Operation::LeftBitShift
+                | Operation::Assign
+        )
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        matches!(
+            self,
+            Operation::And
+                | Operation::Or
+                | Operation::GreaterThan
+                | Operation::Geq
+                | Operation::LessThan
+                | Operation::Leq
+                | Operation::Equivalence
+        )
+    }
+}
+
+impl std::fmt::Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Operation::Negate => SUB_TOKEN.to_string(),
+            Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
+            Operation::Increment => format!("{}{}", ADD_TOKEN, ADD_TOKEN),
+            Operation::Decrement => format!("{}{}", SUB_TOKEN, SUB_TOKEN),
+            Operation::Plus => ADD_TOKEN.to_string(),
+            Operation::Minus => SUB_TOKEN.to_string(),
+            Operation::Mul => MUL_TOKEN.to_string(),
+            Operation::Exp => format!("{}{}", MUL_TOKEN, MUL_TOKEN),
+            Operation::Div => DIV_TOKEN.to_string(),
+            Operation::Mod => MOD_TOKEN.to_string(),
+            Operation::PlusEq => format!("{}{}", ADD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MinusEq => format!("{}{}", SUB_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MulEq => format!("{}{}", MUL_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::DivEq => format!("{}{}", DIV_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::ModEq => format!("{}{}", MOD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseAnd => BITWISE_AND_TOKEN.to_string(),
+            Operation::BitwiseOr => BITWISE_OR_TOKEN.to_string(),
+            Operation::BitwiseXor => BITWISE_XOR_TOKEN.to_string(),
+            Operation::RightBitShift => format!("{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN),
+            Operation::LeftBitShift => format!("{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN),
+            Operation::Assign => ASSIGNMENT_TOKEN.to_string(),
+            Operation::And => format!("{}{}", BITWISE_AND_TOKEN, BITWISE_AND_TOKEN),
+            Operation::Or => format!("{}{}", BITWISE_OR_TOKEN, BITWISE_OR_TOKEN),
+            Operation::GreaterThan => GREATER_THAN_TOKEN.to_string(),
+            Operation::Geq => format!("{}{}", GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::LessThan => LESS_THAN_TOKEN.to_string(),
+            Operation::Leq => format!("{}{}", LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::Equivalence => format!("{}{}", ASSIGNMENT_TOKEN, ASSIGNMENT_TOKEN),
+        };
+
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,11 +214,9 @@ pub enum ControlFlowKind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Identifier,
-    Unary(Operation),
-    Binary(Operation),
-    Conditional(Operation),
+    Operator(Operation),
     Numeric(NumberKind),
-    Type,
+    Type(TypeKind),
     VariableDeclaration(bool),
     ClassDeclaration,
     Override,
@@ -152,12 +250,40 @@ impl Default for Position {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
     pub start_pos: Position,
     pub end_pos: Position
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,
+            "{}..{} | {}:{} → {}:{}",
+            self.start,
+            self.end,
+            self.start_pos.line,
+            self.start_pos.column,
+            self.end_pos.line,
+            self.end_pos.column
+        )   
+    }
+}
+
+impl std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,
+            "starting line {}, starting col {} | span {}..{} | ending line {}, ending col {}",
+            self.start_pos.line,
+            self.start_pos.column,
+            self.start,
+            self.end,
+            self.end_pos.line,
+            self.end_pos.column
+        )
+    }
 }
 
 impl Span {
@@ -176,7 +302,7 @@ impl Span {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     /// The true value in source.
     value: String,
@@ -208,11 +334,9 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let token_type_str = match &self.token_kind {
             TokenKind::Identifier => "Identifier".cyan(),
-            TokenKind::Unary(op) => format!("Unary::{:?}", op).bright_yellow(),
-            TokenKind::Binary(op) => format!("Binary::{:?}", op).yellow(),
-            TokenKind::Conditional(op) => format!("Conditional::{:?}", op).bright_magenta(),
+            TokenKind::Operator(op) => format!("Operator::{:?}", op).bright_magenta(),
             TokenKind::Numeric(n) => format!("Number::{:?}", n).blue(),
-            TokenKind::Type => "Kind".bright_blue(),
+            TokenKind::Type(value_type) => format!("TypeKind::{:?}", value_type).bright_blue(),
             TokenKind::VariableDeclaration(true) => "Let Declaration".bright_green(),
             TokenKind::VariableDeclaration(false) => "Const Declaration".green(),
             TokenKind::ClassDeclaration => "Class Declaration".bright_cyan(),
@@ -238,15 +362,10 @@ impl std::fmt::Display for Token {
 
         write!(
             f,
-            "{} ({}) at [starting line {}, starting col {} | span {}..{} | ending line {}, ending col {}]",
+            "{} ({}) at [{}]",
             self.value.bold(),
             token_type_str,
-            self.span.start_pos.line,
-            self.span.start_pos.column,
-            self.span.start,
-            self.span.end,
-            self.span.end_pos.line,
-            self.span.end_pos.column
+            self.span
         )
     }
 }

@@ -35,7 +35,8 @@ fn main() {
         match parser.parse() {
             Ok(program) => {
                 println!("Parsing finished!");
-                dbg!(program);
+                println!("{}", program);
+                // dbg!(program);
             },
             Err(errs) => {
                 println!("{} errors emitted... printing:", errs.len());
