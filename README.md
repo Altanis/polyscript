@@ -95,6 +95,19 @@ Example Grammar Templates:
         # x is not accessible here by scoping
         # maybe let blocks return a value?
         ```
+    Loops:
+        ```
+        # While Loop
+        while (0) {}
+
+        # For Loop
+        for (int i = 0; i < 5; ++i) { .. }
+
+        int j = 0;
+        for (;j < 5; ++j) { .. }
+
+        for (;;) { .. }
+        ```
 
 ### todo
 - fix error messages to be better

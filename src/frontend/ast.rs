@@ -8,7 +8,8 @@ pub enum NodeKind {
     FloatLiteral(f64),
     BooleanLiteral(bool),
     StringLiteral(String),
-    
+    CharLiteral(char),
+
     // VARIABLES //
     Identifier(String),
     VariableDeclaration {
@@ -138,7 +139,8 @@ impl std::fmt::Display for Node {
             NodeKind::IntegerLiteral(val) => write!(f, "{}", val.to_string().blue()),
             NodeKind::FloatLiteral(val) => write!(f, "{}", val.to_string().blue()),
             NodeKind::BooleanLiteral(val) => write!(f, "{}", val.to_string().magenta()),
-            NodeKind::StringLiteral(s) => write!(f, "\"{}\"", s.green()),
+            NodeKind::StringLiteral(s) => write!(f, "{}", s.green()),
+            NodeKind::CharLiteral(c) => write!(f, "\"{}\"", c.to_string().red()),
             NodeKind::Identifier(name) => write!(f, "{}", name.yellow()),
             NodeKind::VariableDeclaration {
                 mutable,

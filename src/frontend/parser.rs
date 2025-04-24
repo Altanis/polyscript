@@ -1,4 +1,4 @@
-use crate::utils::{error::ParserError, token::{Operation, Position, Span, Token, TokenKind}};
+use crate::utils::{error::ParserError, token::{LoopKind, Operation, Position, Span, Token, TokenKind}};
 
 use super::ast::{FunctionParameter, Node, NodeKind};
 
@@ -40,25 +40,6 @@ impl From<u8> for Precedence {
         }
     }
 }
-
-fn binding_power(op: Operation) -> Option<(u8, u8)> {
-    match op {
-        Operation::Assign => Some((1, 2)), // Assignment
-        Operation::Or => Some((2, 3)), // Or
-        Operation::And => Some((3, 4)), // And
-        Operation::Equivalence => Some((4, 5)), // Equality
-        Operation::GreaterThan | Operation::Geq | Operation::LessThan | Operation::Leq => Some((5, 6)), // Comparison
-        Operation::BitwiseOr => Some((6, 7)), // BitwiseOr
-        Operation::BitwiseXor => Some((7, 8)), // BitwiseXor
-        Operation::BitwiseAnd => Some((8, 9)), // BitwiseAnd
-        Operation::LeftBitShift | Operation::RightBitShift => Some((11, 12)), // Shift
-        Operation::Plus | Operation::Minus => Some((9, 10)), // Term
-        Operation::Mul | Operation::Div | Operation::Mod => Some((10, 11)), // Factor
-        Operation::Exp => Some((12, 11)), // Exponent
-        _ => None,
-    }
-}
-
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
@@ -108,7 +89,7 @@ impl Parser {
         self.advance();
         
         while !self.is_at_end() {
-            if self.previous().get_token_kind() == TokenKind::EndOfLine {
+            if self.previous().get_token_kind() == TokenKind::Semicolon {
                 return;
             }
             
@@ -168,17 +149,15 @@ impl Parser {
                 _ => break,
             };
 
-            let (left_bp, right_bp) = match binding_power(operator) {
-                Some((l, r)) => (Precedence::from(l), Precedence::from(r)),
-                None => break,
-            };
+            let (left_bp, right_bp) = operator.binding_power();
+            let (left_precedence, right_precedence) = (Precedence::from(left_bp), Precedence::from(right_bp));
     
-            if left_bp < precedence {
+            if left_precedence < precedence {
                 break;
             }
     
             self.advance();
-            let rhs = self.parse_precedence(right_bp)?;
+            let rhs = self.parse_precedence(right_precedence)?;
 
             lhs = Node {
                 span: lhs.span.set_end_from_span(rhs.span),
@@ -214,7 +193,7 @@ impl Parser {
             TokenKind::Operator(operator) => {
                 if !operator.is_unary() {
                     let pos = token.get_span().start_pos;
-                    return Err(ParserError::UnexpectedToken(pos.line, pos.column, "Unexpected token in expression".into()));
+                    return Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())));
                 }
 
                 let _ = self.advance();
@@ -229,12 +208,43 @@ impl Parser {
                     },
                 })
             },
-            TokenKind::Numeric(_) => {
+            TokenKind::NumberLiteral(_) => {
                 let token = self.advance();
                 let value = token.get_value().parse::<f64>().unwrap(); // TODO: handle numeric types properly
 
                 Ok(Node {
                     kind: NodeKind::FloatLiteral(value),
+                    span: token.get_span(),
+                })
+            },
+            TokenKind::BooleanLiteral => {
+                let token = self.advance();
+                let value = token.get_value().parse::<bool>().unwrap();
+
+                Ok(Node {
+                    kind: NodeKind::BooleanLiteral(value),
+                    span: token.get_span(),
+                })
+            },
+            TokenKind::StringLiteral => {
+                let token = self.advance();
+
+                let raw_value = token.get_value();
+                let value = raw_value[1..raw_value.len() - 1].to_string();
+
+                Ok(Node {
+                    kind: NodeKind::StringLiteral(value),
+                    span: token.get_span(),
+                })
+            },
+            TokenKind::CharLiteral => {
+                let token = self.advance();
+
+                let raw_value = token.get_value();
+                let value = raw_value[1..raw_value.len() - 1].chars().next().unwrap();
+
+                Ok(Node {
+                    kind: NodeKind::CharLiteral(value),
                     span: token.get_span(),
                 })
             },
@@ -254,14 +264,14 @@ impl Parser {
             },
             _ => {
                 let pos = token.get_span().start_pos;
-                Err(ParserError::UnexpectedToken(pos.line, pos.column, "Unexpected token in expression".into()))
+                Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())))
             }
         }
     }
 
     fn parse_expression_statement(&mut self) -> Result<Node, ParserError> {
         let node = self.parse_expression()?;
-        self.consume(TokenKind::EndOfLine)?;
+        self.consume(TokenKind::Semicolon)?;
         Ok(node)
     }
 }
@@ -317,6 +327,8 @@ impl Parser {
             TokenKind::VariableDeclaration(mutable) => self.parse_variable_declaration(mutable),
             TokenKind::FunctionDeclaration => self.parse_function_declaration(),
             TokenKind::If => self.parse_selection_statements(),
+            TokenKind::Loop(LoopKind::While) => self.parse_while_loop(),
+            TokenKind::Loop(LoopKind::For) => self.parse_for_loop(),
             TokenKind::OpenCurlyBracket => self.parse_block(),
             _ => self.parse_expression_statement()
         }
@@ -359,7 +371,7 @@ impl Parser {
             initializer = Some(Box::new(self.parse_expression()?));
         }
 
-        self.consume(TokenKind::EndOfLine)?;
+        self.consume(TokenKind::Semicolon)?;
 
         Ok(Node {
             kind: NodeKind::VariableDeclaration {
@@ -484,4 +496,67 @@ impl Parser {
             span: span.set_end_from_span(self.previous().get_span())
         })
     }
+
+    fn parse_while_loop(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
+        self.consume(TokenKind::Loop(LoopKind::While))?;
+
+        let condition = Box::new(self.parse_expression()?);
+        let body = Box::new(self.parse_block()?);
+
+        Ok(Node {
+            kind: NodeKind::WhileLoop {
+                body,
+                condition
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_for_loop(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+    
+        self.consume(TokenKind::Loop(LoopKind::For))?;
+        self.consume(TokenKind::OpenParenthesis)?;
+    
+        let initializer = if self.peek().get_token_kind() == TokenKind::Semicolon {
+            self.consume(TokenKind::Semicolon)?;
+            None
+        } else {
+            let init = match self.peek().get_token_kind() {
+                TokenKind::VariableDeclaration(mutable) => self.parse_variable_declaration(mutable),
+                _ => self.parse_expression_statement(),
+            }?;
+            Some(Box::new(init))
+        };
+    
+        let condition = if self.peek().get_token_kind() == TokenKind::Semicolon {
+            self.consume(TokenKind::Semicolon)?;
+            None
+        } else {
+            let cond = self.parse_expression()?;
+            self.consume(TokenKind::Semicolon)?;
+            Some(Box::new(cond))
+        };
+    
+        let increment = if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
+            None
+        } else {
+            Some(Box::new(self.parse_expression()?))
+        };
+    
+        self.consume(TokenKind::CloseParenthesis)?;
+        let body = Box::new(self.parse_block()?);
+    
+        Ok(Node {
+            kind: NodeKind::ForLoop {
+                initializer,
+                condition,
+                increment,
+                body,
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }    
 }

@@ -48,6 +48,9 @@ pub const CLOSE_CURLY_BRACKET: char = '}';
 pub const COMMA: char = ',';
 pub const COLON: char = ':';
 
+pub const STRING_DELIMITER: char = '"';
+pub const CHAR_DELIMITER: char = '\'';
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TypeKind {
     Int,
@@ -72,17 +75,23 @@ pub enum Operation {
     Exp,
     Div,
     Mod,
-    PlusEq,
-    MinusEq,
-    MulEq,
-    DivEq,
-    ModEq,
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
     RightBitShift,
     LeftBitShift,
     Assign,
+    PlusEq,
+    MinusEq,
+    MulEq,
+    ExpEq,
+    DivEq,
+    ModEq,
+    BitwiseAndEq,
+    BitwiseOrEq,
+    BitwiseXorEq,
+    RightBitShiftEq,
+    LeftBitShiftEq,
 
     // CONDITIONAL
     And,
@@ -120,17 +129,23 @@ impl Operation {
                 | Operation::Exp
                 | Operation::Div
                 | Operation::Mod
-                | Operation::PlusEq
-                | Operation::MinusEq
-                | Operation::MulEq
-                | Operation::DivEq
-                | Operation::ModEq
                 | Operation::BitwiseAnd
                 | Operation::BitwiseOr
                 | Operation::BitwiseXor
                 | Operation::RightBitShift
                 | Operation::LeftBitShift
                 | Operation::Assign
+                | Operation::PlusEq
+                | Operation::MinusEq
+                | Operation::MulEq
+                | Operation::ExpEq
+                | Operation::DivEq
+                | Operation::ModEq
+                | Operation::BitwiseAndEq
+                | Operation::BitwiseOrEq
+                | Operation::BitwiseXorEq
+                | Operation::RightBitShiftEq
+                | Operation::LeftBitShiftEq
         )
     }
 
@@ -146,6 +161,57 @@ impl Operation {
                 | Operation::Equivalence
         )
     }
+
+    pub fn binding_power(&self) -> (u8, u8) {
+        match self {
+            Operation::Assign 
+            | Operation::PlusEq 
+            | Operation::MinusEq 
+            | Operation::MulEq 
+            | Operation::ExpEq 
+            | Operation::DivEq 
+            | Operation::ModEq 
+            | Operation::BitwiseAndEq 
+            | Operation::BitwiseOrEq 
+            | Operation::BitwiseXorEq 
+            | Operation::RightBitShiftEq 
+            | Operation::LeftBitShiftEq => (1, 2),
+    
+            Operation::Or => (2, 3),
+            
+            Operation::And => (3, 4),
+    
+            Operation::Equivalence => (4, 5),
+    
+            Operation::GreaterThan 
+            | Operation::Geq 
+            | Operation::LessThan 
+            | Operation::Leq => (5, 6),
+    
+            Operation::BitwiseOr => (6, 7),
+    
+            Operation::BitwiseXor => (7, 8),
+    
+            Operation::BitwiseAnd => (8, 9),
+    
+            Operation::Plus 
+            | Operation::Minus => (9, 10),
+    
+            Operation::Mul 
+            | Operation::Div 
+            | Operation::Mod => (10, 11),
+    
+            Operation::LeftBitShift 
+            | Operation::RightBitShift => (11, 12),
+    
+            Operation::Exp => (12, 11),
+    
+            Operation::Negate 
+            | Operation::BitwiseNegate 
+            | Operation::Increment 
+            | Operation::Decrement => (13, 14),
+        }
+    }
 }
 
 impl std::fmt::Display for Operation {
@@ -155,23 +221,33 @@ impl std::fmt::Display for Operation {
             Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
             Operation::Increment => format!("{}{}", ADD_TOKEN, ADD_TOKEN),
             Operation::Decrement => format!("{}{}", SUB_TOKEN, SUB_TOKEN),
+
             Operation::Plus => ADD_TOKEN.to_string(),
             Operation::Minus => SUB_TOKEN.to_string(),
             Operation::Mul => MUL_TOKEN.to_string(),
             Operation::Exp => format!("{}{}", MUL_TOKEN, MUL_TOKEN),
             Operation::Div => DIV_TOKEN.to_string(),
             Operation::Mod => MOD_TOKEN.to_string(),
-            Operation::PlusEq => format!("{}{}", ADD_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::MinusEq => format!("{}{}", SUB_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::MulEq => format!("{}{}", MUL_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::DivEq => format!("{}{}", DIV_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::ModEq => format!("{}{}", MOD_TOKEN, ASSIGNMENT_TOKEN),
+
             Operation::BitwiseAnd => BITWISE_AND_TOKEN.to_string(),
             Operation::BitwiseOr => BITWISE_OR_TOKEN.to_string(),
             Operation::BitwiseXor => BITWISE_XOR_TOKEN.to_string(),
             Operation::RightBitShift => format!("{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN),
             Operation::LeftBitShift => format!("{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN),
+
             Operation::Assign => ASSIGNMENT_TOKEN.to_string(),
+            Operation::PlusEq => format!("{}{}", ADD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MinusEq => format!("{}{}", SUB_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MulEq => format!("{}{}", MUL_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::ExpEq => format!("{}{}{}", MUL_TOKEN, MUL_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::DivEq => format!("{}{}", DIV_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::ModEq => format!("{}{}", MOD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseAndEq => format!("{}{}", BITWISE_AND_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseOrEq => format!("{}{}", BITWISE_OR_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseXorEq => format!("{}{}", BITWISE_XOR_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::RightBitShiftEq => format!("{}{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::LeftBitShiftEq => format!("{}{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
+
             Operation::And => format!("{}{}", BITWISE_AND_TOKEN, BITWISE_AND_TOKEN),
             Operation::Or => format!("{}{}", BITWISE_OR_TOKEN, BITWISE_OR_TOKEN),
             Operation::GreaterThan => GREATER_THAN_TOKEN.to_string(),
@@ -215,18 +291,20 @@ pub enum ControlFlowKind {
 pub enum TokenKind {
     Identifier,
     Operator(Operation),
-    Numeric(NumberKind),
+    NumberLiteral(NumberKind),
+    BooleanLiteral,
+    StringLiteral,
+    CharLiteral,
     Type(TypeKind),
     VariableDeclaration(bool),
     ClassDeclaration,
     Override,
-    Boolean,
     FunctionDeclaration,
     Loop(LoopKind),
     ControlFlow(ControlFlowKind),
     If,
     Else,
-    EndOfLine,
+    Semicolon,
     OpenParenthesis,
     CloseParenthesis,
     OpenBracket,
@@ -335,20 +413,22 @@ impl std::fmt::Display for Token {
         let token_type_str = match &self.token_kind {
             TokenKind::Identifier => "Identifier".cyan(),
             TokenKind::Operator(op) => format!("Operator::{:?}", op).bright_magenta(),
-            TokenKind::Numeric(n) => format!("Number::{:?}", n).blue(),
+            TokenKind::NumberLiteral(n) => format!("Number::{:?}", n).blue(),
+            TokenKind::BooleanLiteral => "Boolean".magenta(),
+            TokenKind::StringLiteral => "String".green(),
+            TokenKind::CharLiteral => "Character".green(),
             TokenKind::Type(value_type) => format!("TypeKind::{:?}", value_type).bright_blue(),
             TokenKind::VariableDeclaration(true) => "Let Declaration".bright_green(),
             TokenKind::VariableDeclaration(false) => "Const Declaration".green(),
             TokenKind::ClassDeclaration => "Class Declaration".bright_cyan(),
             TokenKind::Override => "Override".bright_black(),
-            TokenKind::Boolean => "Boolean".magenta(),
             TokenKind::FunctionDeclaration => "Function".bright_red(),
             TokenKind::Loop(LoopKind::For) => "Loop::For".bright_white(),
             TokenKind::Loop(LoopKind::While) => "Loop::While".white(),
             TokenKind::ControlFlow(cf) => format!("Control::{:?}", cf).bright_red(),
             TokenKind::If => "If".purple(),
             TokenKind::Else => "Else".purple(),
-            TokenKind::EndOfLine => "EndOfLine".dimmed(),
+            TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),
             TokenKind::CloseParenthesis => "CloseParen".dimmed(),
             TokenKind::OpenBracket => "OpenBracket".dimmed(),
