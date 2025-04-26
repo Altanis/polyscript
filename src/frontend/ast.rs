@@ -332,17 +332,13 @@ impl std::fmt::Display for Node {
                 parameters,
                 return_type,
                 body,
-                instance,
+                ..
             } => {
                 write!(f, "{} ", match qualifier {
                     QualifierKind::Public => "public",
                     QualifierKind::Private => "private",
                     QualifierKind::Protected => "protected",
                 }.purple())?;
-
-                if *instance {
-                    write!(f, "{} ", "this".yellow())?;
-                }
 
                 write!(f, "{} {}", "fn".bright_red(), name.yellow())?;
                 write!(f, "(")?;

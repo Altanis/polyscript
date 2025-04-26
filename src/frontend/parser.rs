@@ -666,20 +666,19 @@ impl Parser {
         let mut instance = false;
 
         self.consume(TokenKind::OpenParenthesis)?;
-        loop {
+        
+        while self.peek().get_token_kind() != TokenKind::CloseParenthesis {
             let span = self.create_span_from_current_token();
-            
             let token = self.advance();
+        
             match token.get_token_kind() {
                 TokenKind::Keyword(KeywordKind::This) => {
                     if parameters.is_empty() {
                         instance = true;
-
                         let type_annotation = Box::new(Node {
                             kind: NodeKind::Identifier(class_name.clone()),
                             span: span.set_end_from_span(self.previous().get_span())
                         });
-    
                         parameters.push(Node {
                             kind: NodeKind::FunctionParameter {
                                 name: "this".to_string(),
@@ -690,10 +689,11 @@ impl Parser {
                         });
                     } else {
                         let position = self.previous().get_span().start_pos;
-                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));    
+                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));
                     }
                 },
                 TokenKind::Identifier => {
+                    let name = token.get_value().to_string();
                     self.consume(TokenKind::Colon)?;
                     let type_annotation = Box::new(self.parse_type()?);
                     let mut initializer = None;
@@ -705,21 +705,24 @@ impl Parser {
         
                     parameters.push(Node {
                         kind: NodeKind::FunctionParameter {
-                            name: name.clone(),
+                            name,
                             type_annotation,
                             initializer
                         },
                         span: span.set_end_from_span(self.previous().get_span())
                     });
                 },
-                TokenKind::CloseParenthesis => break,
                 _ => {
                     let position = self.previous().get_span().start_pos;
                     return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected `this` or an identifier, instead found {:?}.", self.previous().get_token_kind())));
                 }
             }
-
-            self.consume(TokenKind::Comma)?;
+        
+            if self.peek().get_token_kind() == TokenKind::Comma {
+                self.consume(TokenKind::Comma)?;
+            } else {
+                break;
+            }
         }
 
         self.consume(TokenKind::CloseParenthesis)?;
