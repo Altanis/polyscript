@@ -1,3 +1,31 @@
+class X {
+    public const a: int = 5; # static field
+    public const b = 6; # types can be omitted
+    public let c = "how"; # instance field
+    protected let d = 4;
+    let f = "x"; # default public
+
+    public fn from_a(a: int): X {
+
+    }
+
+    public fn x() { # implicitly returns void
+
+    }
+
+    private fn y(this): void {
+        
+    }
+
+    protected fn z(this) {
+
+    }
+}
+
+class Enes: X {
+    public const STATUS: string = "SLAVE";
+}
+
 ## TEST 0: EXPRESSIONS
 # !(-a++ + ~b-- * (c ** d % e / f) - g) &= ((h += i) *= (j -= k) ^= (l /= m %= n)) >> o << p | q & r ^ s && t || u > v >= w < x <= y == z = aa;
 

@@ -1,5 +1,5 @@
 use colored::*;
-use crate::utils::token::{Operation, Span, TypeKind};
+use crate::utils::kind::{Operation, QualifierKind, Span};
 
 #[derive(Debug, Clone)]
 pub enum NodeKind {
@@ -71,9 +71,14 @@ pub enum NodeKind {
     // FUNCTIONS //
     FunctionDeclaration {
         name: String,
-        parameters: Vec<FunctionParameter>,
+        parameters: Vec<Node>,
         return_type: Option<Box<Node>>,
         body: Box<Node>,
+    },
+    FunctionParameter {
+        name: String,
+        type_annotation: Box<Node>,
+        initializer: Option<Box<Node>>,
     },
     FunctionCall {
         callee: Box<Node>,
@@ -84,15 +89,23 @@ pub enum NodeKind {
     ClassDeclaration {
         name: String,
         parent: Option<Box<Node>>,
+        fields: Vec<Node>,
         methods: Vec<Node>,
-        properties: Vec<Node>,
+    },
+    ClassField {
+        qualifier: QualifierKind,
+        name: String,
+        type_annotation: Option<Box<Node>>,
+        initializer: Option<Box<Node>>,
+        instance: bool
     },
     MethodDeclaration {
+        qualifier: QualifierKind,
         name: String,
-        parameters: Vec<FunctionParameter>,
+        parameters: Vec<Node>,
         return_type: Option<Box<Node>>,
         body: Box<Node>,
-        is_override: bool,
+        instance: bool
     },
     PropertyAccess {
         object: Box<Node>,
@@ -100,7 +113,7 @@ pub enum NodeKind {
     },
     
     // TYPES //
-    TypeReference(TypeKind),
+    TypeReference(String),
     
     // PROGRAM //
     Program(Vec<Node>),
@@ -114,13 +127,6 @@ pub struct Node {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
-pub struct FunctionParameter {
-    pub name: String,
-    pub type_annotation: Node,
-    pub default_value: Option<Node>,
-}
-
 impl std::fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
@@ -130,16 +136,16 @@ impl std::fmt::Display for Node {
                     "Program".bright_blue().bold(),
                     nodes.len()
                 );
-                write!(f, "{}", header)?;
+                writeln!(f, "{}", header)?;
                 for node in nodes {
-                    write!(f, "\n  {}", node)?;
+                    writeln!(f, "  {}", node)?;
                 }
                 Ok(())
             }
             NodeKind::IntegerLiteral(val) => write!(f, "{}", val.to_string().blue()),
             NodeKind::FloatLiteral(val) => write!(f, "{}", val.to_string().blue()),
             NodeKind::BooleanLiteral(val) => write!(f, "{}", val.to_string().magenta()),
-            NodeKind::StringLiteral(s) => write!(f, "{}", s.green()),
+            NodeKind::StringLiteral(s) => write!(f, "{}", format!("\"{s}\"").green()),
             NodeKind::CharLiteral(c) => write!(f, "\"{}\"", c.to_string().red()),
             NodeKind::Identifier(name) => write!(f, "{}", name.yellow()),
             NodeKind::VariableDeclaration {
@@ -169,28 +175,24 @@ impl std::fmt::Display for Node {
                     write!(f, "{}{}", operand, operator)
                 }
             }
-            NodeKind::BinaryOperation {
-                operator,
-                left,
-                right,
-            } => write!(f, "({} {} {})", left, operator, right),
-            NodeKind::ConditionalOperation {
-                operator,
-                left,
-                right,
-            } => write!(f, "({} {} {})", left, operator, right),
-            NodeKind::Assignment { target, value } => write!(f, "{} = {}", target, value),
-            NodeKind::CompoundAssignment {
-                operator,
-                target,
-                value,
-            } => write!(f, "{} {}= {}", target, operator, value),
+            NodeKind::BinaryOperation { operator, left, right } => {
+                write!(f, "({} {} {})", left, operator, right)
+            }
+            NodeKind::ConditionalOperation { operator, left, right } => {
+                write!(f, "({} {} {})", left, operator, right)
+            }
+            NodeKind::Assignment { target, value } => {
+                write!(f, "{} = {}", target, value)
+            }
+            NodeKind::CompoundAssignment { operator, target, value } => {
+                write!(f, "{} {}= {}", target, operator, value)
+            }
             NodeKind::Block(nodes) => {
-                writeln!(f, "{}", "{{".dimmed())?;
+                writeln!(f, "{}", "{".dimmed())?;
                 for node in nodes {
                     writeln!(f, "    {}", node)?;
                 }
-                write!(f, "{}", "}}".dimmed())
+                write!(f, "{}", "}".dimmed())
             }
             NodeKind::IfStatement {
                 condition,
@@ -198,14 +200,12 @@ impl std::fmt::Display for Node {
                 else_if_branches,
                 else_branch,
             } => {
-                write!(f, "{} ({}) {}", "if".purple(), condition, then_branch)?;
-
+                writeln!(f, "{} ({}) {}", "if".purple(), condition, then_branch)?;
                 for (branch_cond, branch_then) in else_if_branches {
-                    write!(f, " {} ({}) {}", "else if".purple(), branch_cond, branch_then)?;
+                    writeln!(f, "{} ({}) {}", "else if".purple(), branch_cond, branch_then)?;
                 }
-
                 if let Some(else_node) = else_branch {
-                    write!(f, " {} {}", "else".purple(), else_node)?;
+                    writeln!(f, "{} {}", "else".purple(), else_node)?;
                 }
                 Ok(())
             }
@@ -251,16 +251,24 @@ impl std::fmt::Display for Node {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", param.name.yellow(), param.type_annotation)?;
-                    if let Some(default) = &param.default_value {
-                        write!(f, " = {}", default)?;
-                    }
+                    write!(f, "{}", param)?;
                 }
                 write!(f, ")")?;
                 if let Some(ret_ty) = return_type {
                     write!(f, ": {}", ret_ty)?;
                 }
-                write!(f, " {}", body)
+                writeln!(f, " {}", body)
+            }
+            NodeKind::FunctionParameter {
+                name,
+                type_annotation,
+                initializer,
+            } => {
+                write!(f, "{}: {}", name.yellow(), type_annotation)?;
+                if let Some(default) = initializer {
+                    write!(f, " = {}", default)?;
+                }
+                Ok(())
             }
             NodeKind::FunctionCall { callee, arguments } => {
                 write!(f, "{}(", callee)?;
@@ -276,50 +284,89 @@ impl std::fmt::Display for Node {
                 name,
                 parent,
                 methods,
-                properties,
+                fields,
             } => {
                 write!(f, "{} {}", "class".bright_cyan(), name.yellow())?;
                 if let Some(parent_node) = parent {
-                    write!(f, " {} {}", "extends".bright_cyan(), parent_node)?;
+                    write!(f, " {} {}", ":".bright_cyan(), parent_node)?;
                 }
-                write!(f, " {}", "{{".dimmed())?;
-                for prop in properties {
-                    write!(f, "\n    {}", prop)?;
+                writeln!(f, " {}", "{".dimmed())?;
+                for field in fields {
+                    writeln!(f, "    {}", field)?;
                 }
                 for method in methods {
-                    write!(f, "\n    {}", method)?;
+                    writeln!(f, "    {}", method)?;
                 }
-                write!(f, "\n{}", "}}".dimmed())
+                write!(f, "{}", "}".dimmed())
+            }
+            NodeKind::ClassField {
+                qualifier,
+                name,
+                type_annotation,
+                initializer,
+                instance,
+            } => {
+                write!(f, "{} ", match qualifier {
+                    QualifierKind::Public => "public",
+                    QualifierKind::Private => "private",
+                    QualifierKind::Protected => "protected",
+                }.purple())?;
+
+                write!(f, "{} ", match *instance {
+                    true => "let".green(),
+                    false => "const".green(),
+                })?;
+
+                write!(f, "{}", name.yellow())?;
+                if let Some(type_annotation) = type_annotation {
+                    write!(f, ": {}", type_annotation)?;
+                }
+                if let Some(default) = initializer {
+                    write!(f, " = {}", default)?;
+                }
+                Ok(())
             }
             NodeKind::MethodDeclaration {
+                qualifier,
                 name,
                 parameters,
                 return_type,
                 body,
-                is_override,
+                instance,
             } => {
-                if *is_override {
-                    write!(f, "{} ", "override".bright_black())?;
+                write!(f, "{} ", match qualifier {
+                    QualifierKind::Public => "public",
+                    QualifierKind::Private => "private",
+                    QualifierKind::Protected => "protected",
+                }.purple())?;
+
+                if *instance {
+                    write!(f, "{} ", "this".yellow())?;
                 }
+
                 write!(f, "{} {}", "fn".bright_red(), name.yellow())?;
                 write!(f, "(")?;
                 for (i, param) in parameters.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", param.name.yellow(), param.type_annotation)?;
+                    write!(f, "{}", param)?;
                 }
                 write!(f, ")")?;
                 if let Some(ret_ty) = return_type {
                     write!(f, ": {}", ret_ty)?;
                 }
-                write!(f, " {}", body)
+                writeln!(f, " {}", body)
             }
             NodeKind::PropertyAccess { object, property } => {
                 write!(f, "{}.{}", object, property)
             }
-            NodeKind::TypeReference(name) => write!(f, "{}", format!("{:?}", name).bright_blue()),
-            NodeKind::Error => write!(f, "{}", "ERROR".red().bold()),
+            NodeKind::TypeReference(name) => {
+                write!(f, "{}", name.bright_blue())
+            }
+            NodeKind::Error => {
+                write!(f, "{}", "ERROR".red().bold())
+            }
         }
     }
 }

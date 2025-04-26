@@ -4,9 +4,9 @@ Toy language that can both be interpreted and compiled to machine code. It can b
 
 ## planning board thing
 Whitespaces: Ignored
-Comments: Started by '#', lasts until end of line
+Comments: Started by '#', lasts until end of line (maybe use //)
 Operations:
-    Negate // !,
+    Not // !,
     BitwiseNegate // ~,
     Increment // ++,
     Decrement // --,
@@ -107,6 +107,31 @@ Example Grammar Templates:
         for (;j < 5; ++j) { .. }
 
         for (;;) { .. }
+        ```
+    Classes:
+        ```
+        class Animal {
+            public const SPECIES: string = "Animal"; # static, accessible via Animal.SPECIES
+            private let age: int = 42; # instance field
+
+            ## STATIC METHODS / CTORS ##
+            public fn from_x(x: int): Animal {
+                
+            }
+
+            public fn from_y(y: int): Animal {
+
+            }
+
+            ## INSTANCE METHODS ##
+            public fn speak(this) {
+                this.talk();
+            }
+
+            private fn talk(this) { .. }
+        }
+
+        class Dog: Animal {}
         ```
 
 ### todo

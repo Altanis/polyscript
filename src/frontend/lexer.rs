@@ -1,4 +1,4 @@
-use crate::utils::{error::LexerError, token::*};
+use crate::utils::{error::LexerError, kind::*};
 
 trait CharClassifier {
     fn is_operation(self) -> bool;
@@ -8,7 +8,7 @@ trait CharClassifier {
 impl CharClassifier for char {
     fn is_operation(self) -> bool {
         matches!(self,
-            NEGATE_TOKEN | BITWISE_NEGATE_TOKEN | ADD_TOKEN | SUB_TOKEN 
+            NOT_TOKEN | BITWISE_NEGATE_TOKEN | ADD_TOKEN | SUB_TOKEN 
             | MUL_TOKEN | DIV_TOKEN | MOD_TOKEN | BITWISE_AND_TOKEN 
             | BITWISE_OR_TOKEN | BITWISE_XOR_TOKEN | ASSIGNMENT_TOKEN | GREATER_THAN_TOKEN | LESS_THAN_TOKEN
         )
@@ -157,7 +157,7 @@ impl Lexer {
         };
     
         match operator.chars().next().unwrap() {
-            NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::Negate), span.set_end_from_values(self.index, self.line, self.column))),
+            NOT_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::Not), span.set_end_from_values(self.index, self.line, self.column))),
             BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
             ADD_TOKEN => {
                 let token_type = match self.peek() {
@@ -330,25 +330,28 @@ impl Lexer {
         }
 
         match word.as_str() {
-            INT_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Int), span.set_end_from_values(self.index, self.line, self.column))),
-            FLOAT_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
-            BOOL_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
-            STRING_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::String), span.set_end_from_values(self.index, self.line, self.column))),
-            VOID_TYPE => Ok(Token::new(word, TokenKind::Type(TypeKind::Void), span.set_end_from_values(self.index, self.line, self.column))),
-            LET_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(true), span.set_end_from_values(self.index, self.line, self.column))),
-            CONST_KEYWORD => Ok(Token::new(word, TokenKind::VariableDeclaration(false), span.set_end_from_values(self.index, self.line, self.column))),
-            CLASS_KEYWORD => Ok(Token::new(word, TokenKind::ClassDeclaration, span.set_end_from_values(self.index, self.line, self.column))),
-            OVERRIDE_KEYWORD => Ok(Token::new(word, TokenKind::Override, span.set_end_from_values(self.index, self.line, self.column))),
+            INT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Int), span.set_end_from_values(self.index, self.line, self.column))),
+            FLOAT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
+            BOOL_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
+            STRING_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::String), span.set_end_from_values(self.index, self.line, self.column))),
+            VOID_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Void), span.set_end_from_values(self.index, self.line, self.column))),
+            LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
+            CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
+            CLASS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Class), span.set_end_from_values(self.index, self.line, self.column))),
             TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::BooleanLiteral, span.set_end_from_values(self.index, self.line, self.column))),
-            FN_KEYWORD => Ok(Token::new(word, TokenKind::FunctionDeclaration, span.set_end_from_values(self.index, self.line, self.column))),
-            FOR_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::For), span.set_end_from_values(self.index, self.line, self.column))),
-            WHILE_KEYWORD => Ok(Token::new(word, TokenKind::Loop(LoopKind::While), span.set_end_from_values(self.index, self.line, self.column))),
-            RETURN_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Return), span.set_end_from_values(self.index, self.line, self.column))),
-            BREAK_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Break), span.set_end_from_values(self.index, self.line, self.column))),
-            CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Continue), span.set_end_from_values(self.index, self.line, self.column))),
-            THROW_KEYWORD => Ok(Token::new(word, TokenKind::ControlFlow(ControlFlowKind::Throw), span.set_end_from_values(self.index, self.line, self.column))),
-            IF_KEYWORD => Ok(Token::new(word, TokenKind::If, span.set_end_from_values(self.index, self.line, self.column))),
-            ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Else, span.set_end_from_values(self.index, self.line, self.column))),
+            FN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Fn), span.set_end_from_values(self.index, self.line, self.column))),
+            FOR_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::For), span.set_end_from_values(self.index, self.line, self.column))),
+            WHILE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::While), span.set_end_from_values(self.index, self.line, self.column))),
+            RETURN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Return), span.set_end_from_values(self.index, self.line, self.column))),
+            BREAK_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Break), span.set_end_from_values(self.index, self.line, self.column))),
+            CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Continue), span.set_end_from_values(self.index, self.line, self.column))),
+            THROW_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Throw), span.set_end_from_values(self.index, self.line, self.column))),
+            IF_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::If), span.set_end_from_values(self.index, self.line, self.column))),
+            ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Else), span.set_end_from_values(self.index, self.line, self.column))),
+            THIS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::This), span.set_end_from_values(self.index, self.line, self.column))),
+            PUBLIC_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Public), span.set_end_from_values(self.index, self.line, self.column))),
+            PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
+            PROTECTED_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Protected), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }
@@ -567,10 +570,6 @@ impl Lexer {
             }
 
             self.next_index();
-
-            if next_line {
-                self.next_line();
-            }
         }
 
         self.tokens.push(Token::new("".to_string(), TokenKind::EndOfFile, Span {

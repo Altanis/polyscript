@@ -1,6 +1,6 @@
 use colored::*;
 
-pub const NEGATE_TOKEN: char = '!';
+pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
 pub const ADD_TOKEN: char = '+';
 pub const SUB_TOKEN: char = '-';
@@ -37,6 +37,10 @@ pub const CONTINUE_KEYWORD: &str = "continue";
 pub const IF_KEYWORD: &str = "if";
 pub const ELSE_KEYWORD: &str = "else";
 pub const THROW_KEYWORD: &str = "throw";
+pub const THIS_KEYWORD: &str = "this";
+pub const PUBLIC_KEYWORD: &str = "public";
+pub const PRIVATE_KEYWORD: &str = "private";
+pub const PROTECTED_KEYWORD: &str = "protected";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -52,18 +56,9 @@ pub const STRING_DELIMITER: char = '"';
 pub const CHAR_DELIMITER: char = '\'';
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TypeKind {
-    Int,
-    Float,
-    Bool,
-    String,
-    Void
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operation {
     // UNARY
-    Negate, // !
+    Not, // !
     BitwiseNegate,
     Increment,
     Decrement,
@@ -111,7 +106,7 @@ impl Operation {
     pub fn is_unary(&self) -> bool {
         matches!(
             self,
-            Operation::Negate
+            Operation::Not
                 | Operation::BitwiseNegate
                 | Operation::Increment
                 | Operation::Decrement
@@ -206,7 +201,7 @@ impl Operation {
     
             Operation::Exp => (12, 11),
     
-            Operation::Negate 
+            Operation::Not 
             | Operation::BitwiseNegate 
             | Operation::Increment 
             | Operation::Decrement => (13, 14),
@@ -217,7 +212,7 @@ impl Operation {
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Operation::Negate => SUB_TOKEN.to_string(),
+            Operation::Not => NOT_TOKEN.to_string(),
             Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
             Operation::Increment => format!("{}{}", ADD_TOKEN, ADD_TOKEN),
             Operation::Decrement => format!("{}{}", SUB_TOKEN, SUB_TOKEN),
@@ -288,6 +283,38 @@ pub enum ControlFlowKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeywordKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Void,
+    If,
+    Else,
+    While,
+    For,
+    Break,
+    Continue,
+    Return,
+    Throw,
+    Fn,
+    Class,
+    Let,
+    Const,
+    Public,
+    Private,
+    Protected,
+    This
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum QualifierKind {
+    Public,
+    Private,
+    Protected
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Identifier,
     Operator(Operation),
@@ -295,15 +322,7 @@ pub enum TokenKind {
     BooleanLiteral,
     StringLiteral,
     CharLiteral,
-    Type(TypeKind),
-    VariableDeclaration(bool),
-    ClassDeclaration,
-    Override,
-    FunctionDeclaration,
-    Loop(LoopKind),
-    ControlFlow(ControlFlowKind),
-    If,
-    Else,
+    Keyword(KeywordKind),
     Semicolon,
     OpenParenthesis,
     CloseParenthesis,
@@ -313,8 +332,20 @@ pub enum TokenKind {
     CloseCurlyBracket,
     Comma,
     Colon,
-    EndOfFile
+    EndOfFile,
 }
+
+pub const SYNC_TOKENS: [TokenKind; 9] = [
+    TokenKind::Keyword(KeywordKind::If),
+    TokenKind::Keyword(KeywordKind::For),
+    TokenKind::Keyword(KeywordKind::While),
+    TokenKind::Keyword(KeywordKind::Return),
+    TokenKind::Keyword(KeywordKind::Break),
+    TokenKind::Keyword(KeywordKind::Continue),
+    TokenKind::Keyword(KeywordKind::Let),
+    TokenKind::Keyword(KeywordKind::Const),
+    TokenKind::Keyword(KeywordKind::Fn),
+];
 
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
@@ -417,17 +448,29 @@ impl std::fmt::Display for Token {
             TokenKind::BooleanLiteral => "Boolean".magenta(),
             TokenKind::StringLiteral => "String".green(),
             TokenKind::CharLiteral => "Character".green(),
-            TokenKind::Type(value_type) => format!("TypeKind::{:?}", value_type).bright_blue(),
-            TokenKind::VariableDeclaration(true) => "Let Declaration".bright_green(),
-            TokenKind::VariableDeclaration(false) => "Const Declaration".green(),
-            TokenKind::ClassDeclaration => "Class Declaration".bright_cyan(),
-            TokenKind::Override => "Override".bright_black(),
-            TokenKind::FunctionDeclaration => "Function".bright_red(),
-            TokenKind::Loop(LoopKind::For) => "Loop::For".bright_white(),
-            TokenKind::Loop(LoopKind::While) => "Loop::While".white(),
-            TokenKind::ControlFlow(cf) => format!("Control::{:?}", cf).bright_red(),
-            TokenKind::If => "If".purple(),
-            TokenKind::Else => "Else".purple(),
+            TokenKind::Keyword(keyword) => match keyword {
+                KeywordKind::Int => "Keyword::Int".cyan(),
+                KeywordKind::Float => "Keyword::Float".cyan(),
+                KeywordKind::String => "Keyword::String".cyan(),
+                KeywordKind::Bool => "Keyword::Bool".cyan(),
+                KeywordKind::Void => "Keyword::Void".cyan(),
+                KeywordKind::If => "Keyword::If".yellow(),
+                KeywordKind::Else => "Keyword::Else".yellow(),
+                KeywordKind::While => "Keyword::While".yellow(),
+                KeywordKind::For => "Keyword::For".yellow(),
+                KeywordKind::Break => "Keyword::Break".red(),
+                KeywordKind::Continue => "Keyword::Continue".red(),
+                KeywordKind::Return => "Keyword::Return".red(),
+                KeywordKind::Throw => "Keyword::Throw".red(),
+                KeywordKind::Fn => "Keyword::Fn".green(),
+                KeywordKind::Class => "Keyword::Class".green(),
+                KeywordKind::Let => "Keyword::Let".green(),
+                KeywordKind::Const => "Keyword::Const".green(),
+                KeywordKind::Public => "Keyword::Public".blue(),
+                KeywordKind::Private => "Keyword::Private".blue(),
+                KeywordKind::Protected => "Keyword::Protected".blue(),
+                KeywordKind::This => "Keyword::This".blue()
+            },            
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),
             TokenKind::CloseParenthesis => "CloseParen".dimmed(),

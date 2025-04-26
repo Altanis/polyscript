@@ -1,6 +1,6 @@
-use crate::utils::{error::ParserError, token::{LoopKind, Operation, Position, Span, Token, TokenKind}};
+use crate::utils::{error::ParserError, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
 
-use super::ast::{FunctionParameter, Node, NodeKind};
+use super::ast::{Node, NodeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 enum Precedence {
@@ -93,13 +93,8 @@ impl Parser {
                 return;
             }
             
-            match self.peek().get_token_kind() {
-                TokenKind::VariableDeclaration(_) |
-                TokenKind::FunctionDeclaration |
-                TokenKind::ClassDeclaration |
-                TokenKind::If |
-                TokenKind::Loop(_) => return,
-                _ => {},
+            if SYNC_TOKENS.contains(&self.peek().get_token_kind()) {
+                return;
             }
             
             self.advance();
@@ -324,12 +319,21 @@ impl Parser {
     fn parse_statement(&mut self) -> Result<Node, ParserError> {
         let token = self.peek();
         match token.get_token_kind() {
-            TokenKind::VariableDeclaration(mutable) => self.parse_variable_declaration(mutable),
-            TokenKind::FunctionDeclaration => self.parse_function_declaration(),
-            TokenKind::If => self.parse_selection_statements(),
-            TokenKind::Loop(LoopKind::While) => self.parse_while_loop(),
-            TokenKind::Loop(LoopKind::For) => self.parse_for_loop(),
+            TokenKind::Keyword(kind) => self.parse_keyword(kind),
             TokenKind::OpenCurlyBracket => self.parse_block(),
+            _ => self.parse_expression_statement()
+        }
+    }
+
+    fn parse_keyword(&mut self, kind: KeywordKind) -> Result<Node, ParserError> {
+        match kind {
+            KeywordKind::Let => self.parse_variable_declaration(true),
+            KeywordKind::Const => self.parse_variable_declaration(false),
+            KeywordKind::Fn => self.parse_function_declaration(),
+            KeywordKind::If => self.parse_selection_statements(),
+            KeywordKind::While => self.parse_while_loop(),
+            KeywordKind::For => self.parse_for_loop(),
+            KeywordKind::Class => self.parse_class_declaration(),
             _ => self.parse_expression_statement()
         }
     }
@@ -357,7 +361,7 @@ impl Parser {
     fn parse_variable_declaration(&mut self, mutable: bool) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
 
-        self.consume(TokenKind::VariableDeclaration(mutable))?;
+        self.advance();
 
         let var_name = self.consume(TokenKind::Identifier)?.get_value().to_string();
 
@@ -389,9 +393,15 @@ impl Parser {
 
         let type_reference = self.advance();
         match type_reference.get_token_kind() {
-            TokenKind::Type(value_type) => {
+            TokenKind::Identifier 
+                | TokenKind::Keyword(KeywordKind::Int)
+                | TokenKind::Keyword(KeywordKind::Float)
+                | TokenKind::Keyword(KeywordKind::String)
+                | TokenKind::Keyword(KeywordKind::Bool)
+                | TokenKind::Keyword(KeywordKind::Void) 
+            => {
                 Ok(Node {
-                    kind: NodeKind::TypeReference(value_type),
+                    kind: NodeKind::TypeReference(type_reference.get_value().clone()),
                     span: span.set_end_from_span(self.previous().get_span())
                 })
             },
@@ -405,7 +415,7 @@ impl Parser {
     fn parse_function_declaration(&mut self) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
 
-        self.consume(TokenKind::FunctionDeclaration)?;
+        self.advance();
 
         let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
 
@@ -430,25 +440,30 @@ impl Parser {
         })
     }
 
-    fn parse_parameter_list(&mut self) -> Result<Vec<FunctionParameter>, ParserError> {
+    fn parse_parameter_list(&mut self) -> Result<Vec<Node>, ParserError> {
         let mut parameters = vec![];
 
         self.consume(TokenKind::OpenParenthesis)?;
         loop {
+            let span = self.create_span_from_current_token();
+
             let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
             self.consume(TokenKind::Colon)?;
-            let type_annotation = self.parse_type()?;
-            let mut default_value = None;
+            let type_annotation = Box::new(self.parse_type()?);
+            let mut initializer = None;
 
             if self.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
-                self.consume(TokenKind::Operator(Operation::Assign))?;
-                default_value = Some(self.parse_expression()?);
+                self.advance();
+                initializer = Some(Box::new(self.parse_expression()?));
             }
 
-            parameters.push(FunctionParameter {
-                name,
-                type_annotation,
-                default_value
+            parameters.push(Node {
+                kind: NodeKind::FunctionParameter {
+                    name,
+                    type_annotation,
+                    initializer
+                },
+                span: span.set_end_from_span(self.previous().get_span())
             });
 
             if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
@@ -465,18 +480,18 @@ impl Parser {
     fn parse_selection_statements(&mut self) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
         
-        self.consume(TokenKind::If)?;
+        self.advance();
         let condition = Box::new(self.parse_expression()?);
         let then_branch = Box::new(self.parse_block()?);
         let mut else_if_branches = vec![];
 
         let mut else_branch = None;
 
-        while self.peek().get_token_kind() == TokenKind::Else {
-            self.consume(TokenKind::Else)?;
+        while self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Else) {
+            self.advance();
 
-            if self.peek().get_token_kind() == TokenKind::If {
-                self.consume(TokenKind::If)?;
+            if self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::If) {
+                self.advance();
                 let condition = Box::new(self.parse_expression()?);
                 let then_branch = Box::new(self.parse_block()?);
 
@@ -500,7 +515,7 @@ impl Parser {
     fn parse_while_loop(&mut self) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
 
-        self.consume(TokenKind::Loop(LoopKind::While))?;
+        self.advance();
 
         let condition = Box::new(self.parse_expression()?);
         let body = Box::new(self.parse_block()?);
@@ -517,7 +532,7 @@ impl Parser {
     fn parse_for_loop(&mut self) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
     
-        self.consume(TokenKind::Loop(LoopKind::For))?;
+        self.advance();
         self.consume(TokenKind::OpenParenthesis)?;
     
         let initializer = if self.peek().get_token_kind() == TokenKind::Semicolon {
@@ -525,7 +540,8 @@ impl Parser {
             None
         } else {
             let init = match self.peek().get_token_kind() {
-                TokenKind::VariableDeclaration(mutable) => self.parse_variable_declaration(mutable),
+                TokenKind::Keyword(KeywordKind::Let) => self.parse_variable_declaration(true),
+                TokenKind::Keyword(KeywordKind::Const) => self.parse_variable_declaration(false),
                 _ => self.parse_expression_statement(),
             }?;
             Some(Box::new(init))
@@ -558,5 +574,174 @@ impl Parser {
             },
             span: span.set_end_from_span(self.previous().get_span())
         })
-    }    
+    }
+
+    fn parse_class_declaration(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        self.advance();
+
+        let name = self.consume(TokenKind::Identifier)?.get_value().clone();
+        
+        let mut parent = None;
+        if self.peek().get_token_kind() == TokenKind::Colon {
+            self.advance();
+            parent = Some(Box::new(self.parse_type()?));
+        }
+
+        self.consume(TokenKind::OpenCurlyBracket)?;
+
+        let mut methods = vec![];
+        let mut fields = vec![];
+
+        while self.peek().get_token_kind() != TokenKind::CloseCurlyBracket {
+            let span = self.create_span_from_current_token();
+
+            let qualifier = match self.peek().get_token_kind() {
+                TokenKind::Keyword(KeywordKind::Public) => {
+                    self.advance();
+                    QualifierKind::Public
+                },
+                TokenKind::Keyword(KeywordKind::Private) => {
+                    self.advance();
+                    QualifierKind::Private
+                },
+                TokenKind::Keyword(KeywordKind::Protected) => {
+                    self.advance();
+                    QualifierKind::Protected
+                },
+                _ => QualifierKind::Public
+            };
+
+            match self.peek().get_token_kind() {
+                TokenKind::Keyword(KeywordKind::Let) => fields.push(self.parse_field_declaration(qualifier, true, span)?),
+                TokenKind::Keyword(KeywordKind::Const) => fields.push(self.parse_field_declaration(qualifier, false, span)?),
+                TokenKind::Keyword(KeywordKind::Fn) => methods.push(self.parse_method_declaration(qualifier, span, name.clone())?),
+                _  => {
+                    let position = self.previous().get_span().start_pos;
+                    return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected a method or function initialization, instead found {:?}.", self.peek().get_token_kind())));
+                }
+            }
+        }
+
+        self.advance();
+
+        Ok(Node {
+            kind: NodeKind::ClassDeclaration {
+                name,
+                parent,
+                fields,
+                methods
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_field_declaration(&mut self, qualifier: QualifierKind, instance: bool, span: Span) -> Result<Node, ParserError> {
+        let variable_declaration = self.parse_variable_declaration(instance)?;
+
+        let (name, type_annotation, initializer) = match variable_declaration.kind {
+            NodeKind::VariableDeclaration { name, type_annotation, initializer, .. } 
+                => (name, type_annotation, initializer),
+            _ => unreachable!()
+        };
+
+        Ok(Node {
+            kind: NodeKind::ClassField { 
+                qualifier, 
+                name, 
+                type_annotation, 
+                initializer,
+                instance
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_method_declaration(&mut self, qualifier: QualifierKind, span: Span, class_name: String) -> Result<Node, ParserError> {
+        self.advance();
+
+        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+
+        let mut parameters = vec![];
+        let mut instance = false;
+
+        self.consume(TokenKind::OpenParenthesis)?;
+        loop {
+            let span = self.create_span_from_current_token();
+            
+            let token = self.advance();
+            match token.get_token_kind() {
+                TokenKind::Keyword(KeywordKind::This) => {
+                    if parameters.is_empty() {
+                        instance = true;
+
+                        let type_annotation = Box::new(Node {
+                            kind: NodeKind::Identifier(class_name.clone()),
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+    
+                        parameters.push(Node {
+                            kind: NodeKind::FunctionParameter {
+                                name: "this".to_string(),
+                                type_annotation,
+                                initializer: None
+                            },
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+                    } else {
+                        let position = self.previous().get_span().start_pos;
+                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));    
+                    }
+                },
+                TokenKind::Identifier => {
+                    self.consume(TokenKind::Colon)?;
+                    let type_annotation = Box::new(self.parse_type()?);
+                    let mut initializer = None;
+        
+                    if self.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                        self.advance();
+                        initializer = Some(Box::new(self.parse_expression()?));
+                    }
+        
+                    parameters.push(Node {
+                        kind: NodeKind::FunctionParameter {
+                            name: name.clone(),
+                            type_annotation,
+                            initializer
+                        },
+                        span: span.set_end_from_span(self.previous().get_span())
+                    });
+                },
+                TokenKind::CloseParenthesis => break,
+                _ => {
+                    let position = self.previous().get_span().start_pos;
+                    return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected `this` or an identifier, instead found {:?}.", self.previous().get_token_kind())));
+                }
+            }
+
+            self.consume(TokenKind::Comma)?;
+        }
+
+        self.consume(TokenKind::CloseParenthesis)?;
+
+        let mut return_type = None;
+        if self.peek().get_token_kind() == TokenKind::Colon {
+            self.consume(TokenKind::Colon)?;
+            return_type = Some(Box::new(self.parse_type()?));
+        }
+
+        let body = Box::new(self.parse_block()?);
+
+        Ok(Node {
+            kind: NodeKind::MethodDeclaration {
+                qualifier,
+                name,
+                parameters,
+                return_type,
+                body,
+                instance
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
 }
