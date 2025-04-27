@@ -334,6 +334,10 @@ impl Parser {
             KeywordKind::While => self.parse_while_loop(),
             KeywordKind::For => self.parse_for_loop(),
             KeywordKind::Class => self.parse_class_declaration(),
+            KeywordKind::Return => self.parse_return_statement(),
+            KeywordKind::Break => self.parse_break_statement(),
+            KeywordKind::Continue => self.parse_continue_statement(),
+            KeywordKind::Throw => self.parse_throw_statement(),
             _ => self.parse_expression_statement()
         }
     }
@@ -444,6 +448,11 @@ impl Parser {
         let mut parameters = vec![];
 
         self.consume(TokenKind::OpenParenthesis)?;
+        if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
+            self.consume(TokenKind::CloseParenthesis)?;
+            return Ok(parameters);
+        }
+    
         loop {
             let span = self.create_span_from_current_token();
 
@@ -744,6 +753,61 @@ impl Parser {
                 body,
                 instance
             },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_return_statement(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
+        self.advance();
+
+        let expression = if self.peek().get_token_kind() != TokenKind::Semicolon {
+            Some(Box::new(self.parse_expression_statement()?))
+        } else {
+            self.advance();
+            None
+        };
+
+        Ok(Node {
+            kind: NodeKind::Return(expression),
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_throw_statement(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
+        self.advance();
+
+        let expression = Box::new(self.parse_expression_statement()?);
+
+        Ok(Node {
+            kind: NodeKind::Throw(expression),
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_continue_statement(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        
+        self.advance();
+        self.consume(TokenKind::Semicolon)?;
+
+        Ok(Node {
+            kind: NodeKind::Continue,
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_break_statement(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        
+        self.advance();
+        self.consume(TokenKind::Semicolon)?;
+
+        Ok(Node {
+            kind: NodeKind::Break,
             span: span.set_end_from_span(self.previous().get_span())
         })
     }

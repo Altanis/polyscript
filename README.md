@@ -82,6 +82,7 @@ Example Grammar Templates:
         ```
     Function Declaration:
         ```
+        fn name() {}
         fn name(x: int): void { .. }
         fn name(x: int, y: int): int { .. }
         fn name(x: int = 3, y: int): float { .. }
@@ -132,6 +133,24 @@ Example Grammar Templates:
         }
 
         class Dog: Animal {}
+        ```
+    Control Flow:
+        ```
+            while (true) {
+                break;
+            }
+
+            for (let i = 0; i < 5; ++i) {
+                continue;
+            }
+
+            fn add(a: int, b: int = 0) {
+                return a + b;
+            }
+
+            fn panic(message: string) {
+                throw message;
+            }
         ```
 
 ### todo
