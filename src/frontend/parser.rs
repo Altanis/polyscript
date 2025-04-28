@@ -138,7 +138,7 @@ impl Parser {
                 _ => {},
             };
 
-            let token = self.peek().clone(); // todo get rid of clone
+            let token = self.peek().clone();
             let operator = match token.get_token_kind() {
                 TokenKind::Operator(op) => op,
                 _ => break,
@@ -205,10 +205,37 @@ impl Parser {
             },
             TokenKind::NumberLiteral(_) => {
                 let token = self.advance();
-                let value = token.get_value().parse::<f64>().unwrap(); // TODO: handle numeric types properly
+                let numeric_literal: String = token.get_value().to_string();
+
+                let (is_integer, value): (bool, f64) = {
+                    if numeric_literal.starts_with("0b") || numeric_literal.starts_with("0B") {
+                        let without_prefix = &numeric_literal[2..];
+                        let int_value = u64::from_str_radix(without_prefix, 2)
+                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                        (true, int_value as f64)
+                    } else if numeric_literal.starts_with("0o") || numeric_literal.starts_with("0O") {
+                        let without_prefix = &numeric_literal[2..];
+                        let int_value = u64::from_str_radix(without_prefix, 8)
+                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                        (true, int_value as f64)
+                    } else if numeric_literal.starts_with("0x") || numeric_literal.starts_with("0X") {
+                        let without_prefix = &numeric_literal[2..];
+                        let int_value = u64::from_str_radix(without_prefix, 16)
+                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                        (true, int_value as f64)
+                    } else if numeric_literal.contains('.') || numeric_literal.contains('e') || numeric_literal.contains('E') {
+                        let float_value = numeric_literal.parse::<f64>()
+                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                        (false, float_value)
+                    } else {
+                        let int_value = numeric_literal.parse::<u64>()
+                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                        (true, int_value as f64)
+                    }
+                };
 
                 Ok(Node {
-                    kind: NodeKind::FloatLiteral(value),
+                    kind: if is_integer { NodeKind::IntegerLiteral(value as i64) } else { NodeKind::FloatLiteral(value) },
                     span: token.get_span(),
                 })
             },

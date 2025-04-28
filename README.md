@@ -2,7 +2,7 @@
 - [x] structs
     - [x] struct declaration
     - [x] struct initialization
-- [ ] actually parse numeric types properly
+- [x] actually parse numeric types properly
 - [ ] implementations
 - [ ] enums
 - [ ] refactor parser/ast for consistency

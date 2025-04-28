@@ -1,12 +1,8 @@
-struct X {
-    public x: int;
-    private y: int;
-}
-
-let x = X {
-    x: 4,
-    y: 3 + 2 % 4 - 1
-};
+const y: float = 3.14;
+let bin: int = 0b1010;
+let oct: int = 0o7373;
+let hex: int = 0xFF;
+let sci: float = 314e-2;
 
 ## TEST 0: EXPRESSIONS
 # !(-a++ + ~b-- * (c ** d % e / f) - g) &= ((h += i) *= (j -= k) ^= (l /= m %= n)) >> o << p | q & r ^ s && t || u > v >= w < x <= y == z = aa;
@@ -64,3 +60,14 @@ let x = X {
 # fn panic(message: string) {
 #     throw message;
 # }
+
+## TEST 7: STRUCTS
+# struct X {
+#     public x: int;
+#     private y: int;
+# }
+
+# let x = X {
+#     x: 4,
+#     y: 3 + 2 % 4 - 1
+# };
