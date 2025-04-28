@@ -337,7 +337,7 @@ impl Lexer {
             VOID_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Void), span.set_end_from_values(self.index, self.line, self.column))),
             LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
             CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
-            CLASS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Class), span.set_end_from_values(self.index, self.line, self.column))),
+            STRUCT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Struct), span.set_end_from_values(self.index, self.line, self.column))),
             TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::BooleanLiteral, span.set_end_from_values(self.index, self.line, self.column))),
             FN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Fn), span.set_end_from_values(self.index, self.line, self.column))),
             FOR_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::For), span.set_end_from_values(self.index, self.line, self.column))),
@@ -351,7 +351,6 @@ impl Lexer {
             THIS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::This), span.set_end_from_values(self.index, self.line, self.column))),
             PUBLIC_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Public), span.set_end_from_values(self.index, self.line, self.column))),
             PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
-            PROTECTED_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Protected), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }
@@ -485,8 +484,8 @@ impl Lexer {
             CLOSE_PARENTHESIS => Ok(Token::new(symbol_buffer, TokenKind::CloseParenthesis, span.set_end_from_values(self.index, self.line, self.column))),
             OPEN_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::OpenBracket, span.set_end_from_values(self.index, self.line, self.column))),
             CLOSE_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::CloseBracket, span.set_end_from_values(self.index, self.line, self.column))),
-            OPEN_CURLY_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::OpenCurlyBracket, span.set_end_from_values(self.index, self.line, self.column))),
-            CLOSE_CURLY_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::CloseCurlyBracket, span.set_end_from_values(self.index, self.line, self.column))),
+            OPEN_BRACE => Ok(Token::new(symbol_buffer, TokenKind::OpenBrace, span.set_end_from_values(self.index, self.line, self.column))),
+            CLOSE_BRACE => Ok(Token::new(symbol_buffer, TokenKind::CloseBrace, span.set_end_from_values(self.index, self.line, self.column))),
             COMMA => Ok(Token::new(symbol_buffer, TokenKind::Comma, span.set_end_from_values(self.index, self.line, self.column))),
             COLON => Ok(Token::new(symbol_buffer, TokenKind::Colon, span.set_end_from_values(self.index, self.line, self.column))),
             STRING_DELIMITER => {
@@ -546,11 +545,9 @@ impl Lexer {
     
     pub fn tokenize(&mut self) -> Result<(), LexerError> {
         while let Some(&char) = self.source.get(self.index) {
-            let mut next_line = false;
 
-            if char.is_whitespace() {
-                next_line = char == '\n';
-            } else if char == COMMENT_TOKEN {
+            if char.is_whitespace() {} 
+            else if char == COMMENT_TOKEN {
                 while let Ok(c) = self.peek() {
                     if c == '\n' { break; }
                     else { self.next_index(); }

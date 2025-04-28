@@ -71,25 +71,23 @@ pub enum NodeKind {
         type_annotation: Box<Node>,
         initializer: Option<Box<Node>>,
     },
-    FunctionCall {
-        callee: Box<Node>,
-        arguments: Vec<Node>,
-    },
     
-    // CLASSES //
-    ClassDeclaration {
+    // STRUCTS //
+    StructDeclaration {
         name: String,
-        parent: Option<Box<Node>>,
-        fields: Vec<Node>,
-        methods: Vec<Node>,
+        fields: Vec<Node>
     },
-    ClassField {
+    StructField {
         qualifier: QualifierKind,
         name: String,
-        type_annotation: Option<Box<Node>>,
-        initializer: Option<Box<Node>>,
-        instance: bool
+        type_annotation: Box<Node>
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, Node)>
+    },
+
+    // IMPLEMENTATIONS //
     MethodDeclaration {
         qualifier: QualifierKind,
         name: String,
@@ -98,11 +96,7 @@ pub enum NodeKind {
         body: Box<Node>,
         instance: bool
     },
-    PropertyAccess {
-        object: Box<Node>,
-        property: Box<Node>,
-    },
-    
+
     // TYPES //
     TypeReference(String),
     
@@ -238,8 +232,7 @@ impl Node {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{} ", match qualifier {
                     QualifierKind::Public => "public".purple(),
-                    QualifierKind::Private => "private".purple(),
-                    QualifierKind::Protected => "protected".purple(),
+                    QualifierKind::Private => "private".purple()
                 })?;
 
                 write!(f, "fn {}(", name.yellow())?;
@@ -336,30 +329,11 @@ impl Node {
                 }
                 Ok(())
             }
-
-            NodeKind::FunctionCall { callee, arguments } => {
-                write!(f, "{}", indent_str)?;
-                callee.fmt_with_indent(f, 0)?;
-                write!(f, "(")?;
-                for (i, arg) in arguments.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    arg.fmt_with_indent(f, 0)?;
-                }
-                write!(f, ")")
-            }
-            NodeKind::ClassDeclaration {
+            NodeKind::StructDeclaration {
                 name,
-                parent,
-                methods,
                 fields,
             } => {
-                write!(f, "{}class {}", indent_str, name.yellow())?;
-                if let Some(parent_node) = parent {
-                    write!(f, " : ")?;
-                    parent_node.fmt_with_indent(f, 0)?;
-                }
+                write!(f, "{}struct {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
                 
                 for field in fields {
@@ -367,48 +341,36 @@ impl Node {
                     writeln!(f)?;
                 }
                 
-                for method in methods {
-                    method.fmt_with_indent(f, child_indent)?;
-                    writeln!(f)?;
-                }
-                
                 write!(f, "{}{}", indent_str, "}".dimmed())
             }
-            NodeKind::ClassField {
+            NodeKind::StructField {
                 qualifier,
                 name,
                 type_annotation,
-                initializer,
-                instance,
             } => {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{} ", match qualifier {
                     QualifierKind::Public => "public".purple(),
-                    QualifierKind::Private => "private".purple(),
-                    QualifierKind::Protected => "protected".purple(),
-                })?;
-
-                write!(f, "{} ", match *instance {
-                    true => "let".green(),
-                    false => "const".green(),
+                    QualifierKind::Private => "private".purple()
                 })?;
 
                 write!(f, "{}", name.yellow())?;
-                if let Some(type_annotation) = type_annotation {
-                    write!(f, ": {}", type_annotation)?;
-                }
-                if let Some(default) = initializer {
-                    write!(f, " = ")?;
-                    default.fmt_with_indent(f, 0)?;
-                }
+                write!(f, ": {}", type_annotation)?;
+
                 Ok(())
             }
-
-            NodeKind::PropertyAccess { object, property } => {
-                write!(f, "{}", indent_str)?;
-                object.fmt_with_indent(f, 0)?;
-                write!(f, ".{}", property)
-            }
+            NodeKind::StructLiteral { name, fields } => {
+                write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
+                writeln!(f, "{}", "{".dimmed())?;
+            
+                for (field_name, expr) in fields {
+                    write!(f, "{}", " ".repeat(child_indent))?;
+                    write!(f, "{}: ", field_name.yellow())?;
+                    writeln!(f, "{}", expr)?;
+                }
+            
+                write!(f, "{}{}", indent_str, "}".dimmed())
+            }            
             NodeKind::TypeReference(name) => {
                 write!(f, "{}{}", indent_str, name.bright_blue())
             }

@@ -22,12 +22,13 @@ let result = x + y - 2 * 3 / 6 % 2 ** 3;
 if (x == y) {
     return;
 } else {
-    throw;
+    throw "huh..";
 }
 
 while (x < 100 && y >= 10) {
     x = x << 1;
     y = y >> 1;
+
     break;
 }
 
@@ -35,13 +36,14 @@ fn compute(a: int, b: float): float {
     return a * b;
 }
 
-class Dog : Animal {
-    override fn speak(): void {
-        # Dog speaks
-    }
+struct X {
+    public x: string;
+    private y: string;
+    public z: string;
 }
 
-true;
-false;
-
-() {} , : ;
+let x = X {
+    x: "3",
+    y: "4",
+    z: "5"
+};

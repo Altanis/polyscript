@@ -1,3 +1,13 @@
+struct X {
+    public x: int;
+    private y: int;
+}
+
+let x = X {
+    x: 4,
+    y: 3 + 2 % 4 - 1
+};
+
 ## TEST 0: EXPRESSIONS
 # !(-a++ + ~b-- * (c ** d % e / f) - g) &= ((h += i) *= (j -= k) ^= (l /= m %= n)) >> o << p | q & r ^ s && t || u > v >= w < x <= y == z = aa;
 
@@ -38,30 +48,7 @@
 #
 # for (;;) {}
 
-## TEST 6: CLASSES
-# class User {
-#     public const MAX_LOGIN_ATTEMPTS: int = 5; # static field
-#     public const DEFAULT_ROLE = "user"; # type omitted, inferred as string
-#     public let username = "guest"; # instance field
-#     protected let failed_login_times = 0;
-#     let email = "example@example.com"; # default public
-
-#     public fn from_username(username: string): User {
-#     }
-
-#     public fn login() { # implicitly returns void
-
-#    }
-
-#     private fn reset_pw(this): void {}
-#     protected fn lock_account(this) {}
-# }
-
-# class Admin: User {
-#     public const ADMIN_PANEL_URL: string = "/admin/dashboard";
-# }
-
-## TEST 7: CONTROL FLOW
+## TEST 6: CONTROL FLOW
 # while (true) {
 #     break;
 # }
@@ -70,7 +57,7 @@
 #     continue;
 # }
 # 
-# fn add(a: int, b: int = 0) {
+# fn add(a: int, b: int = 0): int {
 #     return a + b;
 # }
 # 

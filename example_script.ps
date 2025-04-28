@@ -1,0 +1,66 @@
+## VARIABLE DECLARATION ##
+    let a = "Hello, world!"; # implicit types should be fine
+    let b: int = 5;
+    const c: float = 3.0;
+    let d; # maybe dont allow for no expr.
+
+## FUNCTION DECLARATION ##
+    fn name() {}
+    fn name(x: int): void {}
+    fn name(x: int, y: int): int {}
+    fn name(x: int = 3, y: int): float {}
+
+## BLOCKS ##
+    {
+        let x: int = 5;
+    } 
+    # maybe let blocks resolve to an expr?
+
+## LOOPS ##
+    # While Loop
+    while (0) {}
+
+    # For Loop
+    for (int i = 0; i < 5; ++i) { .. }
+
+    int j = 0;
+    for (;j < 5; ++j) { .. }
+
+    for (;;) { .. }
+
+## CONTROL FLOW ##
+    while (true) {
+        break;
+    }
+
+    for (let i = 0; i < 5; ++i) {
+        continue;
+    }
+
+    fn add(a: int, b: int = 0): int {
+        return a + b;
+    }
+
+    fn panic(message: string) {
+        throw message;
+    }
+
+## STRUCTS ##
+    struct User {
+        public x: int;
+        private y: int;
+    }
+
+    let x = User {
+        x: 3,
+        y: 4
+    };
+
+## IMPLEMENTATIONS ##
+
+## ENUMS ##
+    enum Level {
+        Easy,
+        Medium,
+        Hard
+    }

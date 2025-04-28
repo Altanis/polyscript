@@ -24,8 +24,7 @@ pub const VOID_TYPE: &str = "void";
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
-pub const CLASS_KEYWORD: &str = "class";
-pub const OVERRIDE_KEYWORD: &str = "override";
+pub const STRUCT_KEYWORD: &str = "struct";
 pub const TRUE_KEYWORD: &str = "true";
 pub const FALSE_KEYWORD: &str = "false";
 pub const FN_KEYWORD: &str = "fn";
@@ -40,15 +39,14 @@ pub const THROW_KEYWORD: &str = "throw";
 pub const THIS_KEYWORD: &str = "this";
 pub const PUBLIC_KEYWORD: &str = "public";
 pub const PRIVATE_KEYWORD: &str = "private";
-pub const PROTECTED_KEYWORD: &str = "protected";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
 pub const CLOSE_PARENTHESIS: char = ')';
 pub const OPEN_BRACKET: char = '[';
 pub const CLOSE_BRACKET: char = ']';
-pub const OPEN_CURLY_BRACKET: char = '{';
-pub const CLOSE_CURLY_BRACKET: char = '}';
+pub const OPEN_BRACE: char = '{';
+pub const CLOSE_BRACE: char = '}';
 pub const COMMA: char = ',';
 pub const COLON: char = ':';
 
@@ -298,20 +296,18 @@ pub enum KeywordKind {
     Return,
     Throw,
     Fn,
-    Class,
+    Struct,
     Let,
     Const,
     Public,
     Private,
-    Protected,
     This
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QualifierKind {
     Public,
-    Private,
-    Protected
+    Private
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -328,8 +324,8 @@ pub enum TokenKind {
     CloseParenthesis,
     OpenBracket,
     CloseBracket,
-    OpenCurlyBracket,
-    CloseCurlyBracket,
+    OpenBrace,
+    CloseBrace,
     Comma,
     Colon,
     EndOfFile,
@@ -463,12 +459,11 @@ impl std::fmt::Display for Token {
                 KeywordKind::Return => "Keyword::Return".red(),
                 KeywordKind::Throw => "Keyword::Throw".red(),
                 KeywordKind::Fn => "Keyword::Fn".green(),
-                KeywordKind::Class => "Keyword::Class".green(),
+                KeywordKind::Struct => "Keyword::Struct".green(),
                 KeywordKind::Let => "Keyword::Let".green(),
                 KeywordKind::Const => "Keyword::Const".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
-                KeywordKind::Protected => "Keyword::Protected".blue(),
                 KeywordKind::This => "Keyword::This".blue()
             },            
             TokenKind::Semicolon => "Semicolon".dimmed(),
@@ -476,8 +471,8 @@ impl std::fmt::Display for Token {
             TokenKind::CloseParenthesis => "CloseParen".dimmed(),
             TokenKind::OpenBracket => "OpenBracket".dimmed(),
             TokenKind::CloseBracket => "CloseBracket".dimmed(),
-            TokenKind::OpenCurlyBracket => "OpenCurly".dimmed(),
-            TokenKind::CloseCurlyBracket => "CloseCurly".dimmed(),
+            TokenKind::OpenBrace => "OpenCurly".dimmed(),
+            TokenKind::CloseBrace => "CloseCurly".dimmed(),
             TokenKind::Comma => "Comma".dimmed(),
             TokenKind::Colon => "Colon".dimmed(),
             TokenKind::EndOfFile => "END OF FILE".into()
