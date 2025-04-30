@@ -135,31 +135,31 @@ impl Parser {
                     _ => unreachable!()
                 }
             };
+        }
 
-            while self.peek().get_token_kind() == TokenKind::OpenParenthesis {
-                self.advance();
-            
-                let mut arguments = vec![];
-                if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
-                    loop {
-                        arguments.push(self.parse_expression()?);
-                        if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
-                            break;
-                        }
-                        self.consume(TokenKind::Comma)?;
+        while self.peek().get_token_kind() == TokenKind::OpenParenthesis {
+            self.advance();
+        
+            let mut arguments = vec![];
+            if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
+                loop {
+                    arguments.push(self.parse_expression()?);
+                    if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
+                        break;
                     }
+                    self.consume(TokenKind::Comma)?;
                 }
-            
-                self.consume(TokenKind::CloseParenthesis)?;
-            
-                lhs = Node {
-                    span: lhs.span.set_end_from_span(self.previous().get_span()),
-                    kind: NodeKind::FunctionCall {
-                        function: Box::new(lhs),
-                        arguments,
-                    }
-                };
             }
+        
+            self.consume(TokenKind::CloseParenthesis)?;
+        
+            lhs = Node {
+                span: lhs.span.set_end_from_span(self.previous().get_span()),
+                kind: NodeKind::FunctionCall {
+                    function: Box::new(lhs),
+                    arguments,
+                }
+            };
         }
 
         Ok(lhs)
