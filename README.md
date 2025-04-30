@@ -3,7 +3,10 @@
     - [x] struct declaration
     - [x] struct initialization
 - [x] actually parse numeric types properly
-- [ ] implementations
+- [x] implementations
+    - [x] create implementations
+    - [x] property access
+    - [x] function access
 - [ ] enums
 - [ ] refactor parser/ast for consistency
 - [ ] refactor lexer/token for consistency

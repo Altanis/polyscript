@@ -13,6 +13,7 @@ pub const BITWISE_XOR_TOKEN: char = '^';
 pub const ASSIGNMENT_TOKEN: char = '=';
 pub const GREATER_THAN_TOKEN: char = '>';
 pub const LESS_THAN_TOKEN: char = '<';
+pub const FIELD_ACCESS_TOKEN: char = '.';
 
 pub const COMMENT_TOKEN: char = '#';
 
@@ -25,6 +26,7 @@ pub const VOID_TYPE: &str = "void";
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
 pub const STRUCT_KEYWORD: &str = "struct";
+pub const IMPL_KEYWORD: &str = "impl";
 pub const TRUE_KEYWORD: &str = "true";
 pub const FALSE_KEYWORD: &str = "false";
 pub const FN_KEYWORD: &str = "fn";
@@ -93,7 +95,10 @@ pub enum Operation {
     Geq, // ≥
     LessThan,
     Leq, // ≤
-    Equivalence
+    Equivalence,
+
+    // CALL
+    FieldAccess
 }
 
 impl Operation {
@@ -203,6 +208,8 @@ impl Operation {
             | Operation::BitwiseNegate 
             | Operation::Increment 
             | Operation::Decrement => (13, 14),
+
+            Operation::FieldAccess => (14, 15)
         }
     }
 }
@@ -248,6 +255,8 @@ impl std::fmt::Display for Operation {
             Operation::LessThan => LESS_THAN_TOKEN.to_string(),
             Operation::Leq => format!("{}{}", LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
             Operation::Equivalence => format!("{}{}", ASSIGNMENT_TOKEN, ASSIGNMENT_TOKEN),
+
+            Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string()
         };
 
         write!(f, "{}", s)
@@ -297,6 +306,7 @@ pub enum KeywordKind {
     Throw,
     Fn,
     Struct,
+    Impl,
     Let,
     Const,
     Public,
@@ -464,7 +474,8 @@ impl std::fmt::Display for Token {
                 KeywordKind::Const => "Keyword::Const".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
-                KeywordKind::This => "Keyword::This".blue()
+                KeywordKind::This => "Keyword::This".blue(),
+                KeywordKind::Impl => "Keyword::Impl".purple()
             },            
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

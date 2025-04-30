@@ -11,6 +11,7 @@ impl CharClassifier for char {
             NOT_TOKEN | BITWISE_NEGATE_TOKEN | ADD_TOKEN | SUB_TOKEN 
             | MUL_TOKEN | DIV_TOKEN | MOD_TOKEN | BITWISE_AND_TOKEN 
             | BITWISE_OR_TOKEN | BITWISE_XOR_TOKEN | ASSIGNMENT_TOKEN | GREATER_THAN_TOKEN | LESS_THAN_TOKEN
+            | FIELD_ACCESS_TOKEN
         )
     }
 
@@ -307,6 +308,7 @@ impl Lexer {
                     _ => Ok(Token::new(operator, TokenKind::Operator(Operation::LessThan), span.set_end_from_values(self.index, self.line, self.column))),
                 }
             },
+            FIELD_ACCESS_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::FieldAccess), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Err(LexerError::UnidentifiedError(self.line, self.column, operator))
         }
     }    
@@ -351,6 +353,7 @@ impl Lexer {
             THIS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::This), span.set_end_from_values(self.index, self.line, self.column))),
             PUBLIC_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Public), span.set_end_from_values(self.index, self.line, self.column))),
             PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
+            IMPL_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Impl), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }

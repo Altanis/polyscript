@@ -2,7 +2,7 @@
     let a = "Hello, world!"; # implicit types should be fine
     let b: int = 5;
     const c: float = 3.0;
-    let d; # maybe dont allow for no expr.
+    let d; # maybe dont allow for no expr, or store null and dont allow access until declared
 
 ## FUNCTION DECLARATION ##
     fn name() {}
@@ -57,6 +57,21 @@
     };
 
 ## IMPLEMENTATIONS ##
+    impl User {
+        public const TYPE = "user";
+        
+        public fn new(x: int, y: int = 0) {
+            return User { x, y };
+        }
+
+        public fn check_permissions(this) {}
+    }
+
+## FIELD/METHOD ACCESS##
+    let type = User.TYPE;
+    let user = User.new(3, 4);
+    user.check_permissions();
+    user.x = 3;
 
 ## ENUMS ##
     enum Level {
@@ -64,3 +79,5 @@
         Medium,
         Hard
     }
+
+## MATCH ##

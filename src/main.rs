@@ -36,7 +36,6 @@ fn main() {
             Ok(program) => {
                 println!("Parsing finished!");
                 println!("{}", program);
-                // dbg!(program);
             },
             Err(errs) => {
                 println!("{} errors emitted... printing:", errs.len());

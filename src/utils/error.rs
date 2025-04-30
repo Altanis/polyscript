@@ -21,7 +21,9 @@ pub enum LexerError {
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum ParserError {
     #[error("[PARSER_ERROR / UNEXPECTED_TOKEN] ({0}:{1}): {2}")]
-    UnexpectedToken(usize, usize, String)
+    UnexpectedToken(usize, usize, String),
+    #[error("[PARSER_ERROR / UNINITIALIZED_CONSTANT] ({0}:{1}): A constant must be initialized with a value.")]
+    UninitializedConstant(usize, usize)
 }
 
 #[derive(Error, Debug, Clone, PartialEq)]

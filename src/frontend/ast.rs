@@ -88,13 +88,30 @@ pub enum NodeKind {
     },
 
     // IMPLEMENTATIONS //
-    MethodDeclaration {
+    ImplDeclaration {
+        name: String,
+        parent: Option<Box<Node>>,
+        associated_constants: Vec<Node>,
+        associated_functions: Vec<Node>
+    },
+    AssociatedConstant {
+        qualifier: QualifierKind,
+        name: String,
+        type_annotation: Option<Box<Node>>,
+        initializer: Box<Node>
+    },
+    AssociatedFunction {
         qualifier: QualifierKind,
         name: String,
         parameters: Vec<Node>,
         return_type: Option<Box<Node>>,
         body: Box<Node>,
         instance: bool
+    },
+
+    FunctionCall {
+        function: Box<Node>,
+        arguments: Vec<Node>
     },
 
     // TYPES //
@@ -186,6 +203,7 @@ impl Node {
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")
             }
+
             NodeKind::Block(nodes) => {
                 write!(f, "{}", "{".dimmed())?;
                 if !nodes.is_empty() {
@@ -197,6 +215,7 @@ impl Node {
                     }
                     write!(f, "{}", indent_str)?;
                 }
+                write!(f, "{}", " ".repeat(child_indent))?;
                 write!(f, "{}", "}".dimmed())
             }
 
@@ -221,7 +240,50 @@ impl Node {
                 body.fmt_with_indent(f, indent)  // Don't increase indent for the block
             }
 
-            NodeKind::MethodDeclaration {
+            NodeKind::ImplDeclaration {
+                name,
+                parent,
+                associated_constants,
+                associated_functions
+            } => {
+                write!(f, "{} {}", "class".bright_cyan(), name.yellow())?;
+                if let Some(parent_node) = parent {
+                    write!(f, " {} {}", ":".bright_cyan(), parent_node)?;
+                }
+                writeln!(f, " {}", "{".dimmed())?;
+                for constant in associated_constants {
+                    writeln!(f, "    {}", constant)?;
+                }
+                for function in associated_functions {
+                    writeln!(f, "    {}", function)?;
+                }
+                write!(f, "{}", "}".dimmed())
+            }
+
+            NodeKind::AssociatedConstant {
+                qualifier,
+                name,
+                type_annotation,
+                initializer
+            } => {
+                write!(f, "{} ", match qualifier {
+                    QualifierKind::Public => "public",
+                    QualifierKind::Private => "private"
+                }.purple())?;
+
+                write!(f, "const ")?;
+                write!(f, "{}", name.yellow())?;
+
+                if let Some(type_annotation) = type_annotation {
+                    write!(f, ": {}", type_annotation)?;
+                }
+
+                write!(f, " = {}", initializer)?;
+
+                Ok(())
+            }
+
+            NodeKind::AssociatedFunction {
                 qualifier,
                 name,
                 parameters,
@@ -329,6 +391,7 @@ impl Node {
                 }
                 Ok(())
             }
+
             NodeKind::StructDeclaration {
                 name,
                 fields,
@@ -361,12 +424,14 @@ impl Node {
             }
             NodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
-                writeln!(f, "{}", "{".dimmed())?;
+                write!(f, "{}", "{".dimmed())?;
             
-                for (field_name, expr) in fields {
-                    write!(f, "{}", " ".repeat(child_indent))?;
+                for (i, (field_name, expr)) in fields.iter().enumerate() {
+                    write!(f, " ")?;
                     write!(f, "{}: ", field_name.yellow())?;
-                    writeln!(f, "{}", expr)?;
+                    write!(f, "{}", expr)?;
+
+                    write!(f, "{}", if i + 1 < fields.len() { "," } else { " " })?;
                 }
             
                 write!(f, "{}{}", indent_str, "}".dimmed())
@@ -377,6 +442,18 @@ impl Node {
             NodeKind::Error => {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{}", "ERROR".red().bold())
+            }
+            NodeKind::FunctionCall { function, arguments } => {
+                write!(f, "{}", indent_str)?;
+                function.fmt_with_indent(f, 0)?;
+                write!(f, "(")?;
+                for (i, param) in arguments.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    param.fmt_with_indent(f, 0)?;
+                }
+                write!(f, ")")
             }
         }
     }
