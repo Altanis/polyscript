@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use indexmap::IndexMap;
+
 use crate::utils::{error::ParserError, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
 
 use super::ast::{Node, NodeKind};
@@ -261,7 +265,7 @@ impl Parser {
                 let span = token.get_span();
 
                 if self.peek().get_token_kind() == TokenKind::OpenBrace {
-                    let mut fields = vec![];
+                    let mut fields = HashMap::new();
 
                     self.advance();
                     loop {
@@ -278,7 +282,7 @@ impl Parser {
                             }
                         };
 
-                        fields.push((name, value));
+                        fields.insert(name, value);
                         
                         if self.peek().get_token_kind() == TokenKind::CloseBrace {
                             break;
@@ -390,6 +394,7 @@ impl Parser {
             KeywordKind::Continue => self.parse_continue_statement(),
             KeywordKind::Throw => self.parse_throw_statement(),
             KeywordKind::Impl => self.parse_impl_statement(),
+            KeywordKind::Enum => self.parse_enum_statement(),
             _ => self.parse_expression_statement()
         }
     }
@@ -905,6 +910,40 @@ impl Parser {
                 return_type,
                 body,
                 instance
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_enum_statement(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        self.advance();
+
+        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        let mut variants = IndexMap::new();
+
+        self.consume(TokenKind::OpenBrace)?;
+        loop {
+            let variant_name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+            if self.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                self.advance();
+                variants.insert(variant_name, Some(self.parse_expression()?));
+            } else {
+                variants.insert(variant_name, None);
+            }
+
+            if self.peek().get_token_kind() == TokenKind::CloseBrace {
+                break;
+            } else {
+                self.consume(TokenKind::Comma)?;
+            }
+        }
+        self.consume(TokenKind::CloseBrace)?;
+
+        Ok(Node {
+            kind: NodeKind::EnumDeclaration { 
+                name,
+                variants
             },
             span: span.set_end_from_span(self.previous().get_span())
         })

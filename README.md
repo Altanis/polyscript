@@ -7,7 +7,9 @@
     - [x] create implementations
     - [x] property access
     - [x] function access
-- [ ] enums
+- [x] enums
 - [ ] refactor parser/ast for consistency
 - [ ] refactor lexer/token for consistency
 - [ ] fix all error formats
+
+NOTE: Trailing commas are NOT allowed.

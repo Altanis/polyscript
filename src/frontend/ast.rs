@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use colored::*;
+use indexmap::IndexMap;
 use crate::utils::kind::{Operation, QualifierKind, Span};
 
 #[derive(Debug, Clone)]
@@ -84,8 +87,15 @@ pub enum NodeKind {
     },
     StructLiteral {
         name: String,
-        fields: Vec<(String, Node)>
+        fields: HashMap<String, Node>
     },
+
+    // ENUMS //
+    EnumDeclaration {
+        name: String,
+        variants: IndexMap<String, Option<Node>>
+    },
+
 
     // IMPLEMENTATIONS //
     ImplDeclaration {
@@ -435,7 +445,22 @@ impl Node {
                 }
             
                 write!(f, "{}{}", indent_str, "}".dimmed())
-            }            
+            }      
+            NodeKind::EnumDeclaration { name, variants } => {
+                write!(f, "{}enum {}", indent_str, name.yellow())?;
+                writeln!(f, " {}", "{".dimmed())?;
+                
+                for (variant, expr) in variants {
+                    write!(f, "{}", " ".repeat(child_indent + 4))?;
+                    write!(f, "{}", variant)?;
+                    if let Some(expr) = expr {
+                        write!(f, " = {}", expr)?;
+                    }
+                    writeln!(f)?;
+                }
+                
+                write!(f, "{}{}", indent_str, "}".dimmed())
+            },
             NodeKind::TypeReference(name) => {
                 write!(f, "{}{}", indent_str, name.bright_blue())
             }

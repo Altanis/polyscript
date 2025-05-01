@@ -340,6 +340,7 @@ impl Lexer {
             LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
             CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
             STRUCT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Struct), span.set_end_from_values(self.index, self.line, self.column))),
+            ENUM_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Enum), span.set_end_from_values(self.index, self.line, self.column))),
             TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::BooleanLiteral, span.set_end_from_values(self.index, self.line, self.column))),
             FN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Fn), span.set_end_from_values(self.index, self.line, self.column))),
             FOR_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::For), span.set_end_from_values(self.index, self.line, self.column))),

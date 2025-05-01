@@ -1,0 +1,35 @@
+struct X {
+    public x: int;
+    private y: int;
+}
+
+let x_struct = X {
+    x: 4,
+    y: 3 + 2 % 4 - 1
+};
+
+let x = 4;
+let y = 5;
+
+let y_struct = X {
+    x,
+    y
+};
+
+struct Vector2D {
+    public x: int;
+    public y: int;
+}
+
+impl Vector2D {
+    public const ZERO: Vector2D = Vector2D { x: 0, y: 0 };
+
+    public fn new(x: int, y: int): Vector2D {
+        return Vector2D { x, y };
+    }
+
+    public fn do_nothing(this) {}
+}
+
+let vector = Vector.new(3, 4).do_nothing();
+vector.x;

@@ -73,11 +73,14 @@
     user.check_permissions();
     user.x = 3;
 
+    fn add() {}
+    add();
+
 ## ENUMS ##
     enum Level {
         Easy,
         Medium,
-        Hard
+        Hard = 7
     }
 
-## MATCH ##
+    let level = Level.Hard;

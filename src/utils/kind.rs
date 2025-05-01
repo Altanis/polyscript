@@ -25,6 +25,7 @@ pub const VOID_TYPE: &str = "void";
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
+pub const ENUM_KEYWORD: &str = "enum";
 pub const STRUCT_KEYWORD: &str = "struct";
 pub const IMPL_KEYWORD: &str = "impl";
 pub const TRUE_KEYWORD: &str = "true";
@@ -309,6 +310,7 @@ pub enum KeywordKind {
     Impl,
     Let,
     Const,
+    Enum,
     Public,
     Private,
     This
@@ -472,6 +474,7 @@ impl std::fmt::Display for Token {
                 KeywordKind::Struct => "Keyword::Struct".green(),
                 KeywordKind::Let => "Keyword::Let".green(),
                 KeywordKind::Const => "Keyword::Const".green(),
+                KeywordKind::Enum => "Keyword::Enum".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
                 KeywordKind::This => "Keyword::This".blue(),
