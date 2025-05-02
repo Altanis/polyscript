@@ -104,7 +104,7 @@ pub enum NodeKind {
     // IMPLEMENTATIONS //
     ImplDeclaration {
         name: String,
-        parent: Option<Box<Node>>,
+        trait_name: Option<String>,
         associated_constants: Vec<Node>,
         associated_functions: Vec<Node>
     },
@@ -122,6 +122,8 @@ pub enum NodeKind {
         body: Box<Node>,
         instance: bool
     },
+
+    SelfValue,
     SelfType,
 
     FunctionCall {
@@ -272,14 +274,16 @@ impl Node {
 
             NodeKind::ImplDeclaration {
                 name,
-                parent,
+                trait_name,
                 associated_constants,
                 associated_functions
             } => {
-                write!(f, "{} {}", "class".bright_cyan(), name.yellow())?;
-                if let Some(parent_node) = parent {
-                    write!(f, " {} {}", ":".bright_cyan(), parent_node)?;
+                write!(f, "{}{} ", indent_str, "impl".bright_cyan())?;
+                if let Some(trait_name) = trait_name {
+                    write!(f, "{} for ", trait_name)?;
                 }
+                write!(f, "{}", name)?;
+
                 writeln!(f, " {}", "{".dimmed())?;
                 for constant in associated_constants {
                     writeln!(f, "    {}", constant)?;
@@ -342,6 +346,7 @@ impl Node {
                 body.fmt_with_indent(f, indent)  // Don't increase indent for the block
             }
 
+            NodeKind::SelfValue => write!(f, "{}this", indent_str),
             NodeKind::SelfType => write!(f, "{}Self", indent_str),
 
             NodeKind::IfStatement {

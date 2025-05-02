@@ -8,6 +8,11 @@
     - [x] property access
     - [x] function access
 - [x] enums
+- [ ] traits
+- [ ] generics
+- [ ] function types
+- [ ] arrays (fixed length + vector)
+- [ ] struct extension
 - [ ] refactor parser/ast for consistency
 - [ ] refactor lexer/token for consistency
 - [ ] fix all error formats

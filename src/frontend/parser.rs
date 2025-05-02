@@ -312,6 +312,13 @@ impl Parser {
                 self.consume(TokenKind::CloseParenthesis)?;
                 Ok(expr)
             },
+            TokenKind::Keyword(KeywordKind::This) => {
+                self.advance();
+                Ok(Node {
+                    kind: NodeKind::SelfValue,
+                    span: span.set_end_from_span(self.previous().get_span())
+                })
+            },
             _ => {
                 let pos = token.get_span().start_pos;
                 Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())))
@@ -829,12 +836,15 @@ impl Parser {
         let span = self.create_span_from_current_token();
         self.advance();
 
-        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
-        
-        let mut parent = None;
-        if self.peek().get_token_kind() == TokenKind::Colon {
+        let (mut name, mut trait_name) = ("".to_string(), None);
+        let temp_name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        if self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::For) {
             self.advance();
-            parent = Some(Box::new(self.parse_type()?));
+
+            name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+            trait_name = Some(temp_name);
+        } else {
+            name = temp_name;
         }
 
         self.consume(TokenKind::OpenBrace)?;
@@ -872,7 +882,7 @@ impl Parser {
         Ok(Node {
             kind: NodeKind::ImplDeclaration {
                 name,
-                parent,
+                trait_name,
                 associated_constants,
                 associated_functions
             },
