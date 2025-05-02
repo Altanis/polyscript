@@ -336,7 +336,6 @@ impl Lexer {
             FLOAT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
             BOOL_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
             STRING_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::String), span.set_end_from_values(self.index, self.line, self.column))),
-            VOID_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Void), span.set_end_from_values(self.index, self.line, self.column))),
             LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
             CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
             STRUCT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Struct), span.set_end_from_values(self.index, self.line, self.column))),

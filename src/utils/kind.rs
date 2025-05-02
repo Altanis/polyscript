@@ -21,7 +21,6 @@ pub const INT_TYPE: &str = "int";
 pub const FLOAT_TYPE: &str = "float";
 pub const BOOL_TYPE: &str = "bool";
 pub const STRING_TYPE: &str = "string";
-pub const VOID_TYPE: &str = "void";
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
@@ -296,7 +295,6 @@ pub enum KeywordKind {
     Float,
     String,
     Bool,
-    Void,
     If,
     Else,
     While,
@@ -461,7 +459,6 @@ impl std::fmt::Display for Token {
                 KeywordKind::Float => "Keyword::Float".cyan(),
                 KeywordKind::String => "Keyword::String".cyan(),
                 KeywordKind::Bool => "Keyword::Bool".cyan(),
-                KeywordKind::Void => "Keyword::Void".cyan(),
                 KeywordKind::If => "Keyword::If".yellow(),
                 KeywordKind::Else => "Keyword::Else".yellow(),
                 KeywordKind::While => "Keyword::While".yellow(),

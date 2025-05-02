@@ -63,10 +63,13 @@ pub enum NodeKind {
     Throw(Box<Node>),
     
     // FUNCTIONS //
-    FunctionDeclaration {
+    FunctionSignature {
         name: String,
         parameters: Vec<Node>,
-        return_type: Option<Box<Node>>,
+        return_type: Option<Box<Node>>
+    },
+    FunctionDeclaration {
+        signature: Box<Node>,
         body: Box<Node>,
     },
     FunctionParameter {
@@ -123,6 +126,11 @@ pub enum NodeKind {
         function: Box<Node>,
         arguments: Vec<Node>
     },
+
+    // TRAITS //
+    // TraitDeclaration {
+// 
+    // },
 
     // TYPES //
     TypeReference(String),
@@ -229,11 +237,10 @@ impl Node {
                 write!(f, "{}", "}".dimmed())
             }
 
-            NodeKind::FunctionDeclaration {
+            NodeKind::FunctionSignature {
                 name,
                 parameters,
                 return_type,
-                body,
             } => {
                 write!(f, "{}fn {}(", indent_str, name.yellow())?;
                 for (i, param) in parameters.iter().enumerate() {
@@ -246,8 +253,17 @@ impl Node {
                 if let Some(ret_ty) = return_type {
                     write!(f, ": {}", ret_ty)?;
                 }
+                
+                Ok(())
+            }
+
+            NodeKind::FunctionDeclaration {
+                signature,
+                body,
+            } => {
+                write!(f, "{}", signature)?;
                 write!(f, " ")?;
-                body.fmt_with_indent(f, indent)  // Don't increase indent for the block
+                body.fmt_with_indent(f, indent)
             }
 
             NodeKind::ImplDeclaration {

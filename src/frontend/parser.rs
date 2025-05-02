@@ -459,7 +459,6 @@ impl Parser {
                 | TokenKind::Keyword(KeywordKind::Float)
                 | TokenKind::Keyword(KeywordKind::String)
                 | TokenKind::Keyword(KeywordKind::Bool)
-                | TokenKind::Keyword(KeywordKind::Void) 
             => {
                 Ok(Node {
                     kind: NodeKind::TypeReference(type_reference.get_value().to_string()),
@@ -474,7 +473,8 @@ impl Parser {
     }
 
     fn parse_function_declaration(&mut self) -> Result<Node, ParserError> {
-        let span = self.create_span_from_current_token();
+        let fn_signature_span = self.create_span_from_current_token();
+        let fn_span = self.create_span_from_current_token();
 
         self.advance();
 
@@ -488,16 +488,23 @@ impl Parser {
             return_type = Some(Box::new(self.parse_type()?));
         }
 
+        let signature = Box::new(Node {
+            kind: NodeKind::FunctionSignature {
+                name,
+                parameters,
+                return_type,
+            },
+            span: fn_signature_span.set_end_from_span(self.previous().get_span())
+        });
+
         let body = Box::new(self.parse_block()?);
 
         Ok(Node {
             kind: NodeKind::FunctionDeclaration {
-                name,
-                parameters,
-                return_type,
+                signature,
                 body
             },
-            span: span.set_end_from_span(self.previous().get_span())
+            span: fn_span.set_end_from_span(self.previous().get_span())
         })
     }
 

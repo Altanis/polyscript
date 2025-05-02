@@ -6,7 +6,7 @@
 
 ## FUNCTION DECLARATION ##
     fn name() {}
-    fn name(x: int): void {}
+    fn name(x: int) {}
     fn name(x: int, y: int): int {}
     fn name(x: int = 3, y: int): float {}
 
@@ -84,3 +84,74 @@
     }
 
     let level = Level.Hard;
+
+## TRAITS ##
+    enum Species {
+        Dog,
+        Cat,
+        UE2020
+    }
+
+    trait TAnimal {
+        fn get_species(this): Species;
+        fn speak(this);
+    }
+
+    struct Animal {
+        private species: Species;
+    }
+
+    impl TAnimal for Animal {
+        fn get_species(this): Species {
+            return this.species;
+        }
+
+        fn speak(this) {}
+    }
+
+    impl Animal {
+        public fn new(species: Species): Animal {
+            Animal { species }
+        }
+    }
+
+## GENERICS ##
+    struct Vector2D<T> {
+        public x: T;
+        public y: T;
+    }
+
+    impl<T> Vector2D<T> {
+        public fn add(this, vector: Vector2D<T>): Vector2D<T> {
+            return Vector2D {
+                x: this.x + vector.x,
+                y: this.y + vector.y
+            };
+        }
+
+        public fn random_method<U>(x: U) {}
+    }
+
+    fn identity<T>(x: T): T {
+        return x;
+    }
+
+    fn generic_pair<A, B>(a: A, b: B) {}
+
+    let vector1: Vector2D<int> = Vector2D { x: 3, y: 3 };
+    let vector2 = Vector2D { x: "Hello", y: "world" };
+    # let vector3 = Vector2D { x: 1, y: "3" } <-- compile error
+
+## SCOPED TYPES ##
+    type Integer = int;
+    let x: Integer = 2;
+
+    struct Box<T> {
+        public value: T;
+    }
+
+    type StringBox = Box<String>;
+    let box: StringBox = Box { value: "hi" };
+
+## FUNCTION SIGNATURE AS TYPE ##
+    type Callback = fn();
