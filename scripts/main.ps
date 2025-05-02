@@ -1,1 +1,33 @@
-impl TAddable for int {}
+trait TAddable {
+    fn add(this, other: Self): Self;
+}
+
+trait TSubbable {
+    fn sub(this, other: Self): Self;
+}
+
+impl TAddable for int {
+    fn add(this, other: Self): Self {
+        return this + other;
+    }
+}
+
+impl TSubbable for int {
+    fn sub(this, other: Self): Self {
+        return this - other;
+    }
+}
+
+fn identity[T](x: T): T {
+    return x;
+}
+
+fn generic_pair[A: TAddable + TSubbable, B: TAddable + TSubbable](a: A, b: B) {}
+
+let identity_value = identity(5);
+generic_pair(5, "3");
+
+struct Vector2D[T: TAddable] {
+    public x: T;
+    public y: T;
+}

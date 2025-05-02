@@ -65,6 +65,7 @@ pub enum NodeKind {
     // FUNCTIONS //
     FunctionSignature {
         name: String,
+        generic_parameters: Vec<Node>,
         parameters: Vec<Node>,
         return_type: Option<Box<Node>>,
         instance: Option<bool>
@@ -82,6 +83,7 @@ pub enum NodeKind {
     // STRUCTS //
     StructDeclaration {
         name: String,
+        generic_parameters: Vec<Node>,
         fields: Vec<Node>
     },
     StructField {
@@ -135,6 +137,12 @@ pub enum NodeKind {
     TraitDeclaration {
         name: String,
         signatures: Vec<Node>
+    },
+
+    // GENERICS //
+    GenericParameter {
+        name: String,
+        constraints: Vec<String>
     },
 
     // TYPES //
@@ -244,11 +252,26 @@ impl Node {
 
             NodeKind::FunctionSignature {
                 name,
+                generic_parameters,
                 parameters,
                 return_type,
-                ..
+                instance
             } => {
-                write!(f, "{}fn {}(", indent_str, name.yellow())?;
+                write!(f, "{}fn {}", indent_str, name.yellow())?;
+
+                if !generic_parameters.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_parameters.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
+                write!(f, "(")?;
+
                 for (i, param) in parameters.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -431,9 +454,22 @@ impl Node {
 
             NodeKind::StructDeclaration {
                 name,
+                generic_parameters,
                 fields,
             } => {
                 write!(f, "{}struct {}", indent_str, name.yellow())?;
+
+                if !generic_parameters.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_parameters.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
                 writeln!(f, " {}", "{".dimmed())?;
                 
                 for field in fields {
@@ -517,6 +553,22 @@ impl Node {
                 }
                 
                 write!(f, "{}{}", indent_str, "}".dimmed())
+            }
+            NodeKind::GenericParameter { name, constraints } => {
+                write!(f, "{}{}", indent_str, name.yellow())?;
+
+                if !constraints.is_empty() {
+                    write!(f, ": ")?;
+                }
+
+                for (i, constraint) in constraints.iter().enumerate() {
+                    write!(f, "{}", constraint)?;
+                    if i + 1 < constraints.len() {
+                        write!(f, " + ")?;
+                    }
+                }
+
+                Ok(())
             }
         }
     }
