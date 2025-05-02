@@ -103,7 +103,7 @@ pub enum NodeKind {
 
     // IMPLEMENTATIONS //
     ImplDeclaration {
-        name: String,
+        type_reference: Box<Node>,
         trait_name: Option<String>,
         associated_constants: Vec<Node>,
         associated_functions: Vec<Node>
@@ -273,7 +273,7 @@ impl Node {
             }
 
             NodeKind::ImplDeclaration {
-                name,
+                type_reference: name,
                 trait_name,
                 associated_constants,
                 associated_functions

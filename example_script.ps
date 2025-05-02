@@ -95,6 +95,7 @@
     trait TAnimal {
         fn get_species(this): Species;
         fn speak(this);
+        fn interact(this, other: Self): Self;
     }
 
     struct Animal {
@@ -107,15 +108,27 @@
         }
 
         fn speak(this) {}
+
+        fn interact(this, other: Animal): Animal {
+            return this;
+        }
     }
 
     impl Animal {
         public fn new(species: Species): Animal {
-            Animal { species }
+            return Animal { species };
         }
     }
 
 ## GENERICS ##
+    trait TAddable {
+        fn add(this, other: Self): Self;
+    }
+
+    impl TAddable for int {
+        
+    }
+
     struct Vector2D<T> {
         public x: T;
         public y: T;

@@ -836,16 +836,41 @@ impl Parser {
         let span = self.create_span_from_current_token();
         self.advance();
 
-        let (mut name, mut trait_name) = ("".to_string(), None);
-        let temp_name = self.consume(TokenKind::Identifier)?.get_value().to_string();
-        if self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::For) {
-            self.advance();
-
-            name = self.consume(TokenKind::Identifier)?.get_value().to_string();
-            trait_name = Some(temp_name);
-        } else {
-            name = temp_name;
-        }
+        let (type_node, trait_name) = {
+            let first = self.advance().clone();
+        
+            if self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::For) {
+                self.advance();
+                let type_node = self.parse_type()?;
+                let trait_name = first.get_value().to_string();
+                (Some(type_node), Some(trait_name))
+            } else {
+                match first.get_token_kind() {
+                    TokenKind::Identifier
+                    | TokenKind::Keyword(KeywordKind::Int)
+                    | TokenKind::Keyword(KeywordKind::Float)
+                    | TokenKind::Keyword(KeywordKind::String)
+                    | TokenKind::Keyword(KeywordKind::Bool) => {
+                        let type_node = Node {
+                            span: first.get_span(),
+                            kind: NodeKind::TypeReference(first.get_value().to_string()),
+                        };
+                        (Some(type_node), None)
+                    }
+                    _ => {
+                        let position = first.get_span().end_pos;
+                        return Err(ParserError::UnexpectedToken(
+                            position.line,
+                            position.column,
+                            format!(
+                                "Expected a type reference, instead found {:?}.",
+                                first.get_token_kind()
+                            ),
+                        ));
+                    }
+                }
+            }
+        };
 
         self.consume(TokenKind::OpenBrace)?;
 
@@ -881,7 +906,7 @@ impl Parser {
 
         Ok(Node {
             kind: NodeKind::ImplDeclaration {
-                name,
+                type_reference: Box::new(type_node.unwrap()),
                 trait_name,
                 associated_constants,
                 associated_functions
