@@ -66,7 +66,8 @@ pub enum NodeKind {
     FunctionSignature {
         name: String,
         parameters: Vec<Node>,
-        return_type: Option<Box<Node>>
+        return_type: Option<Box<Node>>,
+        instance: Option<bool>
     },
     FunctionDeclaration {
         signature: Box<Node>,
@@ -121,6 +122,7 @@ pub enum NodeKind {
         body: Box<Node>,
         instance: bool
     },
+    SelfType,
 
     FunctionCall {
         function: Box<Node>,
@@ -128,9 +130,10 @@ pub enum NodeKind {
     },
 
     // TRAITS //
-    // TraitDeclaration {
-// 
-    // },
+    TraitDeclaration {
+        name: String,
+        signatures: Vec<Node>
+    },
 
     // TYPES //
     TypeReference(String),
@@ -241,6 +244,7 @@ impl Node {
                 name,
                 parameters,
                 return_type,
+                ..
             } => {
                 write!(f, "{}fn {}(", indent_str, name.yellow())?;
                 for (i, param) in parameters.iter().enumerate() {
@@ -337,6 +341,8 @@ impl Node {
                 write!(f, " ")?;
                 body.fmt_with_indent(f, indent)  // Don't increase indent for the block
             }
+
+            NodeKind::SelfType => write!(f, "{}Self", indent_str),
 
             NodeKind::IfStatement {
                 condition,
@@ -495,6 +501,17 @@ impl Node {
                     param.fmt_with_indent(f, 0)?;
                 }
                 write!(f, ")")
+            }
+            NodeKind::TraitDeclaration { name, signatures } => {
+                write!(f, "{}trait {}", indent_str, name.yellow())?;
+                writeln!(f, " {}", "{".dimmed())?;
+                
+                for signature in signatures {
+                    signature.fmt_with_indent(f, child_indent)?;
+                    writeln!(f)?;
+                }
+                
+                write!(f, "{}{}", indent_str, "}".dimmed())
             }
         }
     }

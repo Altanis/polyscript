@@ -354,6 +354,7 @@ impl Lexer {
             PUBLIC_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Public), span.set_end_from_values(self.index, self.line, self.column))),
             PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
             IMPL_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Impl), span.set_end_from_values(self.index, self.line, self.column))),
+            TRAIT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Trait), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }

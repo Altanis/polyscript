@@ -41,6 +41,7 @@ pub const THROW_KEYWORD: &str = "throw";
 pub const THIS_KEYWORD: &str = "this";
 pub const PUBLIC_KEYWORD: &str = "public";
 pub const PRIVATE_KEYWORD: &str = "private";
+pub const TRAIT_KEYWORD: &str = "trait";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -311,7 +312,8 @@ pub enum KeywordKind {
     Enum,
     Public,
     Private,
-    This
+    This,
+    Trait
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -475,7 +477,8 @@ impl std::fmt::Display for Token {
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
                 KeywordKind::This => "Keyword::This".blue(),
-                KeywordKind::Impl => "Keyword::Impl".purple()
+                KeywordKind::Impl => "Keyword::Impl".purple(),
+                KeywordKind::Trait => "Keyword::Trait".purple(),
             },            
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

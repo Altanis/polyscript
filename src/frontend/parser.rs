@@ -395,6 +395,7 @@ impl Parser {
             KeywordKind::Throw => self.parse_throw_statement(),
             KeywordKind::Impl => self.parse_impl_statement(),
             KeywordKind::Enum => self.parse_enum_statement(),
+            KeywordKind::Trait => self.parse_trait_declaration(),
             _ => self.parse_expression_statement()
         }
     }
@@ -480,7 +481,7 @@ impl Parser {
 
         let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
 
-        let parameters = self.parse_parameter_list()?;
+        let parameters = self.parse_function_parameter_list()?;
 
         let mut return_type = None;
         if self.peek().get_token_kind() == TokenKind::Colon {
@@ -493,6 +494,7 @@ impl Parser {
                 name,
                 parameters,
                 return_type,
+                instance: None
             },
             span: fn_signature_span.set_end_from_span(self.previous().get_span())
         });
@@ -508,7 +510,7 @@ impl Parser {
         })
     }
 
-    fn parse_parameter_list(&mut self) -> Result<Vec<Node>, ParserError> {
+    fn parse_function_parameter_list(&mut self) -> Result<Vec<Node>, ParserError> {
         let mut parameters = vec![];
 
         self.consume(TokenKind::OpenParenthesis)?;
@@ -548,6 +550,75 @@ impl Parser {
         self.consume(TokenKind::CloseParenthesis)?;
 
         Ok(parameters)
+    }
+
+    fn parse_associated_function_parameter_list(&mut self) -> Result<(Vec<Node>, bool), ParserError> {
+        let mut parameters = vec![];
+        let mut instance = false;
+
+        self.consume(TokenKind::OpenParenthesis)?;
+        
+        while self.peek().get_token_kind() != TokenKind::CloseParenthesis {
+            let span = self.create_span_from_current_token();
+            let token = self.advance();
+        
+            match token.get_token_kind() {
+                TokenKind::Keyword(KeywordKind::This) => {
+                    if parameters.is_empty() {
+                        instance = true;
+                        let type_annotation = Box::new(Node {
+                            kind: NodeKind::SelfType,
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+                        parameters.push(Node {
+                            kind: NodeKind::FunctionParameter {
+                                name: "this".to_string(),
+                                type_annotation,
+                                initializer: None
+                            },
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+                    } else {
+                        let position = self.previous().get_span().start_pos;
+                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));
+                    }
+                },
+                TokenKind::Identifier => {
+                    let name = token.get_value().to_string();
+                    self.consume(TokenKind::Colon)?;
+                    let type_annotation = Box::new(self.parse_type()?);
+                    let mut initializer = None;
+        
+                    if self.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                        self.advance();
+                        initializer = Some(Box::new(self.parse_expression()?));
+                    }
+        
+                    parameters.push(Node {
+                        kind: NodeKind::FunctionParameter {
+                            name,
+                            type_annotation,
+                            initializer
+                        },
+                        span: span.set_end_from_span(self.previous().get_span())
+                    });
+                },
+                _ => {
+                    let position = self.previous().get_span().start_pos;
+                    return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected `this` or an identifier, instead found {:?}.", self.previous().get_token_kind())));
+                }
+            }
+        
+            if self.peek().get_token_kind() == TokenKind::Comma {
+                self.consume(TokenKind::Comma)?;
+            } else {
+                break;
+            }
+        }
+
+        self.consume(TokenKind::CloseParenthesis)?;
+
+        Ok((parameters, instance))
     }
 
     fn parse_selection_statements(&mut self) -> Result<Node, ParserError> {
@@ -788,7 +859,7 @@ impl Parser {
 
             match self.peek().get_token_kind() {
                 TokenKind::Keyword(KeywordKind::Const) => associated_constants.push(self.parse_associated_constant_declaration(qualifier, span)?),
-                TokenKind::Keyword(KeywordKind::Fn) => associated_functions.push(self.parse_associated_function_declaration(qualifier, span, name.clone())?),
+                TokenKind::Keyword(KeywordKind::Fn) => associated_functions.push(self.parse_associated_function_declaration(qualifier, span)?),
                 _  => {
                     let position = self.previous().get_span().start_pos;
                     return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected an associated function or an associated constant variable to be initialized, instead found {:?}.", self.peek().get_token_kind())));
@@ -831,75 +902,11 @@ impl Parser {
         })
     }
 
-    fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind, span: Span, class_name: String) -> Result<Node, ParserError> {
+    fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind, span: Span) -> Result<Node, ParserError> {
         self.advance();
 
         let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
-
-        let mut parameters = vec![];
-        let mut instance = false;
-
-        self.consume(TokenKind::OpenParenthesis)?;
-        
-        while self.peek().get_token_kind() != TokenKind::CloseParenthesis {
-            let span = self.create_span_from_current_token();
-            let token = self.advance();
-        
-            match token.get_token_kind() {
-                TokenKind::Keyword(KeywordKind::This) => {
-                    if parameters.is_empty() {
-                        instance = true;
-                        let type_annotation = Box::new(Node {
-                            kind: NodeKind::Identifier(class_name.clone()),
-                            span: span.set_end_from_span(self.previous().get_span())
-                        });
-                        parameters.push(Node {
-                            kind: NodeKind::FunctionParameter {
-                                name: "this".to_string(),
-                                type_annotation,
-                                initializer: None
-                            },
-                            span: span.set_end_from_span(self.previous().get_span())
-                        });
-                    } else {
-                        let position = self.previous().get_span().start_pos;
-                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));
-                    }
-                },
-                TokenKind::Identifier => {
-                    let name = token.get_value().to_string();
-                    self.consume(TokenKind::Colon)?;
-                    let type_annotation = Box::new(self.parse_type()?);
-                    let mut initializer = None;
-        
-                    if self.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
-                        self.advance();
-                        initializer = Some(Box::new(self.parse_expression()?));
-                    }
-        
-                    parameters.push(Node {
-                        kind: NodeKind::FunctionParameter {
-                            name,
-                            type_annotation,
-                            initializer
-                        },
-                        span: span.set_end_from_span(self.previous().get_span())
-                    });
-                },
-                _ => {
-                    let position = self.previous().get_span().start_pos;
-                    return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected `this` or an identifier, instead found {:?}.", self.previous().get_token_kind())));
-                }
-            }
-        
-            if self.peek().get_token_kind() == TokenKind::Comma {
-                self.consume(TokenKind::Comma)?;
-            } else {
-                break;
-            }
-        }
-
-        self.consume(TokenKind::CloseParenthesis)?;
+        let (parameters, instance) = self.parse_associated_function_parameter_list()?;
 
         let mut return_type = None;
         if self.peek().get_token_kind() == TokenKind::Colon {
@@ -951,6 +958,53 @@ impl Parser {
             kind: NodeKind::EnumDeclaration { 
                 name,
                 variants
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_trait_declaration(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        self.advance();
+
+        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        let mut signatures = vec![];
+
+        self.consume(TokenKind::OpenBrace)?;
+        while self.peek().get_token_kind() != TokenKind::CloseBrace {
+            signatures.push(self.parse_function_signature()?);
+            self.consume(TokenKind::Semicolon)?;
+        }
+        self.consume(TokenKind::CloseBrace)?;
+
+        Ok(Node {
+            kind: NodeKind::TraitDeclaration {
+                name,
+                signatures
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_function_signature(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+
+        self.consume(TokenKind::Keyword(KeywordKind::Fn))?;
+        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        let (parameters, instance) = self.parse_associated_function_parameter_list()?;
+        let mut return_type = None;
+
+        if self.peek().get_token_kind() == TokenKind::Colon {
+            self.consume(TokenKind::Colon)?;
+            return_type = Some(Box::new(self.parse_type()?));
+        }
+
+        Ok(Node {
+            kind: NodeKind::FunctionSignature {
+                name,
+                parameters,
+                return_type,
+                instance: Some(instance)
             },
             span: span.set_end_from_span(self.previous().get_span())
         })
