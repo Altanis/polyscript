@@ -105,6 +105,7 @@ pub enum NodeKind {
 
     // IMPLEMENTATIONS //
     ImplDeclaration {
+        generic_parameters: Vec<Node>,
         type_reference: Box<Node>,
         trait_name: Option<String>,
         associated_constants: Vec<Node>,
@@ -118,11 +119,8 @@ pub enum NodeKind {
     },
     AssociatedFunction {
         qualifier: QualifierKind,
-        name: String,
-        parameters: Vec<Node>,
-        return_type: Option<Box<Node>>,
-        body: Box<Node>,
-        instance: bool
+        signature: Box<Node>,
+        body: Box<Node>
     },
 
     SelfValue,
@@ -144,9 +142,15 @@ pub enum NodeKind {
         name: String,
         constraints: Vec<String>
     },
+    GenericType {
+        type_annotation: Box<Node>
+    },
 
     // TYPES //
-    TypeReference(String),
+    TypeReference {
+        type_name: String,
+        generic_types: Vec<Node>
+    },
     
     // PROGRAM //
     Program(Vec<Node>),
@@ -296,12 +300,24 @@ impl Node {
             }
 
             NodeKind::ImplDeclaration {
+                generic_parameters,
                 type_reference: name,
                 trait_name,
                 associated_constants,
                 associated_functions
             } => {
                 write!(f, "{}{} ", indent_str, "impl".bright_cyan())?;
+                if !generic_parameters.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_parameters.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
                 if let Some(trait_name) = trait_name {
                     write!(f, "{} for ", trait_name)?;
                 }
@@ -342,11 +358,8 @@ impl Node {
 
             NodeKind::AssociatedFunction {
                 qualifier,
-                name,
-                parameters,
-                return_type,
-                body,
-                ..
+                signature,
+                body
             } => {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{} ", match qualifier {
@@ -354,19 +367,9 @@ impl Node {
                     QualifierKind::Private => "private".purple()
                 })?;
 
-                write!(f, "fn {}(", name.yellow())?;
-                for (i, param) in parameters.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    param.fmt_with_indent(f, 0)?;
-                }
-                write!(f, ")")?;
-                if let Some(ret_ty) = return_type {
-                    write!(f, ": {}", ret_ty)?;
-                }
+                write!(f, "{}", signature)?;
                 write!(f, " ")?;
-                body.fmt_with_indent(f, indent)  // Don't increase indent for the block
+                body.fmt_with_indent(f, indent)
             }
 
             NodeKind::SelfValue => write!(f, "{}this", indent_str),
@@ -524,8 +527,20 @@ impl Node {
                 
                 write!(f, "{}{}", indent_str, "}".dimmed())
             },
-            NodeKind::TypeReference(name) => {
-                write!(f, "{}{}", indent_str, name.bright_blue())
+            NodeKind::TypeReference { type_name, generic_types } => {
+                write!(f, "{}{}", indent_str, type_name.bright_blue())?;
+                if !generic_types.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_types.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
+                Ok(())
             }
             NodeKind::Error => {
                 write!(f, "{}", indent_str)?;
@@ -569,6 +584,9 @@ impl Node {
                 }
 
                 Ok(())
+            },
+            NodeKind::GenericType { type_annotation } => {
+                write!(f, "{}", type_annotation)
             }
         }
     }

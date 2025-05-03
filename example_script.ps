@@ -155,7 +155,7 @@
         public y: T;
     }
 
-    impl[T: TAddable] Vector2D[T] {
+    impl[T: TAddable, U] Vector2D[T] {
         public fn add(this, vector: Vector2D[T]): Vector2D[T] {
             return Vector2D {
                 x: this.x.add(other.x),
