@@ -158,7 +158,16 @@ impl Lexer {
         };
     
         match operator.chars().next().unwrap() {
-            NOT_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::Not), span.set_end_from_values(self.index, self.line, self.column))),
+            NOT_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::NotEqual)
+                    },
+                    _ => TokenKind::Operator(Operation::Not),
+                };
+                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
+            },            
             BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
             ADD_TOKEN => {
                 let token_type = match self.peek() {
@@ -355,6 +364,8 @@ impl Lexer {
             PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
             IMPL_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Impl), span.set_end_from_values(self.index, self.line, self.column))),
             TRAIT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Trait), span.set_end_from_values(self.index, self.line, self.column))),
+            TYPE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Type), span.set_end_from_values(self.index, self.line, self.column))),
+            MUT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Mut), span.set_end_from_values(self.index, self.line, self.column))),
             _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
         }
     }

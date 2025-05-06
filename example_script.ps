@@ -192,5 +192,32 @@
     type StringBox = Box[string];
     let box: StringBox = Box { value: "hi" };
 
+## REFERENCES ##
+    let integer = 3;
+    
+    {
+        let immutable_ref = &integer;
+    }
+    # reference dropped here, prevents UB
+
+    let mutable_ref = &mut integer;
+    while (*mutable_ref != 0) {
+        *mutable_ref--;
+    }
+
+    struct Box {
+        public value: int;
+    }
+
+    impl Box {
+        public fn increment(&mut this) {
+            this.value++;
+        }
+    }
+
+    let box = Box { value: 5 };
+    box.increment();
+    let value = box.value; # 6
+
 ## FUNCTION SIGNATURE AS TYPE ##
     type Callback = fn();

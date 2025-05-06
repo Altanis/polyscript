@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use colored::*;
 use indexmap::IndexMap;
 use crate::utils::kind::{Operation, QualifierKind, Span};
@@ -93,7 +91,7 @@ pub enum NodeKind {
     },
     StructLiteral {
         name: String,
-        fields: HashMap<String, Node>
+        fields: IndexMap<String, Node>
     },
 
     // ENUMS //
@@ -124,7 +122,7 @@ pub enum NodeKind {
     },
 
     SelfValue,
-    SelfType,
+    SelfType(Option<Operation>),
 
     FunctionCall {
         function: Box<Node>,
@@ -151,7 +149,11 @@ pub enum NodeKind {
         type_name: String,
         generic_types: Vec<Node>
     },
-    
+    TypeDeclaration {
+        name: String,
+        value: Box<Node>,
+    },
+
     // PROGRAM //
     Program(Vec<Node>),
     
@@ -259,7 +261,7 @@ impl Node {
                 generic_parameters,
                 parameters,
                 return_type,
-                instance
+                ..
             } => {
                 write!(f, "{}fn {}", indent_str, name.yellow())?;
 
@@ -373,7 +375,15 @@ impl Node {
             }
 
             NodeKind::SelfValue => write!(f, "{}this", indent_str),
-            NodeKind::SelfType => write!(f, "{}Self", indent_str),
+            NodeKind::SelfType(operation) => {
+                let operation_str = match operation {
+                    Some(Operation::ImmutableAddressOf) => "&",
+                    Some(Operation::MutableAddressOf) => "&mut ",
+                    _ => ""
+                };
+
+                write!(f, "{}{operation_str}Self", indent_str)
+            },
 
             NodeKind::IfStatement {
                 condition,
@@ -541,6 +551,11 @@ impl Node {
                 }
 
                 Ok(())
+            }
+            NodeKind::TypeDeclaration { name, value } => {
+                write!(f, "{}", "type ".purple())?;
+                write!(f, "{} = ", name)?;
+                write!(f, "{}", value)
             }
             NodeKind::Error => {
                 write!(f, "{}", indent_str)?;

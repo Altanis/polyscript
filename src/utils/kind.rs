@@ -42,6 +42,8 @@ pub const THIS_KEYWORD: &str = "this";
 pub const PUBLIC_KEYWORD: &str = "public";
 pub const PRIVATE_KEYWORD: &str = "private";
 pub const TRAIT_KEYWORD: &str = "trait";
+pub const TYPE_KEYWORD: &str = "type";
+pub const MUT_KEYWORD: &str = "mut";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -88,6 +90,7 @@ pub enum Operation {
     BitwiseXorEq,
     RightBitShiftEq,
     LeftBitShiftEq,
+    NotEqual,
 
     // CONDITIONAL
     And,
@@ -99,15 +102,20 @@ pub enum Operation {
     Equivalence,
 
     // CALL
-    FieldAccess
+    FieldAccess,
+
+    // POINTER OPS //
+    Dereference,
+    ImmutableAddressOf,
+    MutableAddressOf,
 }
 
 impl Operation {
-    pub fn is_postfix(&self) -> bool {
+    pub fn is_postfix(self) -> bool {
         matches!(self, Operation::Increment | Operation::Decrement)
     }
 
-    pub fn is_unary(&self) -> bool {
+    pub fn is_unary(self) -> bool {
         matches!(
             self,
             Operation::Not
@@ -116,10 +124,15 @@ impl Operation {
                 | Operation::Decrement
                 | Operation::Plus
                 | Operation::Minus
+                | Operation::Mul
+                | Operation::BitwiseAnd
+                | Operation::Dereference
+                | Operation::ImmutableAddressOf
+                | Operation::MutableAddressOf
         )
     }
 
-    pub fn is_binary(&self) -> bool {
+    pub fn is_binary(self) -> bool {
         matches!(
             self,
             Operation::Plus
@@ -174,7 +187,8 @@ impl Operation {
             | Operation::BitwiseOrEq 
             | Operation::BitwiseXorEq 
             | Operation::RightBitShiftEq 
-            | Operation::LeftBitShiftEq => (1, 2),
+            | Operation::LeftBitShiftEq
+            | Operation::NotEqual => (1, 2),
     
             Operation::Or => (2, 3),
             
@@ -210,7 +224,11 @@ impl Operation {
             | Operation::Increment 
             | Operation::Decrement => (13, 14),
 
-            Operation::FieldAccess => (14, 15)
+            Operation::FieldAccess => (14, 15),
+
+            Operation::Dereference
+            | Operation::ImmutableAddressOf
+            | Operation::MutableAddressOf => (15, 16)
         }
     }
 }
@@ -225,12 +243,12 @@ impl std::fmt::Display for Operation {
 
             Operation::Plus => ADD_TOKEN.to_string(),
             Operation::Minus => SUB_TOKEN.to_string(),
-            Operation::Mul => MUL_TOKEN.to_string(),
+            Operation::Mul | Operation::Dereference => MUL_TOKEN.to_string(),
             Operation::Exp => format!("{}{}", MUL_TOKEN, MUL_TOKEN),
             Operation::Div => DIV_TOKEN.to_string(),
             Operation::Mod => MOD_TOKEN.to_string(),
 
-            Operation::BitwiseAnd => BITWISE_AND_TOKEN.to_string(),
+            Operation::BitwiseAnd | Operation::ImmutableAddressOf => BITWISE_AND_TOKEN.to_string(),
             Operation::BitwiseOr => BITWISE_OR_TOKEN.to_string(),
             Operation::BitwiseXor => BITWISE_XOR_TOKEN.to_string(),
             Operation::RightBitShift => format!("{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN),
@@ -248,6 +266,7 @@ impl std::fmt::Display for Operation {
             Operation::BitwiseXorEq => format!("{}{}", BITWISE_XOR_TOKEN, ASSIGNMENT_TOKEN),
             Operation::RightBitShiftEq => format!("{}{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN),
             Operation::LeftBitShiftEq => format!("{}{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::NotEqual => format!("{}{}", NOT_TOKEN, ASSIGNMENT_TOKEN),
 
             Operation::And => format!("{}{}", BITWISE_AND_TOKEN, BITWISE_AND_TOKEN),
             Operation::Or => format!("{}{}", BITWISE_OR_TOKEN, BITWISE_OR_TOKEN),
@@ -257,7 +276,8 @@ impl std::fmt::Display for Operation {
             Operation::Leq => format!("{}{}", LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
             Operation::Equivalence => format!("{}{}", ASSIGNMENT_TOKEN, ASSIGNMENT_TOKEN),
 
-            Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string()
+            Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
+            Operation::MutableAddressOf => "&mut".to_string()
         };
 
         write!(f, "{}", s)
@@ -313,7 +333,9 @@ pub enum KeywordKind {
     Public,
     Private,
     This,
-    Trait
+    Trait,
+    Type,
+    Mut
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -473,12 +495,14 @@ impl std::fmt::Display for Token {
                 KeywordKind::Struct => "Keyword::Struct".green(),
                 KeywordKind::Let => "Keyword::Let".green(),
                 KeywordKind::Const => "Keyword::Const".green(),
+                KeywordKind::Mut => "Keyword::Mut".green(),
                 KeywordKind::Enum => "Keyword::Enum".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
                 KeywordKind::This => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
+                KeywordKind::Type => "Keyword::Type".purple()
             },            
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

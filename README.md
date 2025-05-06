@@ -8,8 +8,8 @@
     - [x] property access
     - [x] function access
 - [x] enums
-- [ ] traits
-- [ ] generics
+- [x] traits
+- [x] generics
 - [ ] function types
 - [ ] arrays (fixed length + vector)
 - [ ] operator overloading???
@@ -24,3 +24,5 @@ NOTE: stdlib should contain:
 - traits for common operations (operator overloading maybe)
 
 NOTE: Trailing commas are NOT allowed.
+
+use lambdarrow for =>

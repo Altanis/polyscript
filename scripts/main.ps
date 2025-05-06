@@ -1,61 +1,25 @@
-trait TAddable {
-    fn add(this, other: Self): Self;
+let integer = 3;
+
+{
+    let immutable_ref = &integer;
+}
+# reference dropped here, prevents UB
+
+let mutable_ref = &mut integer;
+while (*mutable_ref != 0) {
+    *mutable_ref--;
 }
 
-trait TSubbable {
-    fn sub(this, other: Self): Self;
+struct Box {
+    public value: int;
 }
 
-impl TAddable for int {
-    fn add(this, other: Self): Self {
-        return this + other;
+impl Box {
+    public fn increment(&mut this) {
+        this.value++;
     }
 }
 
-impl TSubbable for int {
-    fn sub(this, other: Self): Self {
-        return this - other;
-    }
-}
-
-fn identity[T](x: T): T {
-    return x;
-}
-
-fn generic_pair[A: TAddable + TSubbable, B: TAddable + TSubbable](a: A, b: B) {}
-
-let identity_value = identity(5);
-generic_pair(5, "3");
-
-struct Vector2D[T: TAddable] {
-    public x: T;
-    public y: T;
-}
-
-let vector: Vector2D[int] = Vector2D { x: 3, y: 4 };
-
-impl[T: TAddable, U] Vector2D[T] {
-    public fn add(this, vector: Vector2D[T]): Vector2D[T] {
-        return Vector2D {
-            x: this.x.add(other.x),
-            y: this.y.add(other.y)
-        };
-    }
-
-    public fn random_method[V](x: V) {}
-}
-
-impl Vector2D[string] {
-    public fn merge(this): string {
-        return this.x + this.y;
-    }
-}
-
-let vector1: Vector2D[int] = Vector2D { x: 3, y: 3 };
-let resultant = vector1.add(Vector2D { x: 4, y: 4 });
-vector1.random_method("hi");
-
-let vector2 = Vector2D { x: "Hello", y: "world" };
-let merged = vector2.merge();
-
-# let vector3 = Vector2D { x: 1, y: "3" } <-- compile error
+let box = Box { value: 5 };
+box.increment();
+let value = box.value; # 6

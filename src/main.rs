@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(clippy::wrong_self_convention)]
+#![allow(non_upper_case_globals)]
 #![feature(let_chains)]
 
 use std::fs;

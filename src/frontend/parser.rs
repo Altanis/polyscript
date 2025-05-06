@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use indexmap::IndexMap;
 
 use crate::utils::{error::ParserError, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
@@ -187,12 +185,25 @@ impl Parser {
                 }
 
                 let _ = self.advance();
+                let mut operator = match operator {
+                    Operation::Mul => Operation::Dereference,
+                    Operation::BitwiseAnd => Operation::ImmutableAddressOf,
+                    _ => operator
+                };
+
+                if operator == Operation::ImmutableAddressOf &&
+                    self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut) 
+                {
+                    self.advance();
+                    operator = Operation::MutableAddressOf;
+                }
+
                 let operand = Box::new(self.parse_precedence(Operation::Not.binding_power().0)?);
 
                 Ok(Node {
                     span: span.set_end_from_span(operand.span),
                     kind: NodeKind::UnaryOperation { 
-                        operator, 
+                        operator,
                         operand,
                         prefix: true
                     },
@@ -271,7 +282,7 @@ impl Parser {
                 let span = token.get_span();
 
                 if self.peek().get_token_kind() == TokenKind::OpenBrace {
-                    let mut fields = HashMap::new();
+                    let mut fields = IndexMap::new();
 
                     self.advance();
                     loop {
@@ -409,6 +420,7 @@ impl Parser {
             KeywordKind::Impl => self.parse_impl_statement(),
             KeywordKind::Enum => self.parse_enum_statement(),
             KeywordKind::Trait => self.parse_trait_declaration(),
+            KeywordKind::Type => self.parse_type_declaration(),
             _ => self.parse_expression_statement()
         }
     }
@@ -582,11 +594,40 @@ impl Parser {
             let token = self.advance();
         
             match token.get_token_kind() {
+                TokenKind::Operator(Operation::BitwiseAnd) => {
+                    let operator = if self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut) {
+                        self.advance();
+                        Operation::MutableAddressOf
+                    } else {
+                        Operation::ImmutableAddressOf
+                    };
+
+                    self.consume(TokenKind::Keyword(KeywordKind::This))?;
+
+                    if parameters.is_empty() {
+                        instance = true;
+                        let type_annotation = Box::new(Node {
+                            kind: NodeKind::SelfType(Some(operator)),
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+                        parameters.push(Node {
+                            kind: NodeKind::FunctionParameter {
+                                name: "this".to_string(),
+                                type_annotation,
+                                initializer: None
+                            },
+                            span: span.set_end_from_span(self.previous().get_span())
+                        });
+                    } else {
+                        let position = self.previous().get_span().start_pos;
+                        return Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()));
+                    }
+                },
                 TokenKind::Keyword(KeywordKind::This) => {
                     if parameters.is_empty() {
                         instance = true;
                         let type_annotation = Box::new(Node {
-                            kind: NodeKind::SelfType,
+                            kind: NodeKind::SelfType(None),
                             span: span.set_end_from_span(self.previous().get_span())
                         });
                         parameters.push(Node {
@@ -1009,7 +1050,7 @@ impl Parser {
     }
 
     fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind, function_span: Span) -> Result<Node, ParserError> {
-        let signature_span = function_span.clone();
+        let signature_span = function_span;
 
         self.advance();
 
@@ -1031,7 +1072,7 @@ impl Parser {
                 return_type,
                 instance: Some(instance)
             },
-            span: function_span.set_end_from_span(self.previous().get_span())
+            span: signature_span.set_end_from_span(self.previous().get_span())
         });
 
         let body = Box::new(self.parse_block()?);
@@ -1124,6 +1165,24 @@ impl Parser {
                 parameters,
                 return_type,
                 instance: Some(instance)
+            },
+            span: span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_type_declaration(&mut self) -> Result<Node, ParserError> {
+        let span = self.create_span_from_current_token();
+        self.advance();
+
+        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        self.consume(TokenKind::Operator(Operation::Assign))?;
+        let value = Box::new(self.parse_type()?);
+        self.consume(TokenKind::Semicolon)?;
+
+        Ok(Node {
+            kind: NodeKind::TypeDeclaration {
+                name,
+                value
             },
             span: span.set_end_from_span(self.previous().get_span())
         })

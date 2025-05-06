@@ -1,0 +1,33 @@
+enum Species {
+    Dog,
+    Cat,
+    UE2020
+}
+
+trait TAnimal {
+    fn get_species(this): Species;
+    fn speak(this);
+    fn interact(this, other: Self): Self;
+}
+
+struct Animal {
+    private species: Species;
+}
+
+impl TAnimal for Animal {
+    fn get_species(this): Species {
+        return this.species;
+    }
+
+    fn speak(this) {}
+
+    fn interact(this, other: Animal): Animal {
+        return this;
+    }
+}
+
+impl Animal {
+    public fn new(species: Species): Animal {
+        return Animal { species };
+    }
+}
