@@ -1,15 +1,17 @@
 ## todo
+- [x] variable declaration
+- [x] function declaration
+- [x] blocks
+- [x] loops
+- [x] control flow
 - [x] structs
-    - [x] struct declaration
-    - [x] struct initialization
-- [x] actually parse numeric types properly
-- [x] implementations
-    - [x] create implementations
-    - [x] property access
-    - [x] function access
+- [x] impl/associated functions/variables
+- [x] associated field/function access
 - [x] enums
 - [x] traits
 - [x] generics
+- [x] custom types
+- [x] references
 - [ ] function types
 - [ ] arrays (fixed length + vector)
 - [ ] operator overloading???

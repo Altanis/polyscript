@@ -77,6 +77,10 @@ pub enum NodeKind {
         type_annotation: Box<Node>,
         initializer: Option<Box<Node>>,
     },
+    FunctionExpression {
+        signature: Box<Node>,
+        body: Box<Node>
+    },
     
     // STRUCTS //
     StructDeclaration {
@@ -151,7 +155,12 @@ pub enum NodeKind {
     },
     TypeDeclaration {
         name: String,
+        generic_parameters: Vec<Node>,
         value: Box<Node>,
+    },
+    FunctionPointer {
+        params: Vec<Node>,
+        return_type: Option<Box<Node>>
     },
 
     // PROGRAM //
@@ -465,6 +474,15 @@ impl Node {
                 Ok(())
             }
 
+            NodeKind::FunctionExpression {
+                signature,
+                body
+            } => {
+                write!(f, "{}", signature)?;
+                write!(f, " ")?;
+                body.fmt_with_indent(f, indent)
+            }
+
             NodeKind::StructDeclaration {
                 name,
                 generic_parameters,
@@ -552,9 +570,22 @@ impl Node {
 
                 Ok(())
             }
-            NodeKind::TypeDeclaration { name, value } => {
+            NodeKind::TypeDeclaration { name, generic_parameters, value } => {
                 write!(f, "{}", "type ".purple())?;
-                write!(f, "{} = ", name)?;
+                write!(f, "{}", name)?;
+                
+                if !generic_parameters.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_parameters.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
+                write!(f, "= ")?;
                 write!(f, "{}", value)
             }
             NodeKind::Error => {
@@ -602,6 +633,23 @@ impl Node {
             },
             NodeKind::GenericType { type_annotation } => {
                 write!(f, "{}", type_annotation)
+            }
+            NodeKind::FunctionPointer { params, return_type } => {
+                write!(f, "{}{}", indent_str, "fn".bright_blue())?;
+                write!(f, "(")?;
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    param.fmt_with_indent(f, 0)?;
+                }
+                write!(f, ")")?;
+
+                if let Some(return_type) = return_type {
+                    write!(f, ": {}", return_type)?;
+                }
+
+                Ok(())
             }
         }
     }

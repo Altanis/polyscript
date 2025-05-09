@@ -336,6 +336,9 @@ impl Parser {
                     span: span.set_end_from_span(self.previous().get_span())
                 })
             },
+            TokenKind::Keyword(KeywordKind::Fn) => {
+                self.parse_function_expression()
+            },
             _ => {
                 let pos = token.get_span().start_pos;
                 Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())))
@@ -496,6 +499,36 @@ impl Parser {
                     span: span.set_end_from_span(self.previous().get_span())
                 })
             },
+            TokenKind::Keyword(KeywordKind::Fn) => {
+                let mut params = vec![];
+
+                self.consume(TokenKind::OpenParenthesis)?;
+                loop {
+                    params.push(self.parse_type()?);
+                    if self.peek().get_token_kind() == TokenKind::Comma {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.consume(TokenKind::CloseParenthesis)?;
+
+                let mut return_type = None;
+
+                if self.peek().get_token_kind() == TokenKind::Colon {
+                    self.advance();
+                    return_type = Some(Box::new(self.parse_type()?));
+                }
+
+
+                Ok(Node {
+                    kind: NodeKind::FunctionPointer {
+                        params,
+                        return_type
+                    },
+                    span: span.set_end_from_span(self.previous().get_span())
+                })
+            },
             _ => {
                 let position = type_reference.get_span().end_pos;
                 Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected a type reference, instead found {:?}.", type_reference.get_token_kind())))
@@ -504,36 +537,28 @@ impl Parser {
     }
 
     fn parse_function_declaration(&mut self) -> Result<Node, ParserError> {
-        let fn_signature_span = self.create_span_from_current_token();
         let fn_span = self.create_span_from_current_token();
 
-        self.advance();
-
-        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
-        let generic_parameters = self.parse_generic_parameter_list()?;
-        let parameters = self.parse_function_parameter_list()?;
-
-        let mut return_type = None;
-        if self.peek().get_token_kind() == TokenKind::Colon {
-            self.consume(TokenKind::Colon)?;
-            return_type = Some(Box::new(self.parse_type()?));
-        }
-
-        let signature = Box::new(Node {
-            kind: NodeKind::FunctionSignature {
-                name,
-                generic_parameters,
-                parameters,
-                return_type,
-                instance: None
-            },
-            span: fn_signature_span.set_end_from_span(self.previous().get_span())
-        });
-
+        let signature = Box::new(self.parse_function_signature(false, false)?);
         let body = Box::new(self.parse_block()?);
 
         Ok(Node {
             kind: NodeKind::FunctionDeclaration {
+                signature,
+                body
+            },
+            span: fn_span.set_end_from_span(self.previous().get_span())
+        })
+    }
+
+    fn parse_function_expression(&mut self) -> Result<Node, ParserError> {
+        let fn_span = self.create_span_from_current_token();
+        
+        let signature = Box::new(self.parse_function_signature(true, false)?);
+        let body = Box::new(self.parse_block()?);
+
+        Ok(Node {
+            kind: NodeKind::FunctionExpression {
                 signature,
                 body
             },
@@ -1130,7 +1155,7 @@ impl Parser {
 
         self.consume(TokenKind::OpenBrace)?;
         while self.peek().get_token_kind() != TokenKind::CloseBrace {
-            signatures.push(self.parse_function_signature()?);
+            signatures.push(self.parse_function_signature(false, true)?);
             self.consume(TokenKind::Semicolon)?;
         }
         self.consume(TokenKind::CloseBrace)?;
@@ -1144,13 +1169,25 @@ impl Parser {
         })
     }
 
-    fn parse_function_signature(&mut self) -> Result<Node, ParserError> {
+    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool) -> Result<Node, ParserError> {
         let span = self.create_span_from_current_token();
-
         self.consume(TokenKind::Keyword(KeywordKind::Fn))?;
-        let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+
+        let name = if !anonymous {
+            self.consume(TokenKind::Identifier)?.get_value().to_string()
+        } else {
+            String::new()
+        };
+
         let generic_parameters = self.parse_generic_parameter_list()?;
-        let (parameters, instance) = self.parse_associated_function_parameter_list()?;
+
+        let (parameters, instance) = if associated_fn {
+            let (params, has_instance) = self.parse_associated_function_parameter_list()?;
+            (params, Some(has_instance))
+        } else {
+            (self.parse_function_parameter_list()?, None)
+        };
+
         let mut return_type = None;
 
         if self.peek().get_token_kind() == TokenKind::Colon {
@@ -1164,7 +1201,7 @@ impl Parser {
                 generic_parameters,
                 parameters,
                 return_type,
-                instance: Some(instance)
+                instance
             },
             span: span.set_end_from_span(self.previous().get_span())
         })
@@ -1175,6 +1212,7 @@ impl Parser {
         self.advance();
 
         let name = self.consume(TokenKind::Identifier)?.get_value().to_string();
+        let generic_parameters = self.parse_generic_parameter_list()?;
         self.consume(TokenKind::Operator(Operation::Assign))?;
         let value = Box::new(self.parse_type()?);
         self.consume(TokenKind::Semicolon)?;
@@ -1182,6 +1220,7 @@ impl Parser {
         Ok(Node {
             kind: NodeKind::TypeDeclaration {
                 name,
+                generic_parameters,
                 value
             },
             span: span.set_end_from_span(self.previous().get_span())
