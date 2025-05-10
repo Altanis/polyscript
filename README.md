@@ -12,10 +12,7 @@
 - [x] generics
 - [x] custom types
 - [x] references
-- [ ] function types
-- [ ] arrays (fixed length + vector)
-- [ ] operator overloading???
-- [ ] struct extension
+- [x] function types
 - [ ] refactor parser/ast for consistency
 - [ ] refactor lexer/token for consistency
 - [ ] fix all error formats
@@ -27,4 +24,15 @@ NOTE: stdlib should contain:
 
 NOTE: Trailing commas are NOT allowed.
 
-use lambdarrow for =>
+NOTE: Builtin types will eventually be eliminated and implemented by stdlib in this way:
+    # traits.ps
+        ```
+        trait TAddable {
+            fn add(this, other: Self): Self;
+        }
+        ```
+    # int.ps
+        ```
+        type int = __BUILTIN_INTEGER__;
+        impl TAddable for int { ... }
+        ```
