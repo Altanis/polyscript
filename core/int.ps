@@ -1,0 +1,214 @@
+type int = __BUILTIN_INTEGER__;
+
+impl TClonable for int {
+    fn clone(&self) -> Self {
+        return *self;
+    }
+}
+
+impl TCopyable for int {}
+
+impl TEquatable for int {
+    fn equate(&self, other: &Self) -> bool {
+        return *self == *other;
+    }
+}
+
+impl TOrderable for int {
+    fn order(&self, other: &Self) -> Ordering {
+        if *self < *other {
+            return Ordering::Less;
+        } else if *self > *other {
+            return Ordering::Greater;
+        } else {
+            return Ordering::Equal;
+        }
+    }
+}
+
+impl TDefault for int {
+    fn default() -> Self {
+        return 0;
+    }
+}
+
+impl TBitwiseNegate for int {
+    fn negate(this: Self) -> Self {
+        return ~this;
+    }
+}
+
+impl TIncrement for int {
+    fn pre_increment(&mut self) -> &mut Self {
+        *self += 1;
+        return self;
+    }
+
+    fn post_increment(&mut self) -> &mut Self {
+        let old = *self;
+        *self += 1;
+        return old;
+    }
+}
+
+impl TDecrement for int {
+    fn pre_decrement(&mut self) -> &mut Self {
+        *self -= 1;
+        return self;
+    }
+
+    fn post_decrement(&mut self) -> &mut Self {
+        let old = *self;
+        *self -= 1;
+        return old;
+    }
+}
+
+impl TPlus for int {
+    fn add(this: Self, other: Self) -> Self {
+        return this + other;
+    }
+}
+
+impl TMinus for int {
+    fn sub(this: Self, other: Self) -> Self {
+        return this - other;
+    }
+}
+
+impl TMul for int {
+    fn mul(this: Self, other: Self) -> Self {
+        return this * other;
+    }
+}
+
+impl TExp for int {
+    fn exp(this: Self, other: Self) -> Self {
+        return this ** other;
+    }
+}
+
+impl TDiv for int {
+    fn div(this: Self, other: Self) -> Self {
+        return this / other;
+    }
+}
+
+impl TMod for int {
+    fn mod(this: Self, other: Self) -> Self {
+        return this % other;
+    }
+}
+
+impl TBitwiseAnd for int {
+    fn bitwise_and(this: Self, other: Self) -> Self {
+        return this & other;
+    }
+}
+
+impl TBitwiseOr for int {
+    fn bitwise_or(this: Self, other: Self) -> Self {
+        return this | other;
+    }
+}
+
+impl TBitwiseXor for int {
+    fn bitwise_xor(this: Self, other: Self) -> Self {
+        return this ^ other;
+    }
+}
+
+impl TRightBitShift for int {
+    fn right_bit_shift(this: Self, other: Self) -> Self {
+        return this >> other;
+    }
+}
+
+impl TLeftBitShift for int {
+    fn left_bit_shift(this: Self, other: Self) -> Self {
+        return this << other;
+    }
+}
+
+impl TAssign for int {
+    fn assign(this: Self, other: Self) -> Self {
+        return other;
+    }
+}
+
+impl TPlusEq for int {
+    fn plus_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self += *other;
+        return self;
+    }
+}
+
+impl TMinusEq for int {
+    fn minus_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self -= *other;
+        return self;
+    }
+}
+
+impl TMulEq for int {
+    fn mul_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self *= *other;
+        return self;
+    }
+}
+
+impl TExpEq for int {
+    fn exp_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self **= *other;
+        return self;
+    }
+}
+
+impl TDivEq for int {
+    fn div_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self /= *other;
+        return self;
+    }
+}
+
+impl TModEq for int {
+    fn mod_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self %= *other;
+        return self;
+    }
+}
+
+impl TBitwiseAndEq for int {
+    fn bitwise_and_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self &= *other;
+        return self;
+    }
+}
+
+impl TBitwiseOrEq for int {
+    fn bitwise_or_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self |= *other;
+        return self;
+    }
+}
+
+impl TBitwiseXorEq for int {
+    fn bitwise_xor_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self ^= *other;
+        return self;
+    }
+}
+
+impl TRightBitShiftEq for int {
+    fn right_bit_shift_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self >>= *other;
+        return self;
+    }
+}
+
+impl TLeftBitShiftEq for int {
+    fn left_bit_shift_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self <<= *other;
+        return self;
+    }
+}

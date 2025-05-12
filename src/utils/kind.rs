@@ -17,10 +17,11 @@ pub const FIELD_ACCESS_TOKEN: char = '.';
 
 pub const COMMENT_TOKEN: char = '#';
 
-pub const INT_TYPE: &str = "int";
-pub const FLOAT_TYPE: &str = "float";
-pub const BOOL_TYPE: &str = "bool";
-pub const STRING_TYPE: &str = "string";
+pub const INT_TYPE: &str = "__BUILTIN_INTEGER__";
+pub const FLOAT_TYPE: &str = "__BUILTIN_FLOAT__";
+pub const BOOL_TYPE: &str = "__BUILTIN_BOOL__";
+pub const STRING_TYPE: &str = "__BUILTIN_STRING__";
+pub const CHAR_TYPE: &str = "__BUILTIN_CHAR__";
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
@@ -316,6 +317,7 @@ pub enum KeywordKind {
     Float,
     String,
     Bool,
+    Char,
     If,
     Else,
     While,
@@ -365,16 +367,25 @@ pub enum TokenKind {
     EndOfFile,
 }
 
-pub const SYNC_TOKENS: [TokenKind; 9] = [
+pub const SYNC_TOKENS: [TokenKind; 16] = [
     TokenKind::Keyword(KeywordKind::If),
     TokenKind::Keyword(KeywordKind::For),
     TokenKind::Keyword(KeywordKind::While),
     TokenKind::Keyword(KeywordKind::Return),
     TokenKind::Keyword(KeywordKind::Break),
     TokenKind::Keyword(KeywordKind::Continue),
+
     TokenKind::Keyword(KeywordKind::Let),
     TokenKind::Keyword(KeywordKind::Const),
     TokenKind::Keyword(KeywordKind::Fn),
+    TokenKind::Keyword(KeywordKind::Struct),
+    TokenKind::Keyword(KeywordKind::Enum),
+    TokenKind::Keyword(KeywordKind::Impl),
+    TokenKind::Keyword(KeywordKind::Trait),
+    TokenKind::Keyword(KeywordKind::Type),
+
+    TokenKind::Keyword(KeywordKind::Public),
+    TokenKind::Keyword(KeywordKind::Private),
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -483,6 +494,7 @@ impl std::fmt::Display for Token {
                 KeywordKind::Float => "Keyword::Float".cyan(),
                 KeywordKind::String => "Keyword::String".cyan(),
                 KeywordKind::Bool => "Keyword::Bool".cyan(),
+                KeywordKind::Char => "Keyword::Char".cyan(),
                 KeywordKind::If => "Keyword::If".yellow(),
                 KeywordKind::Else => "Keyword::Else".yellow(),
                 KeywordKind::While => "Keyword::While".yellow(),
@@ -524,4 +536,16 @@ impl std::fmt::Display for Token {
             self.span
         )
     }
+}
+
+pub enum SymbolKind {
+    
+}
+
+#[derive(Debug, Clone)]
+pub struct Symbol {
+    name: String,
+    kind: SymbolKind,
+    mutable: bool,
+    span: Span
 }

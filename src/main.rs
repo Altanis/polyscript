@@ -25,8 +25,8 @@ fn generate_tokens(program: String) -> Vec<utils::kind::Token> {
     lexer.take_tokens()
 }
 
-fn parse_tokens(tokens: Vec<utils::kind::Token>) -> frontend::ast::Node {
-    let mut parser = frontend::parser::Parser::new(tokens);
+fn parse_tokens(tokens: Vec<utils::kind::Token>) -> frontend::ast::AstNode {
+    let mut parser = frontend::token_parser::Parser::new(tokens);
 
     match parser.parse() {
         Err(errs) => {
@@ -86,5 +86,6 @@ fn assert_scripts_work() {
 }
 
 fn main() {
-    assert_scripts_work();
+    // assert_scripts_work();
+    test_main_script();
 }

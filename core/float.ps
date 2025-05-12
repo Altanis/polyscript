@@ -1,0 +1,143 @@
+type int = __BUILTIN_FLOAT__;
+
+impl TClonable for float {
+    fn clone(&self) -> Self {
+        return *self;
+    }
+}
+
+impl TCopyable for float {}
+
+impl TEquatable for float {
+    fn equate(&self, other: &Self) -> bool {
+        return *self == *other;
+    }
+}
+
+impl TOrderable for float {
+    fn order(&self, other: &Self) -> Ordering {
+        if *self < *other {
+            return Ordering::Less;
+        } else if *self > *other {
+            return Ordering::Greater;
+        } else {
+            return Ordering::Equal;
+        }
+    }
+}
+
+impl TDefault for float {
+    fn default() -> Self {
+        return 0;
+    }
+}
+
+impl TIncrement for float {
+    fn pre_increment(&mut self) -> &mut Self {
+        *self += 1.0;
+        return self;
+    }
+
+    fn post_increment(&mut self) -> &mut Self {
+        let old = *self;
+        *self += 1.0;
+        return old;
+    }
+}
+
+impl TDecrement for float {
+    fn pre_decrement(&mut self) -> &mut Self {
+        *self -= 1.0;
+        return self;
+    }
+
+    fn post_decrement(&mut self) -> &mut Self {
+        let old = *self;
+        *self -= 1.0;
+        return old;
+    }
+}
+
+impl TPlus for float {
+    fn add(this: Self, other: Self) -> Self {
+        return this + other;
+    }
+}
+
+impl TMinus for float {
+    fn sub(this: Self, other: Self) -> Self {
+        return this - other;
+    }
+}
+
+impl TMul for float {
+    fn mul(this: Self, other: Self) -> Self {
+        return this * other;
+    }
+}
+
+impl TExp for float {
+    fn exp(this: Self, other: Self) -> Self {
+        return this ** other;
+    }
+}
+
+impl TDiv for float {
+    fn div(this: Self, other: Self) -> Self {
+        return this / other;
+    }
+}
+
+impl TMod for float {
+    fn mod(this: Self, other: Self) -> Self {
+        return this % other;
+    }
+}
+
+impl TAssign for float {
+    fn assign(this: Self, other: Self) -> Self {
+        return other;
+    }
+}
+
+impl TPlusEq for float {
+    fn plus_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self += *other;
+        return self;
+    }
+}
+
+impl TMinusEq for float {
+    fn minus_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self -= *other;
+        return self;
+    }
+}
+
+impl TMulEq for float {
+    fn mul_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self *= *other;
+        return self;
+    }
+}
+
+impl TExpEq for float {
+    fn exp_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self **= *other;
+        return self;
+    }
+}
+
+impl TDivEq for float {
+    fn div_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self /= *other;
+        return self;
+    }
+}
+
+impl TModEq for float {
+    fn mod_eq(&mut self, other: &mut Self) -> &mut Self {
+        *self %= *other;
+        return self;
+    }
+}

@@ -345,6 +345,7 @@ impl Lexer {
             FLOAT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
             BOOL_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
             STRING_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::String), span.set_end_from_values(self.index, self.line, self.column))),
+            CHAR_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Char), span.set_end_from_values(self.index, self.line, self.column))),
             LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
             CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
             STRUCT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Struct), span.set_end_from_values(self.index, self.line, self.column))),
@@ -523,14 +524,13 @@ impl Lexer {
                 Err(LexerError::UnterminatedString(self.line, self.column))
             },
             CHAR_DELIMITER => {
-                self.consume()?;
                 let c = self.consume()?;
 
                 if c == '\\' {
                     let ch = self.parse_escape_char()?;
                     symbol_buffer.push(ch);
                 } else if c != CHAR_DELIMITER {
-                    symbol_buffer.push(self.consume()?);
+                    symbol_buffer.push(c);
                 } else {
                     return Err(LexerError::InvalidChar(self.line, self.column));
                 }

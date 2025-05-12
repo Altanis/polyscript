@@ -1,0 +1,141 @@
+enum Ordering {
+    Greater,
+    Equal,
+    Lesser
+}
+
+trait TClonable {
+    fn clone(&this): Self;
+}
+
+trait TCopyable {}
+
+trait TEquatable {
+    fn equate(&self, other: &Self): bool;
+}
+
+trait TOrderable {
+    fn order(&self, other: &Self): Ordering;
+}
+
+trait TDefault {
+    fn default(): Self;
+}
+
+trait TNot {
+    fn not(this): Self;
+}
+
+trait TBitwiseNegate {
+    fn negate(this): Self;
+}
+
+trait TIncrement {
+    fn pre_increment(&mut this): &mut Self;
+    fn post_increment(&mut this): &mut Self;
+}
+
+trait TDecrement {
+    fn pre_decrement(&mut this): &mut Self;
+    fn post_decrement(&mut this): &mut Self;
+}
+
+trait TPlus {
+    fn add(this, other: Self): Self;
+}
+
+trait TMinus {
+    fn sub(this, other: Self): Self;
+}
+
+trait TMul {
+    fn mul(this, other: Self): Self;
+}
+
+trait TExp {
+    fn exp(this, other: Self): Self;
+}
+
+trait TDiv {
+    fn div(this, other: Self): Self;
+}
+
+trait TMod {
+    fn mod(this, other: Self): Self;
+}
+
+trait TBitwiseAnd {
+    fn bitwise_and(this, other: Self): Self;
+}
+
+trait TBitwiseOr {
+    fn bitwise_or(this, other: Self): Self;
+}
+
+trait TBitwiseXor {
+    fn bitwise_xor(this, other: Self): Self;
+}
+
+trait TRightBitShift {
+    fn right_bit_shift(this, other: Self): Self;
+}
+
+trait TLeftBitShift {
+    fn left_bit_shift(this, other: Self): Self;
+}
+
+trait TAssign {
+    fn assign(this, other: Self): Self;
+}
+
+trait TPlusEq {
+    fn plus_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TMinusEq {
+    fn minus_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TMulEq {
+    fn mul_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TExpEq {
+    fn exp_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TDivEq {
+    fn div_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TModEq {
+    fn mod_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TBitwiseAndEq {
+    fn bitwise_and_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TBitwiseOrEq {
+    fn bitwise_or_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TBitwiseXorEq {
+    fn bitwise_xor_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TRightBitShiftEq {
+    fn right_bit_shift_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TLeftBitShiftEq {
+    fn left_bit_shift_eq(&mut this, other: &mut Self): &mut Self;
+}
+
+trait TAnd {
+    fn and(this, other: Self): Self;
+}
+
+trait TOr {
+    fn or(this, other: Self): Self;
+}
