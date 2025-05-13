@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use colored::*;
+
+use super::error::ParserError;
 
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
@@ -538,14 +542,75 @@ impl std::fmt::Display for Token {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum SymbolKind {
-    
+    Variable,
+    Function,
+    Struct,
+    Trait,
+    Enum,
+    TypeAlias
 }
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
     name: String,
     kind: SymbolKind,
+    type_info: TypeInfo,
     mutable: bool,
-    span: Span
+    span: Span,
+    public: Option<bool>,
+    generic_parameters: Vec<TypeInfo>
+}
+
+#[derive(Debug, Clone)]
+struct TypeInfo {
+    base_type: String,
+    generic_parameters: Vec<TypeInfo>,
+    function_data: Option<FunctionTypeData>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionTypeData {
+    params: Vec<TypeInfo>,
+    return_type: Box<TypeInfo>,
+}
+
+struct SymbolTable {
+    scopes: Vec<HashMap<String, Symbol>>,
+    current_scope: usize
+}
+
+impl SymbolTable {
+    fn new() -> SymbolTable {
+        SymbolTable {
+            scopes: vec![HashMap::new()],
+            current_scope: 0
+        }
+    }
+
+        fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+        self.current_scope += 1;
+    }
+
+    fn exit_scope(&mut self) {
+        self.scopes.pop();
+        self.current_scope = self.scopes.len().saturating_sub(1);
+    }
+
+    fn add_symbol(&mut self, symbol: Symbol) -> Result<(), ParserError> {
+        for scope in self.scopes.iter() {
+            let found_symbol = scope.iter().find(|(k, _)| **k == symbol.name);
+            if let Some((_, found_symbol)) = found_symbol {
+                return Err(ParserError::AlreadyDeclared(
+                    symbol.span.start_pos.line, 
+                    symbol.span.start_pos.column, 
+                    format!("Attempted to create ")    
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
