@@ -1,13 +1,14 @@
 use indexmap::IndexMap;
 
-use crate::utils::{error::ParserError, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
+use crate::utils::{error::{Error, ErrorKind}, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
 
 use super::ast::{AstNode, AstNodeKind};
 
 pub struct Parser {
+    lined_source: Vec<String>,
     tokens: Vec<Token>,
     current: usize,
-    errors: Vec<ParserError>
+    errors: Vec<Error>
 }
 
 impl Parser {
@@ -45,13 +46,26 @@ impl Parser {
             false
         }
     }
+
+    /// Generates an Error struct based on the position of the parser.
+    fn generate_error(&self, kind: ErrorKind, span: Span) -> Box<Error> {
+        let span = span.set_end_from_span(self.previous().get_span());
+        Box::new(Error::new(kind, span, self.lined_source[span.end_pos.line - 1].clone()))
+    }
     
-    fn consume(&mut self, token_type: TokenKind) -> Result<&Token, ParserError> {
-        if self.peek().get_token_kind() == token_type {
+    fn consume(&mut self, token_type: TokenKind) -> Result<&Token, Box<Error>> {
+        let peeked = self.peek();
+
+        if peeked.get_token_kind() == token_type {
             Ok(self.advance())
         } else {
-            let position = self.peek().get_span().start_pos;
-            Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected {:?}, instead found {:?}.", token_type, self.peek().get_token_kind())))
+            let span = self.peek().get_span();
+            return Err(self.generate_error(
+                ErrorKind::UnexpectedToken(
+                    peeked.get_value().to_string(), format!("{}", peeked.get_token_kind()), format!("a token of type {}", token_type)
+                ),
+                span
+            ))
         }
     }
 
@@ -82,9 +96,9 @@ impl Parser {
         }
     }
 
-    fn spanned_node<F>(&mut self, builder: F) -> Result<AstNode, ParserError>
+    fn spanned_node<F>(&mut self, builder: F) -> Result<AstNode, Box<Error>>
     where
-        F: FnOnce(&mut Self) -> Result<AstNodeKind, ParserError>,
+        F: FnOnce(&mut Self) -> Result<AstNodeKind, Box<Error>>,
     {
         let start_span = self.peek().get_span();
         let initial = Span {
@@ -102,11 +116,11 @@ impl Parser {
 }
 
 impl Parser {
-    fn parse_expression(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_expression(&mut self) -> Result<AstNode, Box<Error>> {
         self.parse_precedence(Operation::Assign.binding_power().0)
     }
 
-    fn parse_precedence(&mut self, min_bp: u8) -> Result<AstNode, ParserError> {
+    fn parse_precedence(&mut self, min_bp: u8) -> Result<AstNode, Box<Error>> {
         let mut lhs = self.parse_prefix()?;
 
         loop {
@@ -191,15 +205,21 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_prefix(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_prefix(&mut self) -> Result<AstNode, Box<Error>> {
         let token = self.peek();
         let span = self.create_span_from_current_token();
 
         match token.get_token_kind() {
             TokenKind::Operator(operator) => {
                 if !operator.is_unary() {
-                    let pos = token.get_span().start_pos;
-                    return Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())));
+                    return Err(self.generate_error(
+                        ErrorKind::UnexpectedToken(
+                            token.get_value().to_string(),
+                            format!("{}", token.get_token_kind()),
+                            "a unary operator".to_string()
+                        ),
+                        span
+                    ));
                 }
 
                 let _ = self.advance();
@@ -235,25 +255,25 @@ impl Parser {
                     if numeric_literal.starts_with("0b") || numeric_literal.starts_with("0B") {
                         let without_prefix = &numeric_literal[2..];
                         let int_value = u64::from_str_radix(without_prefix, 2)
-                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                            .unwrap_or_else(|_| panic!("The lexer made an error tokenizing token {:?}.", token));
                         (true, int_value as f64)
                     } else if numeric_literal.starts_with("0o") || numeric_literal.starts_with("0O") {
                         let without_prefix = &numeric_literal[2..];
                         let int_value = u64::from_str_radix(without_prefix, 8)
-                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                            .unwrap_or_else(|_| panic!("The lexer made an error tokenizing token {:?}.", token));
                         (true, int_value as f64)
                     } else if numeric_literal.starts_with("0x") || numeric_literal.starts_with("0X") {
                         let without_prefix = &numeric_literal[2..];
                         let int_value = u64::from_str_radix(without_prefix, 16)
-                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                            .unwrap_or_else(|_| panic!("The lexer made an error tokenizing token {:?}.", token));
                         (true, int_value as f64)
                     } else if numeric_literal.contains('.') || numeric_literal.contains('e') || numeric_literal.contains('E') {
                         let float_value = numeric_literal.parse::<f64>()
-                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                            .unwrap_or_else(|_| panic!("The lexer made an error tokenizing token {:?}.", token));
                         (false, float_value)
                     } else {
                         let int_value = numeric_literal.parse::<u64>()
-                            .map_err(|_| panic!("The lexer made an error tokenizing token {:?}.", token))?;
+                            .unwrap_or_else(|_| panic!("The lexer made an error tokenizing token {:?}.", token));
                         (true, int_value as f64)
                     }
                 };
@@ -358,13 +378,19 @@ impl Parser {
                 self.parse_function_expression()
             },
             _ => {
-                let pos = token.get_span().start_pos;
-                Err(ParserError::UnexpectedToken(pos.line, pos.column, format!("Unexpected token {:?}.", token.get_token_kind())))
+                return Err(self.generate_error(
+                    ErrorKind::UnexpectedToken(
+                        token.get_value().to_string(),
+                        format!("{}", token.get_token_kind()),
+                        "a unary operator, a literal, an identifier, open parentheses, or a function expression".to_string()
+                    ),
+                    span
+                ));
             }
         }
     }
 
-    fn parse_expression_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_expression_statement(&mut self) -> Result<AstNode, Box<Error>> {
         let node = self.parse_expression()?;
         self.consume(TokenKind::Semicolon)?;
         Ok(node)
@@ -372,15 +398,16 @@ impl Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        Parser { 
+    pub fn new(lined_source: Vec<String>, tokens: Vec<Token>) -> Parser {
+        Parser {
+            lined_source,
             tokens, 
             current: 0, 
             errors: vec![]
         }
     }
 
-    pub fn parse(&mut self) -> Result<AstNode, Vec<ParserError>> {
+    pub fn parse(&mut self) -> Result<AstNode, Vec<Error>> {
         let program = self.parse_program();
         if self.errors.is_empty() {
             Ok(program)
@@ -396,7 +423,7 @@ impl Parser {
             match self.parse_statement() {
                 Ok(stmt) => statements.push(stmt),
                 Err(err) => {
-                    self.errors.push(err);
+                    self.errors.push(*err);
                     self.synchronize();
                 }
             }
@@ -416,7 +443,7 @@ impl Parser {
         }
     }
 
-    fn parse_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_statement(&mut self) -> Result<AstNode, Box<Error>> {
         let token = self.peek();
         match token.get_token_kind() {
             TokenKind::Keyword(kind) => self.parse_keyword(kind),
@@ -425,7 +452,7 @@ impl Parser {
         }
     }
 
-    fn parse_keyword(&mut self, kind: KeywordKind) -> Result<AstNode, ParserError> {
+    fn parse_keyword(&mut self, kind: KeywordKind) -> Result<AstNode, Box<Error>> {
         match kind {
             KeywordKind::Let => self.parse_variable_declaration(true),
             KeywordKind::Const => self.parse_variable_declaration(false),
@@ -446,7 +473,7 @@ impl Parser {
         }
     }
 
-    fn parse_block(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_block(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::OpenBrace)?;
             
@@ -463,7 +490,7 @@ impl Parser {
         })
     }
 
-    fn parse_variable_declaration(&mut self, mutable: bool) -> Result<AstNode, ParserError> {
+    fn parse_variable_declaration(&mut self, mutable: bool) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
 
@@ -479,6 +506,10 @@ impl Parser {
                 initializer = Some(Box::new(parser.parse_expression()?));
             }
 
+            if !mutable && initializer.is_none() {
+                return Err(parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span()));
+            }
+
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::VariableDeclaration {
@@ -490,7 +521,7 @@ impl Parser {
         })
     }
 
-    fn parse_type(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_type(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             let type_reference = parser.advance().clone();
             match type_reference.get_token_kind() {
@@ -535,14 +566,17 @@ impl Parser {
                     })
                 },
                 _ => {
-                    let position = type_reference.get_span().end_pos;
-                    Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected a type reference, instead found {:?}.", type_reference.get_token_kind())))
+                    let span = type_reference.get_span();
+                    return Err(parser.generate_error(
+                        ErrorKind::UnexpectedToken(type_reference.get_value().to_string(), format!("{}", type_reference.get_token_kind()), "a type reference".to_string()),
+                        span
+                    ));
                 }
             }
         })
     }
 
-    fn parse_function_declaration(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_function_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             let signature = Box::new(parser.parse_function_signature(false, false)?);
             let body = Box::new(parser.parse_block()?);
@@ -554,7 +588,7 @@ impl Parser {
         })
     }
 
-    fn parse_function_expression(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_function_expression(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             let signature = Box::new(parser.parse_function_signature(true, false)?);
             let body = Box::new(parser.parse_block()?);
@@ -566,26 +600,26 @@ impl Parser {
         })
     }
 
-    fn parse_parameter(&mut self, allow_this: bool, is_first: bool) -> Result<(AstNode, bool), ParserError> {
+    fn parse_parameter(&mut self, allow_this: bool, is_first: bool) -> Result<(AstNode, bool), Box<Error>> {
         let mut is_this_param = false;
 
-        let node = self.spanned_node(|this| {
-            let token = this.advance();
+        let node = self.spanned_node(|parser| {
+            let token = parser.advance().clone();
             match token.get_token_kind() {
                 TokenKind::Operator(Operation::BitwiseAnd) => {
-                    let operator = if this.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut) {
-                        this.advance();
+                    let operator = if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut) {
+                        parser.advance();
                         Operation::MutableAddressOf
                     } else {
                         Operation::ImmutableAddressOf
                     };
 
-                    this.consume(TokenKind::Keyword(KeywordKind::This))?;
+                    parser.consume(TokenKind::Keyword(KeywordKind::This))?;
 
                     if allow_this && is_first {
                         is_this_param = true;
 
-                        let type_annotation = Box::new(this.spanned_node(|_| {
+                        let type_annotation = Box::new(parser.spanned_node(|_| {
                             Ok(AstNodeKind::SelfType(Some(operator)))
                         })?);
 
@@ -595,15 +629,18 @@ impl Parser {
                             initializer: None,
                         })
                     } else {
-                        let position = this.previous().get_span().start_pos;
-                        Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()))
+                        let span = parser.previous().get_span();
+                        return Err(parser.generate_error(
+                            ErrorKind::UnexpectedToken("this".to_string(), "<this>".to_string(), "an identifier".to_string()),
+                            span
+                        ));
                     }
                 },
                 TokenKind::Keyword(KeywordKind::This) => {
                     if allow_this && is_first {
                         is_this_param = true;
 
-                        let type_annotation = Box::new(this.spanned_node(|_| {
+                        let type_annotation = Box::new(parser.spanned_node(|_| {
                             Ok(AstNodeKind::SelfType(None))
                         })?);
 
@@ -613,19 +650,22 @@ impl Parser {
                             initializer: None,
                         })
                     } else {
-                        let position = this.previous().get_span().start_pos;
-                        Err(ParserError::UnexpectedToken(position.line, position.column, "Expected an identifier, instead found `this`.".to_string()))
+                        let span = parser.previous().get_span();
+                        return Err(parser.generate_error(
+                            ErrorKind::UnexpectedToken("this".to_string(), "<this>".to_string(), "an identifier".to_string()),
+                            span
+                        ));
                     }
                 },
                 TokenKind::Identifier => {
                     let name = token.get_value().to_string();
-                    this.consume(TokenKind::Colon)?;
-                    let type_annotation = Box::new(this.parse_type()?);
+                    parser.consume(TokenKind::Colon)?;
+                    let type_annotation = Box::new(parser.parse_type()?);
                     let mut initializer = None;
 
-                    if this.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
-                        this.advance();
-                        initializer = Some(Box::new(this.parse_expression()?));
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                        parser.advance();
+                        initializer = Some(Box::new(parser.parse_expression()?));
                     }
 
                     Ok(AstNodeKind::FunctionParameter {
@@ -635,12 +675,11 @@ impl Parser {
                     })
                 },
                 _ => {
-                    let position = token.get_span().start_pos;
-                    Err(ParserError::UnexpectedToken(
-                        position.line,
-                        position.column,
-                        format!("Expected `this` or an identifier, instead found {:?}.", token.get_token_kind()),
-                    ))
+                    let span = token.get_span();
+                    return Err(parser.generate_error(
+                        ErrorKind::UnexpectedToken(token.get_value().to_string(), format!("{}", token.get_token_kind()), "<this> or an identifier".to_string()),
+                        span
+                    ));
                 }
             }
         })?;
@@ -648,7 +687,7 @@ impl Parser {
         Ok((node, is_this_param))
     }
 
-    fn parse_function_parameter_list(&mut self) -> Result<Vec<AstNode>, ParserError> {
+    fn parse_function_parameter_list(&mut self) -> Result<Vec<AstNode>, Box<Error>> {
         let mut parameters = vec![];
 
         self.consume(TokenKind::OpenParenthesis)?;
@@ -674,7 +713,7 @@ impl Parser {
         Ok(parameters)
     }
 
-    fn parse_associated_function_parameter_list(&mut self) -> Result<(Vec<AstNode>, bool), ParserError> {
+    fn parse_associated_function_parameter_list(&mut self) -> Result<(Vec<AstNode>, bool), Box<Error>> {
         let mut parameters = vec![];
         let mut instance = false;
 
@@ -700,7 +739,7 @@ impl Parser {
         Ok((parameters, instance))
     }
     
-    fn parse_generic_parameter_list(&mut self) -> Result<Vec<AstNode>, ParserError> {
+    fn parse_generic_parameter_list(&mut self) -> Result<Vec<AstNode>, Box<Error>> {
         let mut parameters = vec![];
 
         if self.peek().get_token_kind() != TokenKind::OpenBracket {
@@ -745,7 +784,7 @@ impl Parser {
         Ok(parameters)
     }
 
-    fn parse_generic_types_list(&mut self) -> Result<Vec<AstNode>, ParserError> {
+    fn parse_generic_types_list(&mut self) -> Result<Vec<AstNode>, Box<Error>> {
         let mut types = vec![];
 
         if self.peek().get_token_kind() != TokenKind::OpenBracket {
@@ -774,7 +813,7 @@ impl Parser {
         Ok(types)
     }
 
-    fn parse_selection_statements(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_selection_statements(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let condition = Box::new(parser.parse_expression()?);
@@ -806,7 +845,7 @@ impl Parser {
         })
     }
 
-    fn parse_while_loop(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_while_loop(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
 
@@ -820,7 +859,7 @@ impl Parser {
         })
     }
 
-    fn parse_for_loop(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_for_loop(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             parser.consume(TokenKind::OpenParenthesis)?;
@@ -864,7 +903,7 @@ impl Parser {
         })
     }
 
-    fn parse_return_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_return_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
 
@@ -879,7 +918,7 @@ impl Parser {
         })
     }
 
-    fn parse_throw_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_throw_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
 
@@ -889,7 +928,7 @@ impl Parser {
         })
     }
 
-    fn parse_continue_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_continue_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             parser.consume(TokenKind::Semicolon)?;
@@ -898,7 +937,7 @@ impl Parser {
         })
     }
 
-    fn parse_break_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_break_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             parser.consume(TokenKind::Semicolon)?;
@@ -907,7 +946,7 @@ impl Parser {
         })
     }
 
-    fn parse_struct_declaration(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_struct_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
 
@@ -929,15 +968,18 @@ impl Parser {
         })
     }
 
-    fn parse_struct_field(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_struct_field(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
-            let qualifier_token = parser.advance();
+            let qualifier_token = parser.advance().clone();
             let qualifier = match qualifier_token.get_token_kind() {
                 TokenKind::Keyword(KeywordKind::Public) => QualifierKind::Public,
                 TokenKind::Keyword(KeywordKind::Private) => QualifierKind::Private,
                 _ => {
-                    let position = qualifier_token.get_span().end_pos;
-                    return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected a type reference, instead found {:?}.", qualifier_token.get_token_kind())));
+                    let span = qualifier_token.get_span();
+                    return Err(parser.generate_error(
+                        ErrorKind::UnexpectedToken(qualifier_token.get_value().to_string(), format!("{}", qualifier_token.get_token_kind()), "a type reference".to_string()),
+                        span
+                    ));
                 }
             };
 
@@ -954,7 +996,7 @@ impl Parser {
         })
     }
 
-    fn parse_impl_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_impl_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let generic_parameters = parser.parse_generic_parameter_list()?;
@@ -994,9 +1036,12 @@ impl Parser {
                 match parser.peek().get_token_kind() {
                     TokenKind::Keyword(KeywordKind::Const) => associated_constants.push(parser.parse_associated_constant_declaration(qualifier)?),
                     TokenKind::Keyword(KeywordKind::Fn) => associated_functions.push(parser.parse_associated_function_declaration(qualifier)?),
-                    _ => {
-                        let position = parser.previous().get_span().start_pos;
-                        return Err(ParserError::UnexpectedToken(position.line, position.column, format!("Expected an associated function or constant, found {:?}.", parser.peek().get_token_kind())));
+                    kind => {
+                        let span = parser.previous().get_span();
+                        return Err(parser.generate_error(
+                            ErrorKind::UnexpectedToken(parser.peek().get_value().to_string(), format!("{}", kind), "an associated function or constant".to_string()),
+                            span
+                        ));
                     }
                 }
             }
@@ -1013,7 +1058,7 @@ impl Parser {
         })
     }
 
-    fn parse_associated_constant_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, ParserError> {
+    fn parse_associated_constant_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             let variable_declaration = parser.parse_variable_declaration(false)?;
 
@@ -1023,7 +1068,7 @@ impl Parser {
                 _ => unreachable!()
             };
 
-            let initializer = initializer.ok_or(ParserError::UninitializedConstant(parser.previous().get_span().end_pos.line, parser.previous().get_span().end_pos.column))?;
+            let initializer = initializer.ok_or(parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span()))?;
 
             Ok(AstNodeKind::AssociatedConstant { 
                 qualifier, 
@@ -1034,7 +1079,7 @@ impl Parser {
         })
     }
 
-    fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, ParserError> {
+    fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
@@ -1068,7 +1113,7 @@ impl Parser {
         })
     }
 
-    fn parse_enum_statement(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_enum_statement(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
@@ -1096,7 +1141,7 @@ impl Parser {
         })
     }
 
-    fn parse_trait_declaration(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_trait_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
@@ -1113,7 +1158,7 @@ impl Parser {
         })
     }
 
-    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool) -> Result<AstNode, ParserError> {
+    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::Fn))?;
 
@@ -1148,7 +1193,7 @@ impl Parser {
         })
     }
 
-    fn parse_type_declaration(&mut self) -> Result<AstNode, ParserError> {
+    fn parse_type_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();

@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use colored::*;
 
-use super::error::ParserError;
-
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
 pub const ADD_TOKEN: char = '+';
@@ -484,9 +482,9 @@ impl Token {
     }
 }
 
-impl std::fmt::Display for Token {
+impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let token_type_str = match &self.token_kind {
+        let token_type_str = match self {
             TokenKind::Identifier => "Identifier".cyan(),
             TokenKind::Operator(op) => format!("Operator::{:?}", op).bright_magenta(),
             TokenKind::NumberLiteral(n) => format!("Number::{:?}", n).blue(),
@@ -529,14 +527,20 @@ impl std::fmt::Display for Token {
             TokenKind::CloseBrace => "CloseCurly".dimmed(),
             TokenKind::Comma => "Comma".dimmed(),
             TokenKind::Colon => "Colon".dimmed(),
-            TokenKind::EndOfFile => "END OF FILE".into()
+            TokenKind::EndOfFile => "<EOF>".into()
         };
 
+        write!(f, "{}", token_type_str)
+    }
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{} ({}) at [{}]",
             self.value.bold(),
-            token_type_str,
+            self.get_token_kind(),
             self.span
         )
     }
@@ -599,18 +603,18 @@ impl SymbolTable {
         self.current_scope = self.scopes.len().saturating_sub(1);
     }
 
-    fn add_symbol(&mut self, symbol: Symbol) -> Result<(), ParserError> {
-        for scope in self.scopes.iter() {
-            let found_symbol = scope.iter().find(|(k, _)| **k == symbol.name);
-            if let Some((_, found_symbol)) = found_symbol {
-                return Err(ParserError::AlreadyDeclared(
-                    symbol.span.start_pos.line, 
-                    symbol.span.start_pos.column, 
-                    format!("Attempted to create ")    
-                ));
-            }
-        }
+    // fn add_symbol(&mut self, symbol: Symbol) -> Result<(), ParserError> {
+    //     for scope in self.scopes.iter() {
+    //         let found_symbol = scope.iter().find(|(k, _)| **k == symbol.name);
+    //         if let Some((_, found_symbol)) = found_symbol {
+    //             return Err(ParserError::AlreadyDeclared(
+    //                 symbol.span.start_pos.line, 
+    //                 symbol.span.start_pos.column, 
+    //                 format!("Attempted to create ")    
+    //             ));
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

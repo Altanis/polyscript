@@ -1,30 +1,66 @@
-use thiserror::Error;
+use colored::Colorize;
 
-#[derive(Error, Debug, Clone, PartialEq)]
-pub enum LexerError {
-    #[error("[LEXER_ERROR / UNIDENTIFIED_ERROR] ({0}:{1}): Unrecognized symbol {2}.")]
-    UnidentifiedError(usize, usize, String),
-    #[error("[LEXER_ERROR / UNEXPECTED_EOF] ({0}:{1}): Unexpected end of file while reading token.")]
-    UnexpectedEOF(usize, usize),
-    #[error("[LEXER_ERROR / INVALID_DIGIT] ({0}:{1}): Unexpected digit {2} in a numeric literal.")]
-    InvalidDigit(usize, usize, char),
-    #[error("[LEXER_ERROR / INVALID_ESCAPE_SEQUENCE] ({0}:{1}): Escape sequence {2} is not valid.")]
-    InvalidEscapeSequence(usize, usize, String),
-    #[error("[LEXER_ERROR / UNTERMINATED_STRING] ({0}:{1}): String literal has no ending quote.")]
-    UnterminatedString(usize, usize),
-    #[error("[LEXER_ERROR / INVALID_CHAR] ({0}:{1}): Characters must not be empty nor have more than one character.")]
-    InvalidChar(usize, usize),
-    #[error("[LEXER_ERROR / UNTERMINATED_CHAR] ({0}:{1}): Char literal has no ending quote.")]
-    UnterminatedChar(usize, usize),
+use super::kind::Span;
+
+#[derive(Debug, Clone)]
+pub enum ErrorKind {
+    UnrecognizedSymbol(String),
+    UnexpectedEOF,
+    InvalidDigit(String),
+    InvalidEscapeSequence(String),
+    UnterminatedString,
+    InvalidChar(String),
+    UnterminatedChar,
+    UnexpectedToken(String, String, String),
+    UninitializedConstant,
+    AlreadyDeclared(String)
 }
 
-#[derive(Error, Debug, Clone, PartialEq)]
-pub enum ParserError {
-    #[error("[PARSER_ERROR / UNEXPECTED_TOKEN] ({0}:{1}): {2}")]
-    UnexpectedToken(usize, usize, String),
-    #[error("[PARSER_ERROR / UNINITIALIZED_CONSTANT] ({0}:{1}): A constant must be initialized with a value.")]
-    UninitializedConstant(usize, usize),
-    #[error("[PARSER_ERROR / ALREADY_DECLARED] ({0}:{1}): {2}")]
-    AlreadyDeclared(usize, usize, String)
+impl ErrorKind {
+    fn as_str(&self) -> String {
+        match self {
+            ErrorKind::UnrecognizedSymbol(symbol) => format!("unrecognized symbol {}", symbol),
+            ErrorKind::UnexpectedEOF => "unexpected <eof> while parsing".to_string(),
+            ErrorKind::InvalidDigit(digit) => format!("invalid digit {}", digit),
+            ErrorKind::InvalidEscapeSequence(sequence) => format!("invalid escape sequence {}", sequence),
+            ErrorKind::UnterminatedString => "string left unterminated".to_string(),
+            ErrorKind::InvalidChar(char) => format!("invalid char {}", char),
+            ErrorKind::UnterminatedChar => "unterminated or degenerate char".to_string(),
+            ErrorKind::UnexpectedToken(symbol, found, expected) 
+                => format!("unexpected token: found \"{}\" of type {}, expected {}", symbol, found, expected),
+            ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
+            ErrorKind::AlreadyDeclared(variable) => format!("declared variable {} already exists in scope", variable)
+        }
+    }
 }
 
+#[derive(Debug, Clone)]
+pub struct Error {
+    kind: ErrorKind,
+    span: Span,
+    source_line: String
+}
+
+impl Error {
+    pub fn new(kind: ErrorKind, span: Span, source_line: String) -> Error {
+        Error {
+            kind,
+            span,
+            source_line
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "[{}] {}", "error".red().bold(), self.kind.as_str())?;
+        writeln!(f, "as found in [insert_file_here]:{}:{}", self.span.start_pos.line, self.span.start_pos.column)?;
+
+        writeln!(f, "    {}", self.source_line)?;
+        writeln!(f, "    {}^{}^", " ".repeat(self.span.start_pos.column - 1), "^".repeat(self.span.end_pos.column - self.span.start_pos.column))?;
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for Error {}

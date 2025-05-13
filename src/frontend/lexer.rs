@@ -1,4 +1,4 @@
-use crate::utils::{error::LexerError, kind::*};
+use crate::utils::{error::{Error, ErrorKind}, kind::*};
 
 trait CharClassifier {
     fn is_operation(self) -> bool;
@@ -21,6 +21,8 @@ impl CharClassifier for char {
 }
 
 pub struct Lexer {
+    /// The source program, in lines.
+    lined_source: Vec<String>,
     /// The source program, as characters.
     source: Vec<char>,
     /// The line the lexer is reading.
@@ -51,18 +53,34 @@ impl Lexer {
         self.index += 1;
     }
 
+    /// Generates an Error struct based on the position of the lexer.
+    fn generate_error(&self, kind: ErrorKind, span: Option<Span>) -> Box<Error> {
+        let span = if let Some(span) = span {
+            span.set_end_from_values(self.index, self.line, self.column)
+        } else {
+            Span {
+                start: self.index,
+                end: self.index,
+                start_pos: Position { line: self.line, column: self.column },
+                end_pos: Position { line: self.line, column: self.column }
+            }
+        };
+
+        Box::new(Error::new(kind, span, self.lined_source[span.end_pos.line - 1].clone()))
+    }
+
     /// Peeks at the next character.
-    fn peek(&self) -> Result<char, LexerError> {
-        self.source.get(self.index + 1).ok_or(LexerError::UnexpectedEOF(self.line, self.column)).copied()
+    fn peek(&self) -> Result<char, Box<Error>> {
+        self.source.get(self.index + 1).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
     }
 
     /// Consumes the next character.
-    fn consume(&mut self) -> Result<char, LexerError> {
+    fn consume(&mut self) -> Result<char, Box<Error>> {
         self.next_index();
-        self.source.get(self.index).ok_or(LexerError::UnexpectedEOF(self.line, self.column)).copied()
+        self.source.get(self.index).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
     }
 
-    fn parse_escape_char(&mut self) -> Result<char, LexerError> {
+    fn parse_escape_char(&mut self) -> Result<char, Box<Error>> {
         match self.consume()? {
             'n' => Ok('\n'),
             't' => Ok('\t'),
@@ -81,11 +99,10 @@ impl Lexer {
                     match self.consume()? {
                         c if c.is_ascii_hexdigit() => hex.push(c),
                         c => {
-                            return Err(LexerError::InvalidEscapeSequence(
-                                self.line,
-                                self.column,
-                                format!("\\x{} (invalid char '{}')", hex, c),
-                            ))
+                            return Err(self.generate_error(
+                                ErrorKind::InvalidEscapeSequence(format!("\\x{} (invalid char '{}')", hex, c)),
+                                None
+                            ));
                         }
                     }
                 }
@@ -95,7 +112,10 @@ impl Lexer {
 
             'u' => {
                 if self.consume()? != '{' {
-                    return Err(LexerError::InvalidEscapeSequence(self.line, self.column, "\\u".to_string()));
+                    return Err(self.generate_error(
+                        ErrorKind::InvalidEscapeSequence("\\u (does not have opening brace)".to_string()),
+                        None
+                    ));
                 }
 
                 let mut hex = String::new();
@@ -105,47 +125,50 @@ impl Lexer {
                     }
 
                     if !c.is_ascii_hexdigit() {
-                        return Err(LexerError::InvalidEscapeSequence(
-                            self.line,
-                            self.column,
-                            format!("\\u{{{}}} (invalid char '{}')", hex, c),
+                        return Err(self.generate_error(
+                            ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid char '{}')", hex + &c.to_string(), c)), 
+                            None
                         ));
                     }
 
                     hex.push(c);
 
                     if hex.len() > 6 {
-                        return Err(LexerError::InvalidEscapeSequence(
-                            self.line,
-                            self.column,
-                            format!("Unicode escape too long: \\u{{{}}}", hex),
+                        return Err(self.generate_error(
+                            ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (too long of an escape sequence)", hex)), 
+                            None
                         ));
                     }
                 }
 
                 if hex.is_empty() {
-                    return Err(LexerError::InvalidEscapeSequence(self.line, self.column, "\\u{}".to_string()));
+                    return Err(self.generate_error(
+                        ErrorKind::InvalidEscapeSequence("\\u{}".to_string()), 
+                        None
+                    ));
                 }
 
                 let value = u32::from_str_radix(&hex, 16).unwrap();
                 match char::from_u32(value) {
                     Some(ch) => Ok(ch),
-                    None => Err(LexerError::InvalidEscapeSequence(
-                        self.line,
-                        self.column,
-                        format!("Invalid Unicode scalar: \\u{{{}}}", hex),
+                    None => Err(self.generate_error(
+                        ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid Unicode scalar)", hex)), 
+                        None
                     )),
                 }
             }
 
-            other => Err(LexerError::InvalidEscapeSequence(self.line, self.column, format!("\\{}", other)))
+            other => Err(self.generate_error(
+                ErrorKind::InvalidEscapeSequence(format!("\\{}", other)), 
+                None
+            ))
         }
     }    
 }
 
 impl Lexer {
     /// Parses an operation.
-    fn parse_operator(&mut self) -> Result<Token, LexerError> {
+    fn parse_operator(&mut self) -> Result<Token, Box<Error>> {
         let mut operator = self.source[self.index].to_string();
         let span = Span {
             start: self.index,
@@ -318,12 +341,12 @@ impl Lexer {
                 }
             },
             FIELD_ACCESS_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::FieldAccess), span.set_end_from_values(self.index, self.line, self.column))),
-            _ => Err(LexerError::UnidentifiedError(self.line, self.column, operator))
+            _ => Err(self.generate_error(ErrorKind::UnrecognizedSymbol(operator), Some(span)))
         }
     }    
 
     /// Parses a word.
-    fn parse_word(&mut self) -> Result<Token, LexerError> {
+    fn parse_word(&mut self) -> Result<Token, Box<Error>> {
         let mut word = self.source[self.index].to_string();
         let span = Span {
             start: self.index,
@@ -372,7 +395,7 @@ impl Lexer {
     }
 
     /// Parses a number.
-    fn parse_number(&mut self) -> Result<Token, LexerError> {
+    fn parse_number(&mut self) -> Result<Token, Box<Error>> {
         let mut number_str = String::new();
         let mut has_decimal_point = false;
         let mut has_exponent = false;
@@ -411,7 +434,7 @@ impl Lexer {
 
                     if !has_digits {
                         let invalid_char = self.peek().unwrap_or('\0');
-                        return Err(LexerError::InvalidDigit(self.line, self.column, invalid_char));
+                        return Err(self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
                     }
 
                     let number_type = match base {
@@ -464,7 +487,7 @@ impl Lexer {
 
                 if !exponent_digit_found {
                     let invalid_char = self.peek().unwrap_or('\0');
-                    return Err(LexerError::InvalidDigit(self.line, self.column, invalid_char));
+                    return Err(self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
                 }
             } else {
                 break;
@@ -480,7 +503,7 @@ impl Lexer {
         Ok(Token::new(number_str, TokenKind::NumberLiteral(number_type), span.set_end_from_values(self.index, self.line, self.column)))
     }
 
-    fn parse_symbol(&mut self) -> Result<Token, LexerError> {
+    fn parse_symbol(&mut self) -> Result<Token, Box<Error>> {
         let symbol = self.source[self.index];
         let mut symbol_buffer = symbol.to_string();
 
@@ -521,7 +544,7 @@ impl Lexer {
                     }
                 }
 
-                Err(LexerError::UnterminatedString(self.line, self.column))
+                return Err(self.generate_error(ErrorKind::UnterminatedString, Some(span)));
             },
             CHAR_DELIMITER => {
                 let c = self.consume()?;
@@ -532,17 +555,17 @@ impl Lexer {
                 } else if c != CHAR_DELIMITER {
                     symbol_buffer.push(c);
                 } else {
-                    return Err(LexerError::InvalidChar(self.line, self.column));
+                    return Err(self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span)));
                 }
 
                 if self.consume()? == CHAR_DELIMITER {
                     symbol_buffer.push(CHAR_DELIMITER);
                     Ok(Token::new(symbol_buffer, TokenKind::CharLiteral, span.set_end_from_values(self.index, self.line, self.column)))
                 } else {
-                    Err(LexerError::UnterminatedChar(self.line, self.column))
+                    return Err(self.generate_error(ErrorKind::UnterminatedChar, Some(span)));
                 }
             },
-            _ => Err(LexerError::UnidentifiedError(self.line, self.column, symbol_buffer))
+            _ => return Err(self.generate_error(ErrorKind::UnrecognizedSymbol(symbol.to_string()), Some(span)))
         }
     }
 }
@@ -550,6 +573,7 @@ impl Lexer {
 impl Lexer {
     pub fn new(program: String) -> Lexer {
         Lexer {
+            lined_source: program.split("\n").map(|x| x.to_string()).collect(),
             source: program.chars().collect(),
             line: 1,
             column: 1,
@@ -558,7 +582,7 @@ impl Lexer {
         }
     }
     
-    pub fn tokenize(&mut self) -> Result<(), LexerError> {
+    pub fn tokenize(&mut self) -> Result<(), Box<Error>> {
         while let Some(&char) = self.source.get(self.index) {
 
             if char.is_whitespace() {} 
@@ -596,6 +620,10 @@ impl Lexer {
 
     pub fn get_tokens(&self) -> &Vec<Token> {
         &self.tokens
+    }
+
+    pub fn take_lined_source(&self) -> Vec<String> {
+        self.lined_source.clone()
     }
 
     pub fn take_tokens(self) -> Vec<Token> {
