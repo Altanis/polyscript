@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::utils::kind::{Operation, QualifierKind, Span};
+use crate::utils::kind::*;
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
@@ -20,7 +20,7 @@ pub enum AstNodeKind {
         initializer: Option<Box<AstNode>>,
     },
     
-    // OPERATORS //
+    // OPERATIONS //
     UnaryOperation {
         operator: Operation,
         operand: Box<AstNode>,
@@ -68,6 +68,10 @@ pub enum AstNodeKind {
         return_type: Option<Box<AstNode>>,
         instance: Option<bool>
     },
+    FunctionPointer {
+        params: Vec<AstNode>,
+        return_type: Option<Box<AstNode>>
+    },
     FunctionDeclaration {
         signature: Box<AstNode>,
         body: Box<AstNode>,
@@ -81,7 +85,7 @@ pub enum AstNodeKind {
         signature: Box<AstNode>,
         body: Box<AstNode>
     },
-    
+
     // STRUCTS //
     StructDeclaration {
         name: String,
@@ -122,7 +126,7 @@ pub enum AstNodeKind {
     AssociatedFunction {
         qualifier: QualifierKind,
         signature: Box<AstNode>,
-        body: Box<AstNode>
+        body: Box<AstNode>,
     },
 
     SelfValue,
@@ -144,9 +148,6 @@ pub enum AstNodeKind {
         name: String,
         constraints: Vec<String>
     },
-    GenericType {
-        type_annotation: Box<AstNode>
-    },
 
     // TYPES //
     TypeReference {
@@ -158,21 +159,17 @@ pub enum AstNodeKind {
         generic_parameters: Vec<AstNode>,
         value: Box<AstNode>,
     },
-    FunctionPointer {
-        params: Vec<AstNode>,
-        return_type: Option<Box<AstNode>>
-    },
 
     // PROGRAM //
-    Program(Vec<AstNode>),
-    
-    Error,
+    Program(Vec<AstNode>)
 }
 
 #[derive(Debug, Clone)]
 pub struct AstNode {
     pub kind: AstNodeKind,
     pub span: Span,
+    pub ty: Option<TypeInfo>,
+    pub symbol: Option<Symbol>
 }
 
 impl std::fmt::Display for AstNode {
@@ -198,14 +195,13 @@ impl AstNode {
                     node.fmt_with_indent(f, indent)?;
                     writeln!(f)?;
                 }
-                Ok(())
             }
-            AstNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue()),
-            AstNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue()),
-            AstNodeKind::BooleanLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().magenta()),
-            AstNodeKind::StringLiteral(s) => write!(f, "{}{}", indent_str, format!("\"{s}\"").green()),
-            AstNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red()),
-            AstNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow()),
+            AstNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            AstNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            AstNodeKind::BooleanLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().magenta())?,
+            AstNodeKind::StringLiteral(s) => write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?,
+            AstNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
+            AstNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
             AstNodeKind::VariableDeclaration {
                 mutable,
                 name,
@@ -225,14 +221,13 @@ impl AstNode {
                 if let Some(init) = initializer {
                     write!(f, " = {}", init)?;
                 }
-                Ok(())
             }
             AstNodeKind::UnaryOperation { operator, operand, prefix } => {
                 write!(f, "{}", indent_str)?;
                 if *prefix {
-                    write!(f, "{}{}", operator, operand)
+                    write!(f, "{}{}", operator, operand)?
                 } else {
-                    write!(f, "{}{}", operand, operator)
+                    write!(f, "{}{}", operand, operator)?
                 }
             }
             AstNodeKind::BinaryOperation { operator, left, right } => {
@@ -240,14 +235,14 @@ impl AstNode {
                 left.fmt_with_indent(f, 0)?;
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0)?;
-                write!(f, ")")
+                write!(f, ")")?
             }
             AstNodeKind::ConditionalOperation { operator, left, right } => {
                 write!(f, "{}(", indent_str)?;
                 left.fmt_with_indent(f, 0)?;
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0)?;
-                write!(f, ")")
+                write!(f, ")")?
             }
 
             AstNodeKind::Block(nodes) => {
@@ -262,7 +257,7 @@ impl AstNode {
                     write!(f, "{}", indent_str)?;
                 }
                 write!(f, "{}", " ".repeat(child_indent))?;
-                write!(f, "{}", "}".dimmed())
+                write!(f, "{}", "}".dimmed())?
             }
 
             AstNodeKind::FunctionSignature {
@@ -297,8 +292,6 @@ impl AstNode {
                 if let Some(ret_ty) = return_type {
                     write!(f, ": {}", ret_ty)?;
                 }
-                
-                Ok(())
             }
 
             AstNodeKind::FunctionDeclaration {
@@ -307,7 +300,7 @@ impl AstNode {
             } => {
                 write!(f, "{}", signature)?;
                 write!(f, " ")?;
-                body.fmt_with_indent(f, indent)
+                body.fmt_with_indent(f, indent)?
             }
 
             AstNodeKind::ImplDeclaration {
@@ -341,7 +334,7 @@ impl AstNode {
                 for function in associated_functions {
                     writeln!(f, "    {}", function)?;
                 }
-                write!(f, "{}", "}".dimmed())
+                write!(f, "{}", "}".dimmed())?
             }
 
             AstNodeKind::AssociatedConstant {
@@ -363,8 +356,6 @@ impl AstNode {
                 }
 
                 write!(f, " = {}", initializer)?;
-
-                Ok(())
             }
 
             AstNodeKind::AssociatedFunction {
@@ -380,10 +371,10 @@ impl AstNode {
 
                 write!(f, "{}", signature)?;
                 write!(f, " ")?;
-                body.fmt_with_indent(f, indent)
+                body.fmt_with_indent(f, indent)?
             }
 
-            AstNodeKind::SelfValue => write!(f, "{}this", indent_str),
+            AstNodeKind::SelfValue => write!(f, "{}this", indent_str)?,
             AstNodeKind::SelfType(operation) => {
                 let operation_str = match operation {
                     Some(Operation::ImmutableAddressOf) => "&",
@@ -391,7 +382,7 @@ impl AstNode {
                     _ => ""
                 };
 
-                write!(f, "{}{operation_str}Self", indent_str)
+                write!(f, "{}{operation_str}Self", indent_str)?
             },
 
             AstNodeKind::IfStatement {
@@ -416,7 +407,6 @@ impl AstNode {
                     write!(f, "{}else ", indent_str)?;
                     else_node.fmt_with_indent(f, indent)?;  // Same indent for block
                 }
-                Ok(())
             }
 
             AstNodeKind::ForLoop {
@@ -438,26 +428,26 @@ impl AstNode {
                     inc.fmt_with_indent(f, 0)?;
                 }
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)  // Same indent for block
+                body.fmt_with_indent(f, indent)?  // Same indent for block
             }
 
             AstNodeKind::WhileLoop { condition, body } => {
                 write!(f, "{}while (", indent_str)?;
                 condition.fmt_with_indent(f, 0)?;
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)  // Same indent for block
+                body.fmt_with_indent(f, indent)?  // Same indent for block
             }
 
             AstNodeKind::Return(Some(expr)) => {
                 write!(f, "{}return ", indent_str)?;
-                expr.fmt_with_indent(f, 0)
+                expr.fmt_with_indent(f, 0)?
             }
-            AstNodeKind::Return(None) => write!(f, "{}return", indent_str),
-            AstNodeKind::Break => write!(f, "{}break", indent_str),
-            AstNodeKind::Continue => write!(f, "{}continue", indent_str),
+            AstNodeKind::Return(None) => write!(f, "{}return", indent_str)?,
+            AstNodeKind::Break => write!(f, "{}break", indent_str)?,
+            AstNodeKind::Continue => write!(f, "{}continue", indent_str)?,
             AstNodeKind::Throw(expr) => {
                 write!(f, "{}throw ", indent_str)?;
-                expr.fmt_with_indent(f, 0)
+                expr.fmt_with_indent(f, 0)?
             }
 
             AstNodeKind::FunctionParameter {
@@ -471,7 +461,6 @@ impl AstNode {
                     write!(f, " = ")?;
                     default.fmt_with_indent(f, 0)?;
                 }
-                Ok(())
             }
 
             AstNodeKind::FunctionExpression {
@@ -480,7 +469,7 @@ impl AstNode {
             } => {
                 write!(f, "{}", signature)?;
                 write!(f, " ")?;
-                body.fmt_with_indent(f, indent)
+                body.fmt_with_indent(f, indent)?
             }
 
             AstNodeKind::StructDeclaration {
@@ -508,7 +497,7 @@ impl AstNode {
                     writeln!(f)?;
                 }
                 
-                write!(f, "{}{}", indent_str, "}".dimmed())
+                write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::StructField {
                 qualifier,
@@ -523,8 +512,6 @@ impl AstNode {
 
                 write!(f, "{}", name.yellow())?;
                 write!(f, ": {}", type_annotation)?;
-
-                Ok(())
             }
             AstNodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
@@ -538,7 +525,7 @@ impl AstNode {
                     write!(f, "{}", if i + 1 < fields.len() { "," } else { " " })?;
                 }
             
-                write!(f, "{}{}", indent_str, "}".dimmed())
+                write!(f, "{}{}", indent_str, "}".dimmed())?
             }      
             AstNodeKind::EnumDeclaration { name, variants } => {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
@@ -553,7 +540,7 @@ impl AstNode {
                     writeln!(f)?;
                 }
                 
-                write!(f, "{}{}", indent_str, "}".dimmed())
+                write!(f, "{}{}", indent_str, "}".dimmed())?
             },
             AstNodeKind::TypeReference { type_name, generic_types } => {
                 write!(f, "{}{}", indent_str, type_name.bright_blue())?;
@@ -567,8 +554,6 @@ impl AstNode {
                     }
                     write!(f, "]")?;
                 }
-
-                Ok(())
             }
             AstNodeKind::TypeDeclaration { name, generic_parameters, value } => {
                 write!(f, "{}", "type ".purple())?;
@@ -586,11 +571,7 @@ impl AstNode {
                 }
 
                 write!(f, "= ")?;
-                write!(f, "{}", value)
-            }
-            AstNodeKind::Error => {
-                write!(f, "{}", indent_str)?;
-                write!(f, "{}", "ERROR".red().bold())
+                write!(f, "{}", value)?
             }
             AstNodeKind::FunctionCall { function, arguments } => {
                 write!(f, "{}", indent_str)?;
@@ -602,7 +583,7 @@ impl AstNode {
                     }
                     param.fmt_with_indent(f, 0)?;
                 }
-                write!(f, ")")
+                write!(f, ")")?
             }
             AstNodeKind::TraitDeclaration { name, signatures } => {
                 write!(f, "{}trait {}", indent_str, name.yellow())?;
@@ -613,7 +594,7 @@ impl AstNode {
                     writeln!(f)?;
                 }
                 
-                write!(f, "{}{}", indent_str, "}".dimmed())
+                write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::GenericParameter { name, constraints } => {
                 write!(f, "{}{}", indent_str, name.yellow())?;
@@ -628,12 +609,7 @@ impl AstNode {
                         write!(f, " + ")?;
                     }
                 }
-
-                Ok(())
             },
-            AstNodeKind::GenericType { type_annotation } => {
-                write!(f, "{}", type_annotation)
-            }
             AstNodeKind::FunctionPointer { params, return_type } => {
                 write!(f, "{}{}", indent_str, "fn".bright_blue())?;
                 write!(f, "(")?;
@@ -648,9 +624,19 @@ impl AstNode {
                 if let Some(return_type) = return_type {
                     write!(f, ": {}", return_type)?;
                 }
-
-                Ok(())
             }
         }
+
+        if let Some(ty) = &self.ty {
+            write!(f, " {}", // space before annotation
+                format_args!("[type: {}]", ty.to_string())
+            )?;
+        }
+        // Symbol annotation
+        if let Some(sym) = &self.symbol {
+            write!(f, " [symbol: {}]", sym.name.magenta().bold())?;
+        }
+
+        Ok(())
     }
 }

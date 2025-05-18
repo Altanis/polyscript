@@ -6,14 +6,22 @@
 
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
 
+use backend::semantic_analyzer::SemanticAnalyzer;
+use frontend::ast::AstNode;
+use frontend::token_parser::Parser;
+use utils::kind::Token;
+
+mod backend;
 mod frontend;
 mod utils;
 
 pub const READ_TOKENS: bool = false;
 pub const PARSE_TOKENS: bool = true;
+pub const SEMANTIC_ANALYSIS: bool = true;
 
-fn generate_tokens(program: String) -> (Vec<String>, Vec<utils::kind::Token>) {
+fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
     let mut lexer = frontend::lexer::Lexer::new(program);
     let tokens = lexer.tokenize();
 
@@ -22,11 +30,11 @@ fn generate_tokens(program: String) -> (Vec<String>, Vec<utils::kind::Token>) {
         std::process::exit(1);
     }
 
-    (lexer.take_lined_source(), lexer.take_tokens())
+    lexer.extract()
 }
 
-fn parse_tokens(lined_source: Vec<String>, tokens: Vec<utils::kind::Token>) -> frontend::ast::AstNode {
-    let mut parser = frontend::token_parser::Parser::new(lined_source, tokens);
+fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
+    let mut parser = Parser::new(lined_source, tokens);
 
     match parser.parse() {
         Err(errs) => {
@@ -38,6 +46,21 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<utils::kind::Token>) -> f
             std::process::exit(1);
         },
         Ok(program) => program
+    }
+}
+
+fn analyze_tokens(lined_source: Vec<String>, program: frontend::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
+    let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
+    match analyzer.analyze(program) {
+        Err(errs) => {
+            println!("{} errors emitted... printing:", errs.len());
+            for err in errs {
+                eprintln!("{}", err);
+            }
+
+            std::process::exit(1);
+        },
+        Ok(program) => (analyzer, program)
     }
 }
 
@@ -53,8 +76,17 @@ fn test_main_script() {
     }
 
     if PARSE_TOKENS {
-        let program = parse_tokens(lined_source, tokens);
+        let program = parse_tokens(lined_source.clone(), tokens);
         println!("{}", program);
+
+        if SEMANTIC_ANALYSIS {
+            let (analyzer, program) = analyze_tokens(lined_source, program);
+            println!("--- ANNOTATED AST ---");
+            println!("{}", program);
+
+            println!("--- SYMBOL TABLE ---");
+            println!("{}", analyzer.symbol_table);
+        }
     }
 }
 

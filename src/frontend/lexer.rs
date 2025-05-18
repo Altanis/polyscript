@@ -22,7 +22,7 @@ impl CharClassifier for char {
 
 pub struct Lexer {
     /// The source program, in lines.
-    lined_source: Vec<String>,
+    lines: Vec<String>,
     /// The source program, as characters.
     source: Vec<char>,
     /// The line the lexer is reading.
@@ -66,7 +66,7 @@ impl Lexer {
             }
         };
 
-        Box::new(Error::new(kind, span, self.lined_source[span.end_pos.line - 1].clone()))
+        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
     }
 
     /// Peeks at the next character.
@@ -573,7 +573,7 @@ impl Lexer {
 impl Lexer {
     pub fn new(program: String) -> Lexer {
         Lexer {
-            lined_source: program.split("\n").map(|x| x.to_string()).collect(),
+            lines: program.split("\n").map(|x| x.to_string()).collect(),
             source: program.chars().collect(),
             line: 1,
             column: 1,
@@ -622,11 +622,7 @@ impl Lexer {
         &self.tokens
     }
 
-    pub fn take_lined_source(&self) -> Vec<String> {
-        self.lined_source.clone()
-    }
-
-    pub fn take_tokens(self) -> Vec<Token> {
-        self.tokens
+    pub fn extract(self) -> (Vec<String>, Vec<Token>) {
+        (self.lines, self.tokens)
     }
 }

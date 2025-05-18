@@ -1,11 +1,11 @@
 use indexmap::IndexMap;
 
-use crate::utils::{error::{Error, ErrorKind}, kind::{KeywordKind, Operation, Position, QualifierKind, Span, Token, TokenKind, SYNC_TOKENS}};
+use crate::utils::{error::*, kind::*};
 
 use super::ast::{AstNode, AstNodeKind};
 
 pub struct Parser {
-    lined_source: Vec<String>,
+    lines: Vec<String>,
     tokens: Vec<Token>,
     current: usize,
     errors: Vec<Error>
@@ -50,7 +50,7 @@ impl Parser {
     /// Generates an Error struct based on the position of the parser.
     fn generate_error(&self, kind: ErrorKind, span: Span) -> Box<Error> {
         let span = span.set_end_from_span(self.previous().get_span());
-        Box::new(Error::new(kind, span, self.lined_source[span.end_pos.line - 1].clone()))
+        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), span.start_pos.line))
     }
     
     fn consume(&mut self, token_type: TokenKind) -> Result<&Token, Box<Error>> {
@@ -111,7 +111,7 @@ impl Parser {
         let kind = builder(self)?;
         let finished = initial.set_end_from_span(self.previous().get_span());
 
-        Ok(AstNode { kind, span: finished })
+        Ok(AstNode { kind, span: finished, ty: None, symbol: None })
     }
 }
 
@@ -132,7 +132,9 @@ impl Parser {
                             operator,
                             operand: Box::new(lhs),
                             prefix: false
-                        }
+                        },
+                        ty: None,
+                        symbol: None
                     };
 
                     self.advance();
@@ -173,7 +175,9 @@ impl Parser {
                         }
                     },
                     _ => unreachable!()
-                }
+                },
+                ty: None,
+                symbol: None
             };
         }
 
@@ -198,7 +202,9 @@ impl Parser {
                 kind: AstNodeKind::FunctionCall {
                     function: Box::new(lhs),
                     arguments,
-                }
+                },
+                ty: None,
+                symbol: None
             };
         }
 
@@ -245,6 +251,8 @@ impl Parser {
                         operand,
                         prefix: true
                     },
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::NumberLiteral(_) => {
@@ -281,6 +289,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: if is_integer { AstNodeKind::IntegerLiteral(value as i64) } else { AstNodeKind::FloatLiteral(value) },
                     span: token.get_span(),
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::BooleanLiteral => {
@@ -290,6 +300,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::BooleanLiteral(value),
                     span: token.get_span(),
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::StringLiteral => {
@@ -301,6 +313,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::StringLiteral(value),
                     span: token.get_span(),
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::CharLiteral => {
@@ -312,6 +326,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::CharLiteral(value),
                     span: token.get_span(),
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::Identifier => {
@@ -333,7 +349,9 @@ impl Parser {
                         } else {
                             AstNode {
                                 kind: AstNodeKind::Identifier(name.clone()),
-                                span: name_token.get_span()
+                                span: name_token.get_span(),
+                                ty: None,
+                                symbol: None
                             }
                         };
 
@@ -352,12 +370,16 @@ impl Parser {
                             name,
                             fields
                         },
-                        span: span.set_end_from_span(self.previous().get_span())
+                        span: span.set_end_from_span(self.previous().get_span()),
+                        ty: None,
+                        symbol: None
                     })
                 } else {
                     Ok(AstNode {
                         kind: AstNodeKind::Identifier(name),
                         span,
+                        ty: None,
+                        symbol: None
                     })
                 }
             },
@@ -371,7 +393,9 @@ impl Parser {
                 self.advance();
                 Ok(AstNode {
                     kind: AstNodeKind::SelfValue,
-                    span: span.set_end_from_span(self.previous().get_span())
+                    span: span.set_end_from_span(self.previous().get_span()),
+                    ty: None,
+                    symbol: None
                 })
             },
             TokenKind::Keyword(KeywordKind::Fn) => {
@@ -400,7 +424,7 @@ impl Parser {
 impl Parser {
     pub fn new(lined_source: Vec<String>, tokens: Vec<Token>) -> Parser {
         Parser {
-            lined_source,
+            lines: lined_source,
             tokens, 
             current: 0, 
             errors: vec![]
@@ -440,6 +464,8 @@ impl Parser {
                     column: self.tokens.last().unwrap().get_span().end_pos.column,
                 }
             },
+            ty: None,
+            symbol: None
         }
     }
 
@@ -578,7 +604,7 @@ impl Parser {
 
     fn parse_function_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
-            let signature = Box::new(parser.parse_function_signature(false, false)?);
+            let signature = Box::new(parser.parse_function_signature(false, false, true)?);
             let body = Box::new(parser.parse_block()?);
 
             Ok(AstNodeKind::FunctionDeclaration {
@@ -590,7 +616,7 @@ impl Parser {
 
     fn parse_function_expression(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
-            let signature = Box::new(parser.parse_function_signature(true, false)?);
+            let signature = Box::new(parser.parse_function_signature(true, false, false)?);
             let body = Box::new(parser.parse_block()?);
 
             Ok(AstNodeKind::FunctionExpression {
@@ -793,13 +819,7 @@ impl Parser {
         
         self.consume(TokenKind::OpenBracket)?;
         loop {
-            let node = self.spanned_node(|parser| {
-                let type_annotation = Box::new(parser.parse_type()?);
-                Ok(AstNodeKind::GenericType {
-                    type_annotation
-                })
-            })?;
-
+            let node = self.parse_type()?;
             types.push(node);
 
             if self.peek().get_token_kind() == TokenKind::Comma {
@@ -1100,7 +1120,9 @@ impl Parser {
                     return_type,
                     instance: Some(instance)
                 },
-                span: Span::default()
+                span: Span::default(),
+                ty: None,
+                symbol: None
             });
 
             let body = Box::new(parser.parse_block()?);
@@ -1149,7 +1171,7 @@ impl Parser {
 
             parser.consume(TokenKind::OpenBrace)?;
             while parser.peek().get_token_kind() != TokenKind::CloseBrace {
-                signatures.push(parser.parse_function_signature(false, true)?);
+                signatures.push(parser.parse_function_signature(false, true, true)?);
                 parser.consume(TokenKind::Semicolon)?;
             }
             parser.consume(TokenKind::CloseBrace)?;
@@ -1158,7 +1180,7 @@ impl Parser {
         })
     }
 
-    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool) -> Result<AstNode, Box<Error>> {
+    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool, allowed_generic_parameters: bool) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::Fn))?;
 
@@ -1168,7 +1190,11 @@ impl Parser {
                 String::new()
             };
 
-            let generic_parameters = parser.parse_generic_parameter_list()?;
+            let generic_parameters = if allowed_generic_parameters {
+                parser.parse_generic_parameter_list()?
+            } else {
+                vec![]
+            };
 
             let (parameters, instance) = if associated_fn {
                 let (params, has_instance) = parser.parse_associated_function_parameter_list()?;

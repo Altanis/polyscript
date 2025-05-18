@@ -23,16 +23,3 @@ NOTE: stdlib should contain:
 - traits for common operations (operator overloading maybe)
 
 NOTE: Trailing commas are NOT allowed.
-
-NOTE: Builtin types will eventually be eliminated and implemented by stdlib in this way:
-    # traits.ps
-        ```
-        trait TAddable {
-            fn add(this, other: Self): Self;
-        }
-        ```
-    # int.ps
-        ```
-        type int = __BUILTIN_INTEGER__;
-        impl TAddable for int { ... }
-        ```

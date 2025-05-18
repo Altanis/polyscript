@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use super::kind::Span;
+use super::kind::{Span, TypeInfo};
 
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
@@ -13,7 +13,11 @@ pub enum ErrorKind {
     UnterminatedChar,
     UnexpectedToken(String, String, String),
     UninitializedConstant,
-    AlreadyDeclared(String)
+    UnknownVariable(String),
+    AlreadyDeclared(String),
+    UnknownType,
+    MismatchedTypes(TypeInfo, TypeInfo),
+    BadVariableDeclaration
 }
 
 impl ErrorKind {
@@ -29,7 +33,11 @@ impl ErrorKind {
             ErrorKind::UnexpectedToken(symbol, found, expected) 
                 => format!("unexpected token: found \"{}\" of type {}, expected {}", symbol, found, expected),
             ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
-            ErrorKind::AlreadyDeclared(variable) => format!("declared variable {} already exists in scope", variable)
+            ErrorKind::UnknownVariable(name) => format!("could not find variable \"{}\" in scope", name),
+            ErrorKind::AlreadyDeclared(variable) => format!("attempted to declare {}, but it already exists in scope", variable),
+            ErrorKind::UnknownType => "could not determine type of data at compile-time".to_string(),
+            ErrorKind::MismatchedTypes(t1, t2) => format!("expected two of the same types, instead found {} and {}", t1, t2),
+            ErrorKind::BadVariableDeclaration => "variable must be assigned a type or value upon declaration".to_string()
         }
     }
 }
@@ -38,16 +46,24 @@ impl ErrorKind {
 pub struct Error {
     kind: ErrorKind,
     span: Span,
-    source_line: String
+    source_lines: Vec<(String, usize)>
 }
 
 impl Error {
-    pub fn new(kind: ErrorKind, span: Span, source_line: String) -> Error {
-        Error {
+    pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> Box<Error> {
+        Box::new(Error {
             kind,
             span,
-            source_line
-        }
+            source_lines: vec![source_line]
+        })
+    }
+
+    pub fn from_multiple_errors(kind: ErrorKind, span: Span, source_lines: Vec<(String, usize)>) -> Box<Error> {
+        Box::new(Error {
+            kind,
+            span,
+            source_lines
+        })
     }
 }
 
@@ -56,8 +72,20 @@ impl std::fmt::Display for Error {
         writeln!(f, "[{}] {}", "error".red().bold(), self.kind.as_str())?;
         writeln!(f, "as found in [insert_file_here]:{}:{}", self.span.start_pos.line, self.span.start_pos.column)?;
 
-        writeln!(f, "    {}", self.source_line)?;
-        writeln!(f, "    {}^{}^", " ".repeat(self.span.start_pos.column - 1), "^".repeat(self.span.end_pos.column - self.span.start_pos.column))?;
+        let mut used_numbers = vec![];
+        for (content, number) in self.source_lines.iter() {
+            if used_numbers.contains(number) {
+                continue;
+            } else {
+                used_numbers.push(*number);
+            }
+
+            writeln!(f, "    {}", content)?;
+            
+            if *number == self.span.start_pos.line {
+                writeln!(f, "    {}^{}^", " ".repeat(self.span.start_pos.column - 1), "^".repeat(self.span.end_pos.column - self.span.start_pos.column))?;
+            }
+        }
 
         Ok(())
     }

@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use colored::*;
+
+use super::error::{Error, ErrorKind};
 
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
@@ -19,11 +21,12 @@ pub const FIELD_ACCESS_TOKEN: char = '.';
 
 pub const COMMENT_TOKEN: char = '#';
 
-pub const INT_TYPE: &str = "__BUILTIN_INTEGER__";
-pub const FLOAT_TYPE: &str = "__BUILTIN_FLOAT__";
-pub const BOOL_TYPE: &str = "__BUILTIN_BOOL__";
-pub const STRING_TYPE: &str = "__BUILTIN_STRING__";
-pub const CHAR_TYPE: &str = "__BUILTIN_CHAR__";
+pub const INT_TYPE: &str = "int";
+pub const FLOAT_TYPE: &str = "float";
+pub const BOOL_TYPE: &str = "bool";
+pub const STRING_TYPE: &str = "string";
+pub const CHAR_TYPE: &str = "char";
+pub const NULL_TYPE: &str = "null"; // NOTE: Programs may not use this type.
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
@@ -452,6 +455,25 @@ impl Span {
         
         self
     }
+
+    pub fn get_lines(&self, lines: Rc<Vec<String>>) -> Vec<(String, usize)> {
+        let mut ret: Vec<(String, usize)> = vec![];
+
+        for i in self.start_pos.line..=self.end_pos.line {
+            ret.push((lines[i - 1].clone(), i));
+        }
+
+        ret
+    }
+
+    pub fn get_all_lines(lines: Rc<Vec<String>>, spans: &[Span]) -> Vec<(String, usize)> {
+        let mut ret = vec![];
+        for span in spans.iter() {
+            ret.extend(span.get_lines(lines.clone()));
+        }
+
+        return ret;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -553,68 +575,211 @@ pub enum SymbolKind {
     Struct,
     Trait,
     Enum,
-    TypeAlias
+    TypeAlias,
 }
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    name: String,
-    kind: SymbolKind,
-    type_info: TypeInfo,
-    mutable: bool,
-    span: Span,
-    public: Option<bool>,
-    generic_parameters: Vec<TypeInfo>
+    pub name: String,
+    pub kind: SymbolKind,
+    pub type_info: TypeInfo,
+    pub mutable: bool,
+    pub span: Span,
+    pub public: Option<bool>,
+    pub generic_parameters: Vec<TypeInfo>,
 }
 
-#[derive(Debug, Clone)]
-struct TypeInfo {
-    base_type: String,
-    generic_parameters: Vec<TypeInfo>,
-    function_data: Option<FunctionTypeData>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeInfo {
+    pub base_type: String,
+    pub generic_parameters: Vec<TypeInfo>,
+    pub function_data: Option<FunctionTypeData>,
+    pub reference_kind: ReferenceKind,
 }
 
-#[derive(Debug, Clone)]
-struct FunctionTypeData {
-    params: Vec<TypeInfo>,
-    return_type: Box<TypeInfo>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionTypeData {
+    pub params: Vec<TypeInfo>,
+    pub return_type: Box<TypeInfo>,
 }
 
-struct SymbolTable {
-    scopes: Vec<HashMap<String, Symbol>>,
-    current_scope: usize
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReferenceKind {
+    Value,
+    Reference,
+    MutableReference,
 }
 
-impl SymbolTable {
-    fn new() -> SymbolTable {
-        SymbolTable {
-            scopes: vec![HashMap::new()],
-            current_scope: 0
+impl TypeInfo {
+    pub fn new(base_type: impl Into<String>, generic_parameters: Vec<TypeInfo>, reference_kind: ReferenceKind) -> Self {
+        Self {
+            base_type: base_type.into(),
+            generic_parameters,
+            function_data: None,
+            reference_kind,
         }
     }
 
-        fn enter_scope(&mut self) {
+    pub fn from_function_expression(generic_parameters: Vec<TypeInfo>, function_data: FunctionTypeData, reference_kind: ReferenceKind) -> Self {
+        Self {
+            base_type: String::new(),
+            generic_parameters,
+            function_data: Some(function_data),
+            reference_kind,
+        }
+    }
+}
+
+pub struct SymbolTable {
+    scopes: Vec<HashMap<String, Symbol>>,
+    lines: Rc<Vec<String>>,
+}
+
+impl SymbolTable {
+    pub fn new(lines: Rc<Vec<String>>) -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+            lines,
+        }
+    }
+
+    pub fn enter_scope(&mut self) {
         self.scopes.push(HashMap::new());
-        self.current_scope += 1;
     }
 
-    fn exit_scope(&mut self) {
+    pub fn exit_scope(&mut self) {
         self.scopes.pop();
-        self.current_scope = self.scopes.len().saturating_sub(1);
     }
 
-    // fn add_symbol(&mut self, symbol: Symbol) -> Result<(), ParserError> {
-    //     for scope in self.scopes.iter() {
-    //         let found_symbol = scope.iter().find(|(k, _)| **k == symbol.name);
-    //         if let Some((_, found_symbol)) = found_symbol {
-    //             return Err(ParserError::AlreadyDeclared(
-    //                 symbol.span.start_pos.line, 
-    //                 symbol.span.start_pos.column, 
-    //                 format!("Attempted to create ")    
-    //             ));
-    //         }
-    //     }
+    pub fn find_symbol(&self, name: &str) -> Option<&Symbol> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
+    }
 
-    //     Ok(())
-    // }
+    pub fn add_symbol(&mut self, symbol: Symbol) -> Result<(), Box<Error>> {
+        if let Some(existing) = self.current_scope().get(&symbol.name) {
+            return Err(Error::from_multiple_errors(
+                ErrorKind::AlreadyDeclared(symbol.name),
+                symbol.span,
+                Span::get_all_lines(self.lines.clone(), &[existing.span, symbol.span]),
+            ));
+        }
+
+        self.current_scope_mut()
+            .insert(symbol.name.clone(), symbol);
+        Ok(())
+    }
+
+    fn current_scope(&self) -> &HashMap<String, Symbol> {
+        self.scopes.last().expect("Always at least one scope")
+    }
+
+    fn current_scope_mut(&mut self) -> &mut HashMap<String, Symbol> {
+        self.scopes.last_mut().expect("Always at least one scope")
+    }
+}
+
+impl std::fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let colored = match self {
+            SymbolKind::Variable => "Variable".green(),
+            SymbolKind::Function => "Function".blue(),
+            SymbolKind::Struct => "Struct".magenta(),
+            SymbolKind::Trait => "Trait".cyan(),
+            SymbolKind::Enum => "Enum".yellow(),
+            SymbolKind::TypeAlias => "TypeAlias".white(),
+        };
+        write!(f, "{}", colored)
+    }
+}
+
+impl std::fmt::Display for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name.cyan().bold())?;
+        write!(f, " ({})", self.kind)?;
+        write!(f, " : {}", self.type_info)?;
+        
+        if self.mutable {
+            write!(f, " {}", "mut".red())?;
+        }
+
+        if self.public == Some(true) {
+            write!(f, " {}", "pub".purple())?;
+        }
+        
+        if !self.generic_parameters.is_empty() {
+            let generics = self.generic_parameters.iter()
+                .map(|g| g.to_string().dimmed().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(f, " <{}>", generics)?;
+        }
+        
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for TypeInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reference = match self.reference_kind {
+            ReferenceKind::Value => "".normal(),
+            ReferenceKind::Reference => "&".red(),
+            ReferenceKind::MutableReference => "&mut ".red().bold(),
+        };
+
+        if let Some(func_data) = &self.function_data {
+            return write!(f, "{}{}", reference, func_data);
+        }
+
+        let base = self.base_type.yellow().bold();
+        let generics = if !self.generic_parameters.is_empty() {
+            format!("<{}>", 
+                self.generic_parameters.iter()
+                    .map(|g| g.to_string().blue().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            String::new()
+        };
+
+        write!(f, "{}{}{}", reference, base, generics)
+    }
+}
+
+impl std::fmt::Display for FunctionTypeData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params = self.params.iter()
+            .map(|p| p.to_string().green().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let return_type = self.return_type.to_string().magenta();
+        write!(f, "({}) -> {}", params, return_type)
+    }
+}
+
+fn display_scopes(scopes: &[HashMap<String, Symbol>], indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    if scopes.is_empty() {
+        return Ok(());
+    }
+
+    for symbol in scopes[0].values() {
+        writeln!(f, "{:indent$}{}", "", symbol, indent = indent)?;
+    }
+    
+    if scopes.len() > 1 {
+        writeln!(f, "{:indent$}{{", "", indent = indent)?;
+        display_scopes(&scopes[1..], indent + 4, f)?;
+        writeln!(f, "{:indent$}}}", "", indent = indent)?;
+    }
+
+    Ok(())
+}
+
+impl std::fmt::Display for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        display_scopes(&self.scopes, 0, f)
+    }
 }
