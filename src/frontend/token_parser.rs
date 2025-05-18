@@ -166,6 +166,11 @@ impl Parser {
                                 left: Box::new(lhs),
                                 right: Box::new(rhs),
                             }
+                        } else if op == Operation::FieldAccess {
+                            AstNodeKind::FieldAccess {
+                                left: Box::new(lhs),
+                                right: Box::new(rhs),
+                            }
                         } else {
                             AstNodeKind::BinaryOperation {
                                 operator,

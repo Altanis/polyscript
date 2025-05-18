@@ -132,6 +132,10 @@ pub enum AstNodeKind {
     SelfValue,
     SelfType(Option<Operation>),
 
+    FieldAccess {
+        left: Box<AstNode>,
+        right: Box<AstNode>,
+    },
     FunctionCall {
         function: Box<AstNode>,
         arguments: Vec<AstNode>
@@ -573,6 +577,13 @@ impl AstNode {
                 write!(f, "= ")?;
                 write!(f, "{}", value)?
             }
+            AstNodeKind::FieldAccess { left, right } => {
+                write!(f, "{}(", indent_str)?;
+                left.fmt_with_indent(f, 0)?;
+                write!(f, ".")?;
+                right.fmt_with_indent(f, 0)?;
+                write!(f, ")")?
+            }
             AstNodeKind::FunctionCall { function, arguments } => {
                 write!(f, "{}", indent_str)?;
                 function.fmt_with_indent(f, 0)?;
@@ -628,11 +639,11 @@ impl AstNode {
         }
 
         if let Some(ty) = &self.ty {
-            write!(f, " {}", // space before annotation
+            write!(f, " {}",
                 format_args!("[type: {}]", ty.to_string())
             )?;
         }
-        // Symbol annotation
+
         if let Some(sym) = &self.symbol {
             write!(f, " [symbol: {}]", sym.name.magenta().bold())?;
         }
