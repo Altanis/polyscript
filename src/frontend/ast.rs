@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::utils::kind::*;
+use crate::{backend::semantic_analyzer::{Symbol, SymbolTable, TypeInfo}, utils::kind::*};
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
@@ -16,74 +16,74 @@ pub enum AstNodeKind {
     VariableDeclaration {
         mutable: bool,
         name: String,
-        type_annotation: Option<Box<AstNode>>,
-        initializer: Option<Box<AstNode>>,
+        type_annotation: Option<BoxedAstNode>,
+        initializer: Option<BoxedAstNode>,
     },
     
     // OPERATIONS //
     UnaryOperation {
         operator: Operation,
-        operand: Box<AstNode>,
+        operand: BoxedAstNode,
         prefix: bool
     },
     BinaryOperation {
         operator: Operation,
-        left: Box<AstNode>,
-        right: Box<AstNode>,
+        left: BoxedAstNode,
+        right: BoxedAstNode,
     },
     ConditionalOperation {
         operator: Operation,
-        left: Box<AstNode>,
-        right: Box<AstNode>,
+        left: BoxedAstNode,
+        right: BoxedAstNode,
     },
     
     // CONTROL FLOW //
     Block(Vec<AstNode>),
     IfStatement {
-        condition: Box<AstNode>,
-        then_branch: Box<AstNode>,
-        else_if_branches: Vec<(Box<AstNode>, Box<AstNode>)>,
-        else_branch: Option<Box<AstNode>>,
+        condition: BoxedAstNode,
+        then_branch: BoxedAstNode,
+        else_if_branches: Vec<(BoxedAstNode, BoxedAstNode)>,
+        else_branch: Option<BoxedAstNode>,
     },
     ForLoop {
-        initializer: Option<Box<AstNode>>,
-        condition: Option<Box<AstNode>>,
-        increment: Option<Box<AstNode>>,
-        body: Box<AstNode>,
+        initializer: Option<BoxedAstNode>,
+        condition: Option<BoxedAstNode>,
+        increment: Option<BoxedAstNode>,
+        body: BoxedAstNode,
     },
     WhileLoop {
-        condition: Box<AstNode>,
-        body: Box<AstNode>,
+        condition: BoxedAstNode,
+        body: BoxedAstNode,
     },
-    Return(Option<Box<AstNode>>),
+    Return(Option<BoxedAstNode>),
     Break,
     Continue,
-    Throw(Box<AstNode>),
+    Throw(BoxedAstNode),
     
     // FUNCTIONS //
     FunctionSignature {
         name: String,
         generic_parameters: Vec<AstNode>,
         parameters: Vec<AstNode>,
-        return_type: Option<Box<AstNode>>,
+        return_type: Option<BoxedAstNode>,
         instance: Option<bool>
     },
     FunctionPointer {
         params: Vec<AstNode>,
-        return_type: Option<Box<AstNode>>
+        return_type: Option<BoxedAstNode>
     },
     FunctionDeclaration {
-        signature: Box<AstNode>,
-        body: Box<AstNode>,
+        signature: BoxedAstNode,
+        body: BoxedAstNode,
     },
     FunctionParameter {
         name: String,
-        type_annotation: Box<AstNode>,
-        initializer: Option<Box<AstNode>>,
+        type_annotation: BoxedAstNode,
+        initializer: Option<BoxedAstNode>,
     },
     FunctionExpression {
-        signature: Box<AstNode>,
-        body: Box<AstNode>
+        signature: BoxedAstNode,
+        body: BoxedAstNode
     },
 
     // STRUCTS //
@@ -95,7 +95,7 @@ pub enum AstNodeKind {
     StructField {
         qualifier: QualifierKind,
         name: String,
-        type_annotation: Box<AstNode>
+        type_annotation: BoxedAstNode
     },
     StructLiteral {
         name: String,
@@ -112,7 +112,7 @@ pub enum AstNodeKind {
     // IMPLEMENTATIONS //
     ImplDeclaration {
         generic_parameters: Vec<AstNode>,
-        type_reference: Box<AstNode>,
+        type_reference: BoxedAstNode,
         trait_name: Option<String>,
         associated_constants: Vec<AstNode>,
         associated_functions: Vec<AstNode>
@@ -120,24 +120,24 @@ pub enum AstNodeKind {
     AssociatedConstant {
         qualifier: QualifierKind,
         name: String,
-        type_annotation: Option<Box<AstNode>>,
-        initializer: Box<AstNode>
+        type_annotation: Option<BoxedAstNode>,
+        initializer: BoxedAstNode
     },
     AssociatedFunction {
         qualifier: QualifierKind,
-        signature: Box<AstNode>,
-        body: Box<AstNode>,
+        signature: BoxedAstNode,
+        body: BoxedAstNode,
     },
 
     SelfValue,
     SelfType(Option<Operation>),
 
     FieldAccess {
-        left: Box<AstNode>,
-        right: Box<AstNode>,
+        left: BoxedAstNode,
+        right: BoxedAstNode,
     },
     FunctionCall {
-        function: Box<AstNode>,
+        function: BoxedAstNode,
         arguments: Vec<AstNode>
     },
 
@@ -161,7 +161,7 @@ pub enum AstNodeKind {
     TypeDeclaration {
         name: String,
         generic_parameters: Vec<AstNode>,
-        value: Box<AstNode>,
+        value: BoxedAstNode,
     },
 
     // PROGRAM //
@@ -173,7 +173,21 @@ pub struct AstNode {
     pub kind: AstNodeKind,
     pub span: Span,
     pub ty: Option<TypeInfo>,
-    pub symbol: Option<Symbol>
+    pub symbol: Option<(usize, String)>
+}
+
+pub type BoxedAstNode = Box<AstNode>;
+
+impl AstNode {
+    pub fn get_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a Symbol> {
+        if let Some(symbol) = &self.symbol {
+            if let Some(scope) = symbol_table.scopes.get(&symbol.0) {
+                return scope.find_symbol(&symbol.1, symbol_table);
+            }
+        }
+
+        None
+    }
 }
 
 impl std::fmt::Display for AstNode {
@@ -644,8 +658,8 @@ impl AstNode {
             )?;
         }
 
-        if let Some(sym) = &self.symbol {
-            write!(f, " [symbol: {}]", sym.name.magenta().bold())?;
+        if let Some((_, name)) = &self.symbol {
+            write!(f, " [symbol: {}]", name.magenta().bold())?;
         }
 
         Ok(())

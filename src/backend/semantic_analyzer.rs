@@ -1,8 +1,281 @@
-use std::rc::Rc;
-use crate::utils::{error::*, kind::*};
+use std::{collections::HashMap, rc::Rc};
+use colored::*;
+use crate::{frontend::ast::AstNode, utils::{error::{Error, ErrorKind}, kind::Span}};
 
-use crate::frontend::ast::{AstNode, AstNodeKind};
+#[derive(Debug, Clone)]
+pub enum SymbolKind {
+    Variable,
+    Function,
+    Struct,
+    Trait,
+    Enum,
+    TypeAlias,
+}
 
+#[derive(Debug, Clone)]
+pub struct Symbol {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub type_info: Option<TypeInfo>,
+    pub mutable: bool,
+    pub span: Span,
+    pub public: Option<bool>,
+    pub generic_parameters: Vec<TypeInfo>,
+    pub scope_id: usize
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeInfo {
+    pub base_type: String,
+    pub generic_parameters: Vec<TypeInfo>,
+    pub function_data: Option<FunctionTypeData>,
+    pub reference_kind: ReferenceKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionTypeData {
+    pub params: Vec<TypeInfo>,
+    pub return_type: Box<TypeInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReferenceKind {
+    Value,
+    Reference,
+    MutableReference,
+}
+
+impl TypeInfo {
+    pub fn new(base_type: impl Into<String>, generic_parameters: Vec<TypeInfo>, reference_kind: ReferenceKind) -> Self {
+        Self {
+            base_type: base_type.into(),
+            generic_parameters,
+            function_data: None,
+            reference_kind,
+        }
+    }
+
+    pub fn from_function_expression(generic_parameters: Vec<TypeInfo>, function_data: FunctionTypeData, reference_kind: ReferenceKind) -> Self {
+        Self {
+            base_type: String::new(),
+            generic_parameters,
+            function_data: Some(function_data),
+            reference_kind,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Scope {
+    variables: HashMap<String, Symbol>,
+    parent: Option<usize>,
+    lines: Rc<Vec<String>>,
+    id: usize,
+}
+
+impl Scope {
+    pub fn find_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a Symbol> {
+        if let Some(symbol) = self.variables.get(name) {
+            Some(symbol)
+        } else if let Some(parent_id) = self.parent {
+            symbol_table.scopes.get(&parent_id)?.find_symbol(name, symbol_table)
+        } else {
+            None
+        }
+    }
+
+    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<usize, Box<Error>> {
+        symbol.scope_id = self.id;
+
+        if let Some(existing) = self.variables.get(&symbol.name) {
+            return Err(Error::from_multiple_errors(
+                ErrorKind::AlreadyDeclared(symbol.name),
+                symbol.span,
+                Span::get_all_lines(self.lines.clone(), &[existing.span, symbol.span]),
+            ));
+        }
+
+        self.variables.insert(symbol.name.clone(), symbol);
+        Ok(self.id)
+    }
+}
+
+pub struct SymbolTable {
+    pub scopes: HashMap<usize, Scope>,
+    lines: Rc<Vec<String>>,
+    current_scope_id: usize,
+    next_scope_id: usize,
+}
+
+impl SymbolTable {
+    pub fn new(lines: Rc<Vec<String>>) -> Self {
+        let root_scope = Scope {
+            variables: HashMap::new(),
+            parent: None,
+            lines: lines.clone(),
+            id: 0,
+        };
+
+        let mut scopes = HashMap::new();
+        scopes.insert(0, root_scope);
+
+        SymbolTable {
+            scopes,
+            lines,
+            current_scope_id: 0,
+            next_scope_id: 1,
+        }
+    }
+
+    pub fn enter_scope(&mut self) {
+        let new_id = self.next_scope_id;
+        let parent_id = self.current_scope_id;
+
+        let new_scope = Scope {
+            variables: HashMap::new(),
+            parent: Some(parent_id),
+            lines: self.lines.clone(),
+            id: new_id,
+        };
+
+        self.scopes.insert(new_id, new_scope);
+        self.current_scope_id = new_id;
+        self.next_scope_id += 1;
+    }
+
+    pub fn exit_scope(&mut self) {
+        if let Some(parent_id) = self.current_scope().parent {
+            self.current_scope_id = parent_id;
+        } else {
+            panic!("Tried to exit global scope");
+        }
+    }
+
+    pub fn current_scope_mut(&mut self) -> &mut Scope {
+        self.scopes.get_mut(&self.current_scope_id).expect("Scope should exist")
+    }
+
+    pub fn current_scope(&self) -> &Scope {
+        self.scopes.get(&self.current_scope_id).expect("Scope should exist")
+    }
+}
+
+impl std::fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let colored = match self {
+            SymbolKind::Variable => "Variable".green(),
+            SymbolKind::Function => "Function".blue(),
+            SymbolKind::Struct => "Struct".magenta(),
+            SymbolKind::Trait => "Trait".cyan(),
+            SymbolKind::Enum => "Enum".yellow(),
+            SymbolKind::TypeAlias => "TypeAlias".white(),
+        };
+        write!(f, "{}", colored)
+    }
+}
+
+impl std::fmt::Display for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name.cyan().bold())?;
+        write!(f, " ({})", self.kind)?;
+
+        if let Some(type_info) = &self.type_info {
+            write!(f, " : {}", type_info)?;
+        } else {
+            write!(f, " : undetermined_type")?;
+        }
+        
+        if self.mutable {
+            write!(f, " {}", "mut".red())?;
+        }
+
+        if self.public == Some(true) {
+            write!(f, " {}", "pub".purple())?;
+        }
+        
+        if !self.generic_parameters.is_empty() {
+            let generics = self.generic_parameters.iter()
+                .map(|g| g.to_string().dimmed().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(f, " <{}>", generics)?;
+        }
+        
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for TypeInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reference = match self.reference_kind {
+            ReferenceKind::Value => "".normal(),
+            ReferenceKind::Reference => "&".red(),
+            ReferenceKind::MutableReference => "&mut ".red().bold(),
+        };
+
+        if let Some(func_data) = &self.function_data {
+            return write!(f, "{}{}", reference, func_data);
+        }
+
+        let base = self.base_type.yellow().bold();
+        let generics = if !self.generic_parameters.is_empty() {
+            format!("<{}>", 
+                self.generic_parameters.iter()
+                    .map(|g| g.to_string().blue().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            String::new()
+        };
+
+        write!(f, "{}{}{}", reference, base, generics)
+    }
+}
+
+impl std::fmt::Display for FunctionTypeData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params = self.params.iter()
+            .map(|p| p.to_string().green().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let return_type = self.return_type.to_string().magenta();
+        write!(f, "({}) -> {}", params, return_type)
+    }
+}
+
+impl std::fmt::Display for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.display_scope(0, 0, f)
+    }
+}
+
+impl SymbolTable {
+    fn display_scope(&self, scope_id: usize, indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let scope = match self.scopes.get(&scope_id) {
+            Some(s) => s,
+            None => return Ok(())
+        };
+
+        for symbol in scope.variables.values() {
+            writeln!(f, "{:indent$}{}", "", symbol, indent = indent)?;
+        }
+
+        let mut child_scope_ids: Vec<usize> = self.scopes.values()
+            .filter(|s| s.parent == Some(scope_id))
+            .map(|s| s.id)
+            .collect();
+        child_scope_ids.sort();
+
+        for child_id in child_scope_ids {
+            writeln!(f, "{:indent$}{{", "", indent = indent)?;
+            self.display_scope(child_id, indent + 4, f)?;
+            writeln!(f, "{:indent$}}}", "", indent = indent)?;
+        }
+
+        Ok(())
+    }
+}
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     errors: Vec<Error>,
@@ -23,263 +296,17 @@ impl SemanticAnalyzer {
         Error::from_multiple_errors(kind, primary_span, lines)
     }
 
-    fn primitive_type(&self, name: &str) -> TypeInfo {
-        TypeInfo::new(name, vec![], ReferenceKind::Value)
-    }
-
-    fn lookup_symbol(&self, name: &str, span: Span) -> Result<&Symbol, Box<Error>> {
-        self.symbol_table.find_symbol(name).ok_or_else(|| {
-            self.create_error(
-                ErrorKind::UnknownVariable(name.to_string()),
-                span,
-                &[span],
-            )
-        })
-    }
-
-    fn resolve_expression_pair(
-        &self,
-        left: &mut AstNode,
-        right: &mut AstNode,
-    ) -> Result<TypeInfo, Box<Error>> {
-        let lhs = self.annotate_node(left)?.0;
-        let rhs = self.annotate_node(right)?.0;
-
-        if lhs != rhs {
-            Err(self.create_error(
-                ErrorKind::MismatchedTypes(lhs, rhs),
-                right.span,
-                &[left.span, right.span],
-            ))
-        } else {
-            Ok(lhs)
-        }
-    }
-
-    fn resolve_returns(
-        &self,
-        stmts: &mut [AstNode],
-    ) -> Result<TypeInfo, Box<Error>> {
-        let mut return_type: Option<TypeInfo> = None;
-        
-        for stmt in stmts {
-            if let AstNodeKind::Return(expr) = &mut stmt.kind {
-                let ty = expr.as_mut().map_or_else(
-                    || Ok(self.primitive_type(NULL_TYPE)),
-                    |e| self.annotate_node(e).map(|(t, _)| t),
-                )?;
-
-                if let Some(existing) = &return_type {
-                    if existing != &ty {
-                        return Err(self.create_error(
-                            ErrorKind::MismatchedTypes(existing.clone(), ty),
-                            stmt.span,
-                            &[stmt.span],
-                        ));
-                    }
-                } else {
-                    return_type = Some(ty);
-                }
-            }
-        }
-
-        Ok(return_type.unwrap_or_else(|| self.primitive_type(NULL_TYPE)))
-    }
-
-    fn resolve_if_statement(
-        &self,
-        then_branch: &mut AstNode,
-        else_if_branches: &mut [(Box<AstNode>, Box<AstNode>)],
-        else_branch: &mut Option<Box<AstNode>>
-    ) -> Result<TypeInfo, Box<Error>> {
-        let then_type = self.annotate_node(then_branch)?;
-        let else_type = else_branch.as_mut().map_or_else(
-            || Ok(then_type.clone()),
-            |else_node| self.annotate_node(else_node)
-        )?;
-
-        if then_type.0 != else_type.0 {
-            return Err(self.create_error(
-                ErrorKind::MismatchedTypes(then_type.0, else_type.0),
-                else_branch.as_ref().unwrap().span,
-                &[then_branch.span, else_branch.as_ref().unwrap().span]
-            ));
-        }
-
-        for (_, branch) in else_if_branches {
-            let branch_type = self.annotate_node(branch)?;
-            if branch_type.0 != then_type.0 {
-                return Err(self.create_error(
-                    ErrorKind::MismatchedTypes(then_type.clone().0, branch_type.0),
-                    branch.span,
-                    &[then_branch.span, branch.span]
-                ));
-            }
-        }
-
-        Ok(then_type.0)
-    }
-
-    fn resolve_function_type(
-        &self,
-        parameters: &mut [AstNode],
-        return_type: &mut Option<Box<AstNode>>,
-    ) -> Result<TypeInfo, Box<Error>> {
-        let params = parameters
-            .iter_mut()
-            .map(|p| self.annotate_node(p).map(|(t, _)| t))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let return_ty = match return_type {
-            Some(rt) => self.annotate_node(rt)?.0,
-            None => self.primitive_type(NULL_TYPE),
-        };
-
-        Ok(TypeInfo::from_function_expression(
-            vec![],
-            FunctionTypeData {
-                params,
-                return_type: Box::new(return_ty),
-            },
-            ReferenceKind::Value,
-        ))
-    }
-
-    fn annotate_node(&self, node: &mut AstNode) -> Result<(TypeInfo, Option<Symbol>), Box<Error>> {
-        use AstNodeKind::*;
-
-        let (type_info, symbol) = match &mut node.kind {
-            IntegerLiteral(_) => (self.primitive_type(INT_TYPE), None),
-            FloatLiteral(_) => (self.primitive_type(FLOAT_TYPE), None),
-            BooleanLiteral(_) => (self.primitive_type(BOOL_TYPE), None),
-            StringLiteral(_) => (self.primitive_type(STRING_TYPE), None),
-            CharLiteral(_) => (self.primitive_type(CHAR_TYPE), None),
-            ConditionalOperation { .. } => (self.primitive_type(BOOL_TYPE), None),
-
-            Identifier(name) => {
-                let symbol = self.lookup_symbol(name, node.span)?;
-                (symbol.type_info.clone(), Some(symbol.clone()))
-            }
-
-            UnaryOperation { operand, .. } => (self.annotate_node(operand)?.0, None),
-
-            BinaryOperation { left, right, .. } => {
-                (self.resolve_expression_pair(left, right)?, None)
-            }
-
-            Block(stmts) => (self.resolve_returns(stmts)?, None),
-
-            IfStatement { then_branch, else_if_branches, else_branch, .. } => {
-                (self.resolve_if_statement(then_branch, else_if_branches, else_branch)?, None)
-            }
-
-            FunctionExpression { signature, .. } => {
-                let (params, return_type) = match &mut signature.kind {
-                    FunctionSignature { parameters, return_type, .. } => (parameters, return_type),
-                    _ => unreachable!("Invalid AST structure"),
-                };
-                (self.resolve_function_type(params, return_type)?, None)
-            }
-
-            FunctionPointer { params, return_type } => {
-                (self.resolve_function_type(params, return_type)?, None)
-            }
-
-            TypeReference { type_name, generic_types } => {
-                let generic_params = generic_types
-                    .iter_mut()
-                    .map(|gt| self.annotate_node(gt).map(|(t, _)| t))
-                    .collect::<Result<_, _>>()?;
-
-                let type_info = TypeInfo::new(
-                    type_name.clone(),
-                    generic_params,
-                    ReferenceKind::Value,
-                );
-
-                let symbol = self.symbol_table.find_symbol(type_name).cloned();
-                (type_info, symbol)
-            }
-
-            // structliteral, selfvalue, fieldaccess, function call, 
-
-            _ => return Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
-        };
-
-        node.ty = Some(type_info.clone());
-        node.symbol = symbol.clone();
-
-        Ok((type_info, symbol))
-    }
-}
-
-impl SemanticAnalyzer {
     pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
-        // PASS 1: TYPE/SYMBOL COLLECTION, NODE ANNOTATION //
-        let AstNodeKind::Program(ref mut stmts) = program.kind else { unreachable!(); };
-        for stmt in stmts {
-            if let Err(e) = self.visit_node(stmt) {
-                self.errors.push(*e);
-            }
-        }
+        /* PASS STRUCTURE
+            * 0: Collect all symbols and place into symbol table.
+            * 1: Annotate the AST with all things from symbol table.
+         */
 
-        if !self.errors.is_empty() {
-            return Err(self.errors.clone());
+        let errors = self.symbol_collector_pass(&mut program);
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         Ok(program)
-    }
-
-    pub fn visit_node(&mut self, node: &mut AstNode) -> Result<(), Box<Error>> {
-        // forloop, while loop, function declaration, struct declaration, enum declaration
-        match &mut node.kind {
-            AstNodeKind::VariableDeclaration { mutable, name, type_annotation, initializer }
-                => self.visit_variable_declaration_node(*mutable, name.clone(), type_annotation, initializer, node.span),
-
-            _ => self.annotate_node(node).map(|_| ())
-        }
-    }
-
-    fn visit_variable_declaration_node(&mut self, mutable: bool, name: String, type_annotation: &mut Option<Box<AstNode>>, initializer: &mut Option<Box<AstNode>>, span: Span) -> Result<(), Box<Error>> {
-        let annotation_info = type_annotation.as_mut().map(|ty| self.annotate_node(ty));
-        let initializer_info = initializer.as_mut().map(|ty| self.annotate_node(ty));
-
-        let type_info = match (annotation_info, initializer_info) {
-            (None, None) => {
-                return Err(self.create_error(
-                    ErrorKind::BadVariableDeclaration,
-                    span,
-                    &[span],
-                ));
-            }
-
-            (Some(ann_res), None) => ann_res?.0,
-            (None, Some(init_res)) => init_res?.0,
-
-            (Some(ann_res), Some(init_res)) => {
-                let ann = ann_res?.0;
-                let init = init_res?.0;
-
-                if ann != init {
-                    return Err(self.create_error(
-                        ErrorKind::MismatchedTypes(ann, init),
-                        span,
-                        &[span],
-                    ));
-                }
-
-                ann
-            }
-        };
-
-        self.symbol_table.add_symbol(Symbol {
-            name,
-            kind: SymbolKind::Variable,
-            type_info,
-            mutable,
-            span,
-            public: None,
-            generic_parameters: vec![]
-        })
     }
 }

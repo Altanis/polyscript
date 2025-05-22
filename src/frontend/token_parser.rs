@@ -49,7 +49,7 @@ impl Parser {
 
     /// Generates an Error struct based on the position of the parser.
     fn generate_error(&self, kind: ErrorKind, span: Span) -> Box<Error> {
-        let span = span.set_end_from_span(self.previous().get_span());
+        let span = span.set_end_from_span(self.peek().get_span());
         Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), span.start_pos.line))
     }
     
@@ -59,7 +59,7 @@ impl Parser {
         if peeked.get_token_kind() == token_type {
             Ok(self.advance())
         } else {
-            let span = self.peek().get_span();
+            let span = self.previous().get_span();
             return Err(self.generate_error(
                 ErrorKind::UnexpectedToken(
                     peeked.get_value().to_string(), format!("{}", peeked.get_token_kind()), format!("a token of type {}", token_type)
@@ -117,10 +117,10 @@ impl Parser {
 
 impl Parser {
     fn parse_expression(&mut self) -> Result<AstNode, Box<Error>> {
-        self.parse_precedence(Operation::Assign.binding_power().0)
+        self.parse_binding_power(Operation::Assign.binding_power().0)
     }
 
-    fn parse_precedence(&mut self, min_bp: u8) -> Result<AstNode, Box<Error>> {
+    fn parse_binding_power(&mut self, min_bp: u8) -> Result<AstNode, Box<Error>> {
         let mut lhs = self.parse_prefix()?;
 
         loop {
@@ -154,7 +154,7 @@ impl Parser {
             }
     
             self.advance();
-            let rhs = self.parse_precedence(right_bp)?;
+            let rhs = self.parse_binding_power(right_bp)?;
 
             lhs = AstNode {
                 span: lhs.span.set_end_from_span(rhs.span),
@@ -247,7 +247,7 @@ impl Parser {
                     operator = Operation::MutableAddressOf;
                 }
 
-                let operand = Box::new(self.parse_precedence(Operation::Not.binding_power().0)?);
+                let operand = Box::new(self.parse_binding_power(Operation::Not.binding_power().0)?);
 
                 Ok(AstNode {
                     span: span.set_end_from_span(operand.span),
@@ -1002,7 +1002,7 @@ impl Parser {
                 _ => {
                     let span = qualifier_token.get_span();
                     return Err(parser.generate_error(
-                        ErrorKind::UnexpectedToken(qualifier_token.get_value().to_string(), format!("{}", qualifier_token.get_token_kind()), "a type reference".to_string()),
+                        ErrorKind::UnexpectedToken(qualifier_token.get_value().to_string(), format!("{}", qualifier_token.get_token_kind()), "a public or private qualifier".to_string()),
                         span
                     ));
                 }

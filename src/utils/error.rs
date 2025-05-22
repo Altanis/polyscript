@@ -1,6 +1,7 @@
 use colored::Colorize;
 
-use super::kind::{Span, TypeInfo};
+use crate::backend::semantic_analyzer::TypeInfo;
+use super::kind::Span;
 
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
