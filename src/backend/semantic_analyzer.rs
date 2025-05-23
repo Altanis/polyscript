@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 use colored::*;
-use crate::{frontend::ast::AstNode, utils::{error::{Error, ErrorKind}, kind::Span}};
+use crate::{frontend::ast::AstNode, utils::{error::*, kind::Span}};
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
@@ -10,6 +10,14 @@ pub enum SymbolKind {
     Trait,
     Enum,
     TypeAlias,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Namespace {
+    Type,
+    Value,
+    Const,
+    Variant
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +92,7 @@ impl Scope {
         }
     }
 
-    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<usize, Box<Error>> {
+    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<usize, BoxedError> {
         symbol.scope_id = self.id;
 
         if let Some(existing) = self.variables.get(&symbol.name) {
@@ -291,21 +299,29 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> Box<Error> {
+    pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
         let lines = Span::get_all_lines(self.lines.clone(), spans);
         Error::from_multiple_errors(kind, primary_span, lines)
     }
 
     pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
         /* PASS STRUCTURE
-            * 0: Collect all symbols and place into symbol table.
-            * 1: Annotate the AST with all things from symbol table.
+            * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
+            * 1: Collect type information about symbols.
          */
 
-        let errors = self.symbol_collector_pass(&mut program);
-        if !errors.is_empty() {
-            return Err(errors);
+        macro_rules! pass {
+            ($self:ident, $method:ident, $program:expr) => {{
+                let errors = $self.$method(&mut $program);
+                if !errors.is_empty() {
+                    return Err(errors);
+                }
+            }};
         }
+
+
+        pass!(self, symbol_collector_pass, &mut program);
+        // pass!(self, type_collector_pass, &mut program);
 
         Ok(program)
     }

@@ -3,6 +3,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::needless_return)]
 #![feature(let_chains)]
+#![feature(if_let_guard)]
 
 use std::fs;
 use std::path::Path;
@@ -19,7 +20,7 @@ mod utils;
 
 pub const READ_TOKENS: bool = false;
 pub const PARSE_TOKENS: bool = true;
-pub const SEMANTIC_ANALYSIS: bool = true;
+pub const SEMANTIC_ANALYSIS: bool = false;
 
 fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
     let mut lexer = frontend::lexer::Lexer::new(program);

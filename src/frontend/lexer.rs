@@ -1,4 +1,4 @@
-use crate::utils::{error::{Error, ErrorKind}, kind::*};
+use crate::utils::{error::*, kind::*};
 
 trait CharClassifier {
     fn is_operation(self) -> bool;
@@ -54,7 +54,7 @@ impl Lexer {
     }
 
     /// Generates an Error struct based on the position of the lexer.
-    fn generate_error(&self, kind: ErrorKind, span: Option<Span>) -> Box<Error> {
+    fn generate_error(&self, kind: ErrorKind, span: Option<Span>) -> BoxedError {
         let span = if let Some(span) = span {
             span.set_end_from_values(self.index, self.line, self.column)
         } else {
@@ -70,17 +70,17 @@ impl Lexer {
     }
 
     /// Peeks at the next character.
-    fn peek(&self) -> Result<char, Box<Error>> {
+    fn peek(&self) -> Result<char, BoxedError> {
         self.source.get(self.index + 1).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
     }
 
     /// Consumes the next character.
-    fn consume(&mut self) -> Result<char, Box<Error>> {
+    fn consume(&mut self) -> Result<char, BoxedError> {
         self.next_index();
         self.source.get(self.index).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
     }
 
-    fn parse_escape_char(&mut self) -> Result<char, Box<Error>> {
+    fn parse_escape_char(&mut self) -> Result<char, BoxedError> {
         match self.consume()? {
             'n' => Ok('\n'),
             't' => Ok('\t'),
@@ -168,7 +168,7 @@ impl Lexer {
 
 impl Lexer {
     /// Parses an operation.
-    fn parse_operator(&mut self) -> Result<Token, Box<Error>> {
+    fn parse_operator(&mut self) -> Result<Token, BoxedError> {
         let mut operator = self.source[self.index].to_string();
         let span = Span {
             start: self.index,
@@ -346,7 +346,7 @@ impl Lexer {
     }    
 
     /// Parses a word.
-    fn parse_word(&mut self) -> Result<Token, Box<Error>> {
+    fn parse_word(&mut self) -> Result<Token, BoxedError> {
         let mut word = self.source[self.index].to_string();
         let span = Span {
             start: self.index,
@@ -395,7 +395,7 @@ impl Lexer {
     }
 
     /// Parses a number.
-    fn parse_number(&mut self) -> Result<Token, Box<Error>> {
+    fn parse_number(&mut self) -> Result<Token, BoxedError> {
         let mut number_str = String::new();
         let mut has_decimal_point = false;
         let mut has_exponent = false;
@@ -503,7 +503,7 @@ impl Lexer {
         Ok(Token::new(number_str, TokenKind::NumberLiteral(number_type), span.set_end_from_values(self.index, self.line, self.column)))
     }
 
-    fn parse_symbol(&mut self) -> Result<Token, Box<Error>> {
+    fn parse_symbol(&mut self) -> Result<Token, BoxedError> {
         let symbol = self.source[self.index];
         let mut symbol_buffer = symbol.to_string();
 
@@ -582,7 +582,7 @@ impl Lexer {
         }
     }
     
-    pub fn tokenize(&mut self) -> Result<(), Box<Error>> {
+    pub fn tokenize(&mut self) -> Result<(), BoxedError> {
         while let Some(&char) = self.source.get(self.index) {
 
             if char.is_whitespace() {} 

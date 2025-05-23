@@ -10,7 +10,7 @@ impl SemanticAnalyzer {
         TypeInfo::new(name, vec![], ReferenceKind::Value)
     }
 
-    fn lookup_symbol(&self, name: &str, span: Span) -> Result<&Symbol, Box<Error>> {
+    fn lookup_symbol(&self, name: &str, span: Span) -> Result<&Symbol, BoxedError> {
         self.symbol_table.find_symbol(name).ok_or_else(|| {
             self.create_error(
                 ErrorKind::UnknownVariable(name.to_string()),
@@ -24,7 +24,7 @@ impl SemanticAnalyzer {
         &self,
         left: &mut AstNode,
         right: &mut AstNode,
-    ) -> Result<TypeInfo, Box<Error>> {
+    ) -> Result<TypeInfo, BoxedError> {
         let lhs = self.annotate_node(left)?.0;
         let rhs = self.annotate_node(right)?.0;
 
@@ -42,7 +42,7 @@ impl SemanticAnalyzer {
     fn resolve_returns(
         &self,
         stmts: &mut [AstNode],
-    ) -> Result<TypeInfo, Box<Error>> {
+    ) -> Result<TypeInfo, BoxedError> {
         let mut return_type: Option<TypeInfo> = None;
         
         for stmt in stmts {
@@ -74,7 +74,7 @@ impl SemanticAnalyzer {
         then_branch: &mut AstNode,
         else_if_branches: &mut [(BoxedAstNode, BoxedAstNode)],
         else_branch: &mut Option<BoxedAstNode>
-    ) -> Result<TypeInfo, Box<Error>> {
+    ) -> Result<TypeInfo, BoxedError> {
         let then_type = self.annotate_node(then_branch)?;
         let else_type = else_branch.as_mut().map_or_else(
             || Ok(then_type.clone()),
@@ -107,7 +107,7 @@ impl SemanticAnalyzer {
         &self,
         parameters: &mut [AstNode],
         return_type: &mut Option<BoxedAstNode>,
-    ) -> Result<TypeInfo, Box<Error>> {
+    ) -> Result<TypeInfo, BoxedError> {
         let params = parameters
             .iter_mut()
             .map(|p| self.annotate_node(p).map(|(t, _)| t))
@@ -128,7 +128,7 @@ impl SemanticAnalyzer {
         ))
     }
 
-    fn annotate_node(&self, node: &mut AstNode) -> Result<(TypeInfo, Option<Symbol>), Box<Error>> {
+    fn annotate_node(&self, node: &mut AstNode) -> Result<(TypeInfo, Option<Symbol>), BoxedError> {
         use AstNodeKind::*;
 
         let (type_info, symbol) = match &mut node.kind {
@@ -212,7 +212,7 @@ impl SemanticAnalyzer {
         Ok(program)
     }
 
-    pub fn visit_node(&mut self, node: &mut AstNode) -> Result<(), Box<Error>> {
+    pub fn visit_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
         // forloop, while loop, function declaration, struct declaration, enum declaration
         match &mut node.kind {
             AstNodeKind::VariableDeclaration { mutable, name, type_annotation, initializer }
@@ -222,7 +222,7 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn visit_variable_declaration_node(&mut self, mutable: bool, name: String, type_annotation: &mut Option<BoxedAstNode>, initializer: &mut Option<BoxedAstNode>, span: Span) -> Result<(), Box<Error>> {
+    fn visit_variable_declaration_node(&mut self, mutable: bool, name: String, type_annotation: &mut Option<BoxedAstNode>, initializer: &mut Option<BoxedAstNode>, span: Span) -> Result<(), BoxedError> {
         let annotation_info = type_annotation.as_mut().map(|ty| self.annotate_node(ty));
         let initializer_info = initializer.as_mut().map(|ty| self.annotate_node(ty));
 

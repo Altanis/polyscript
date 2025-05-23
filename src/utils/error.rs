@@ -15,6 +15,7 @@ pub enum ErrorKind {
     UnexpectedToken(String, String, String),
     UninitializedConstant,
     UnknownVariable(String),
+    UnresolvedType(String),
     AlreadyDeclared(String),
     UnknownType,
     MismatchedTypes(TypeInfo, TypeInfo),
@@ -35,6 +36,7 @@ impl ErrorKind {
                 => format!("unexpected token: found \"{}\" of type {}, expected {}", symbol, found, expected),
             ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
             ErrorKind::UnknownVariable(name) => format!("could not find variable \"{}\" in scope", name),
+            ErrorKind::UnresolvedType(name) => format!("type for symbol \"{}\" has not been determined by this line", name),
             ErrorKind::AlreadyDeclared(variable) => format!("attempted to declare {}, but it already exists in scope", variable),
             ErrorKind::UnknownType => "could not determine type of data at compile-time".to_string(),
             ErrorKind::MismatchedTypes(t1, t2) => format!("expected two of the same types, instead found {} and {}", t1, t2),
@@ -50,8 +52,10 @@ pub struct Error {
     source_lines: Vec<(String, usize)>
 }
 
+pub type BoxedError = Box<Error>;
+
 impl Error {
-    pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> Box<Error> {
+    pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> BoxedError {
         Box::new(Error {
             kind,
             span,
@@ -59,7 +63,7 @@ impl Error {
         })
     }
 
-    pub fn from_multiple_errors(kind: ErrorKind, span: Span, source_lines: Vec<(String, usize)>) -> Box<Error> {
+    pub fn from_multiple_errors(kind: ErrorKind, span: Span, source_lines: Vec<(String, usize)>) -> BoxedError {
         Box::new(Error {
             kind,
             span,
