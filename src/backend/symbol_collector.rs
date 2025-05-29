@@ -50,14 +50,16 @@ impl SemanticAnalyzer {
                 => self.collect_struct_symbols(name.clone(), fields, generic_parameters, statement.span),
             AstNodeKind::EnumDeclaration { name, variants } 
                 => self.collect_enum_symbols(name.clone(), variants, statement.span),
-            // AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. }
-                // => self.collect_impl_symbols(associated_constants, associated_functions),
+            AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. }
+                => self.collect_impl_symbols(associated_constants, associated_functions),
             AstNodeKind::TraitDeclaration { name, .. } 
                 => self.collect_trait_symbols(name.clone(), statement.span),
             AstNodeKind::TypeDeclaration { name, .. } 
                 => self.collect_type_symbols(name.clone(), statement.span),
             _ => Ok(None)
         }
+        // collect the following:
+        // impldecl, associatedconst, associatedfn, selftype, traitdecl, typedecl
     }
 
     fn collect_variable_symbol(&mut self, name: String, mutable: bool, span: Span) -> Result<Option<(usize, String)>, BoxedError> {
@@ -221,6 +223,91 @@ impl SemanticAnalyzer {
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
+    }
+
+    fn collect_impl_symbols(&mut self, associated_constants: &mut [AstNode], associated_functions: &mut [AstNode]) -> Result<Option<(usize, String)>, BoxedError> {
+        self.symbol_table.enter_scope(ScopeKind::Impl);
+
+        for associated_const in associated_constants.iter_mut() {
+            let AstNodeKind::AssociatedConstant { qualifier, name, .. } = &mut associated_const.kind else {
+                panic!("associated constants dont hold AssociatedConstant node");
+            };
+
+            associated_const.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::Variable,
+                type_info: None,
+                mutable: false,
+                span: associated_const.span,
+                qualifier: Some(*qualifier),
+                generic_parameters: vec![],
+                scope_id: 0
+            })?, name.clone()));
+        }
+
+        for associated_function in associated_functions.iter_mut() {
+            let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut associated_function.kind else {
+                panic!("associated functions dont hold AssociatedFunction node");
+            };
+
+            let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } 
+                = &mut signature.kind else { panic!("FunctionDeclaration node is not holding a FunctionSignature"); };
+
+            self.symbol_table.enter_scope(ScopeKind::Function);
+
+            for generic_parameter in generic_parameters.iter_mut() {
+                let AstNodeKind::GenericParameter { name, .. } = &generic_parameter.kind else {
+                    panic!("FunctionDeclaration node has generic parameter not of kind GenericParameter");
+                };
+
+                generic_parameter.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                    name: name.clone(),
+                    kind: SymbolKind::TypeAlias,
+                    type_info: None,
+                    generic_parameters: vec![],
+                    mutable: false,
+                    span: generic_parameter.span,
+                    qualifier: None,
+                    scope_id: 0
+                })?, name.clone()));
+            }
+
+            for parameter in parameters.iter_mut() {
+                let AstNodeKind::FunctionParameter { name, .. } = &parameter.kind else {
+                    panic!("FunctionDeclaration node has generic parameter not of kind FunctionParameter");
+                };
+
+                parameter.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                    name: name.clone(),
+                    kind: SymbolKind::Variable,
+                    type_info: None,
+                    generic_parameters: vec![],
+                    mutable: false,
+                    span: parameter.span,
+                    qualifier: None,
+                    scope_id: 0
+                })?, name.clone()));
+            }
+
+            self.collect_node_symbol(body)?;
+
+            self.symbol_table.exit_scope();
+
+            associated_function.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::Function,
+                type_info: None,
+                mutable: false,
+                span: associated_function.span,
+                qualifier: Some(*qualifier),
+                generic_parameters: vec![],
+                scope_id: 0
+            })?, name.clone()));
+        }
+
+        self.symbol_table.exit_scope();
+
+        Ok(None)
     }
 
     fn collect_trait_symbols(&mut self, name: String, span: Span) -> Result<Option<(usize, String)>, BoxedError> {
