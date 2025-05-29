@@ -20,7 +20,7 @@ mod utils;
 
 pub const READ_TOKENS: bool = false;
 pub const PARSE_TOKENS: bool = true;
-pub const SEMANTIC_ANALYSIS: bool = false;
+pub const SEMANTIC_ANALYSIS: bool = true;
 
 fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
     let mut lexer = frontend::lexer::Lexer::new(program);

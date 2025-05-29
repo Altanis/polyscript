@@ -1,6 +1,8 @@
+use indexmap::IndexMap;
+
 use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::Span}};
 
-use super::semantic_analyzer::{SemanticAnalyzer, Symbol, SymbolKind};
+use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, Symbol, SymbolKind};
 
 impl SemanticAnalyzer {
     pub fn symbol_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
@@ -44,10 +46,12 @@ impl SemanticAnalyzer {
             AstNodeKind::Throw(node) => self.collect_throw_statement_symbols(node),
             AstNodeKind::FunctionDeclaration { signature, body } 
                 => self.collect_signature_symbols(signature, body, statement.span),
-            AstNodeKind::StructDeclaration { name, .. } 
-                => self.collect_struct_symbols(name.clone(), statement.span),
-            // AstNodeKind::EnumDeclaration { name, variants } 
-                // => self.collect_enum_symbols(name.clone(), statement.span),
+            AstNodeKind::StructDeclaration { name, fields, generic_parameters } 
+                => self.collect_struct_symbols(name.clone(), fields, generic_parameters, statement.span),
+            AstNodeKind::EnumDeclaration { name, variants } 
+                => self.collect_enum_symbols(name.clone(), variants, statement.span),
+            // AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. }
+                // => self.collect_impl_symbols(associated_constants, associated_functions),
             AstNodeKind::TraitDeclaration { name, .. } 
                 => self.collect_trait_symbols(name.clone(), statement.span),
             AstNodeKind::TypeDeclaration { name, .. } 
@@ -63,7 +67,7 @@ impl SemanticAnalyzer {
             type_info: None,
             mutable,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
@@ -90,12 +94,12 @@ impl SemanticAnalyzer {
             type_info: None,
             mutable: false,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone());
 
-        self.symbol_table.enter_scope();
+        self.symbol_table.enter_scope(ScopeKind::Function);
 
         for generic_parameter in generic_parameters.iter_mut() {
             let AstNodeKind::GenericParameter { name, .. } = &generic_parameter.kind else {
@@ -109,7 +113,7 @@ impl SemanticAnalyzer {
                 generic_parameters: vec![],
                 mutable: false,
                 span: generic_parameter.span,
-                public: None,
+                qualifier: None,
                 scope_id: 0
             })?, name.clone()));
         }
@@ -126,7 +130,7 @@ impl SemanticAnalyzer {
                 generic_parameters: vec![],
                 mutable: false,
                 span: parameter.span,
-                public: None,
+                qualifier: None,
                 scope_id: 0
             })?, name.clone()));
         }
@@ -138,27 +142,82 @@ impl SemanticAnalyzer {
         Ok(Some(ret))
     }
 
-    fn collect_struct_symbols(&mut self, name: String, span: Span) -> Result<Option<(usize, String)>, BoxedError> {
+    fn collect_struct_symbols(&mut self, name: String, fields: &mut [AstNode], generic_parameters: &mut [AstNode], span: Span) -> Result<Option<(usize, String)>, BoxedError> {
+        let id = self.symbol_table.enter_scope(ScopeKind::Struct);
+
+        for field in fields.iter_mut() {
+            let AstNodeKind::StructField { qualifier, name, .. } = &field.kind else {
+                panic!("StructDeclaration does not comprise StructField nodes.");
+            };
+
+            field.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::StructField,
+                type_info: None,
+                mutable: false,
+                span: field.span,
+                qualifier: Some(*qualifier),
+                generic_parameters: vec![],
+                scope_id: 0
+            })?, name.clone()));
+        }
+
+        for generic_parameter in generic_parameters.iter_mut() {
+            let AstNodeKind::GenericParameter { name, .. } = &generic_parameter.kind else {
+                panic!("FunctionDeclaration node has generic parameter not of kind GenericParameter");
+            };
+
+            generic_parameter.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::TypeAlias,
+                type_info: None,
+                generic_parameters: vec![],
+                mutable: false,
+                span: generic_parameter.span,
+                qualifier: None,
+                scope_id: 0
+            })?, name.clone()));
+        }
+
+        self.symbol_table.exit_scope();
+
         Ok(Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
             name: name.clone(),
-            kind: SymbolKind::Struct,
+            kind: SymbolKind::Struct(id),
             type_info: None,
             mutable: false,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
     }
 
-    fn collect_enum_symbols(&mut self, name: String, span: Span) -> Result<Option<(usize, String)>, BoxedError> {
+    fn collect_enum_symbols(&mut self, name: String, variants: &mut IndexMap<String, (AstNode, Option<AstNode>)>, span: Span) -> Result<Option<(usize, String)>, BoxedError> {
+        let id = self.symbol_table.enter_scope(ScopeKind::Enum);
+
+        for (name, (variant, _)) in variants.iter_mut() {
+            variant.symbol = Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::EnumVariant,
+                type_info: None,
+                mutable: false,
+                span: variant.span,
+                qualifier: None,
+                generic_parameters: vec![],
+                scope_id: 0
+            })?, name.clone()));
+        }
+
+        self.symbol_table.exit_scope();
+        
         Ok(Some((self.symbol_table.current_scope_mut().add_symbol(Symbol {
             name: name.clone(),
-            kind: SymbolKind::Enum,
+            kind: SymbolKind::Enum(id),
             type_info: None,
             mutable: false,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
@@ -171,7 +230,7 @@ impl SemanticAnalyzer {
             type_info: None,
             mutable: false,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
@@ -184,14 +243,14 @@ impl SemanticAnalyzer {
             type_info: None,
             mutable: false,
             span,
-            public: None,
+            qualifier: None,
             generic_parameters: vec![],
             scope_id: 0
         })?, name.clone())))
     }
 
     fn collect_block_symbols(&mut self, statements: &mut [AstNode]) -> Result<Option<(usize, String)>, BoxedError> {
-        self.symbol_table.enter_scope();
+        self.symbol_table.enter_scope(ScopeKind::Block);
         
         for statement in statements.iter_mut() {
             statement.symbol = self.collect_node_symbol(statement)?;
@@ -219,7 +278,7 @@ impl SemanticAnalyzer {
     }
 
     fn collect_for_loop_symbols(&mut self, initializer: &mut Option<BoxedAstNode>, condition: &mut Option<BoxedAstNode>, increment: &mut Option<BoxedAstNode>, body: &mut BoxedAstNode) -> Result<Option<(usize, String)>, BoxedError> {
-        self.symbol_table.enter_scope();
+        self.symbol_table.enter_scope(ScopeKind::Block);
 
         if let Some(initializer) = initializer {
             self.collect_node_symbol(initializer)?;
@@ -241,7 +300,7 @@ impl SemanticAnalyzer {
     }
 
     fn collect_while_loop_symbols(&mut self, condition: &mut BoxedAstNode, body: &mut BoxedAstNode) -> Result<Option<(usize, String)>, BoxedError> {
-        self.symbol_table.enter_scope();
+        self.symbol_table.enter_scope(ScopeKind::Block);
         self.collect_node_symbol(condition)?;
         self.collect_node_symbol(body)?;
         self.symbol_table.exit_scope();

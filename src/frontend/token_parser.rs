@@ -1148,12 +1148,14 @@ impl Parser {
 
             parser.consume(TokenKind::OpenBrace)?;
             loop {
-                let variant_name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
+                let variant = parser.parse_enum_variant()?;
+                let AstNodeKind::EnumVariant(name) = &variant.kind else { unreachable!(); };
+
                 if parser.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
                     parser.advance();
-                    variants.insert(variant_name, Some(parser.parse_expression()?));
+                    variants.insert(name.clone(),(variant, Some(parser.parse_expression()?)));
                 } else {
-                    variants.insert(variant_name, None);
+                    variants.insert(name.clone(), (variant, None));
                 }
 
                 if parser.peek().get_token_kind() == TokenKind::CloseBrace {
@@ -1165,6 +1167,13 @@ impl Parser {
             parser.consume(TokenKind::CloseBrace)?;
 
             Ok(AstNodeKind::EnumDeclaration { name, variants })
+        })
+    }
+
+    fn parse_enum_variant(&mut self) -> Result<AstNode, Box<Error>> {
+        self.spanned_node(|parser| {
+            let variant_name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
+            Ok(AstNodeKind::EnumVariant(variant_name))
         })
     }
 

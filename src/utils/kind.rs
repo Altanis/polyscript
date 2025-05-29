@@ -61,7 +61,7 @@ pub const COLON: char = ':';
 pub const STRING_DELIMITER: char = '"';
 pub const CHAR_DELIMITER: char = '\'';
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Hash, Eq, Clone, Copy, PartialEq)]
 pub enum Operation {
     // UNARY
     Not, // !
@@ -346,6 +346,15 @@ pub enum KeywordKind {
 pub enum QualifierKind {
     Public,
     Private
+}
+
+impl std::fmt::Display for QualifierKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QualifierKind::Public => write!(f, "public"),
+            QualifierKind::Private => write!(f, "private")
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1,23 +1,29 @@
 use std::{collections::HashMap, rc::Rc};
 use colored::*;
-use crate::{frontend::ast::AstNode, utils::{error::*, kind::Span}};
+use crate::{frontend::ast::AstNode, utils::{error::*, kind::{QualifierKind, Span}}};
+
+pub type ScopeId = usize;
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
     Variable,
     Function,
-    Struct,
+    Struct(ScopeId),
+    Enum(ScopeId),
     Trait,
-    Enum,
     TypeAlias,
+    StructField,
+    EnumVariant
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Namespace {
-    Type,
-    Value,
-    Const,
-    Variant
+#[derive(Debug, Clone)]
+pub enum ScopeKind {
+    Root,
+    Function,
+    Block,
+    Enum,
+    Struct,
+    Impl
 }
 
 #[derive(Debug, Clone)]
@@ -27,9 +33,9 @@ pub struct Symbol {
     pub type_info: Option<TypeInfo>,
     pub mutable: bool,
     pub span: Span,
-    pub public: Option<bool>,
+    pub qualifier: Option<QualifierKind>,
     pub generic_parameters: Vec<TypeInfo>,
-    pub scope_id: usize
+    pub scope_id: ScopeId
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,9 +82,10 @@ impl TypeInfo {
 #[derive(Debug)]
 pub struct Scope {
     variables: HashMap<String, Symbol>,
-    parent: Option<usize>,
+    parent: Option<ScopeId>,
     lines: Rc<Vec<String>>,
-    id: usize,
+    id: ScopeId,
+    kind: ScopeKind
 }
 
 impl Scope {
@@ -92,7 +99,7 @@ impl Scope {
         }
     }
 
-    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<usize, BoxedError> {
+    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<ScopeId, BoxedError> {
         symbol.scope_id = self.id;
 
         if let Some(existing) = self.variables.get(&symbol.name) {
@@ -109,10 +116,10 @@ impl Scope {
 }
 
 pub struct SymbolTable {
-    pub scopes: HashMap<usize, Scope>,
+    pub scopes: HashMap<ScopeId, Scope>,
     lines: Rc<Vec<String>>,
-    current_scope_id: usize,
-    next_scope_id: usize,
+    current_scope_id: ScopeId,
+    next_scope_id: ScopeId,
 }
 
 impl SymbolTable {
@@ -122,6 +129,7 @@ impl SymbolTable {
             parent: None,
             lines: lines.clone(),
             id: 0,
+            kind: ScopeKind::Root
         };
 
         let mut scopes = HashMap::new();
@@ -135,7 +143,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn enter_scope(&mut self) {
+    pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
         let new_id = self.next_scope_id;
         let parent_id = self.current_scope_id;
 
@@ -144,11 +152,14 @@ impl SymbolTable {
             parent: Some(parent_id),
             lines: self.lines.clone(),
             id: new_id,
+            kind
         };
 
         self.scopes.insert(new_id, new_scope);
         self.current_scope_id = new_id;
         self.next_scope_id += 1;
+
+        new_id
     }
 
     pub fn exit_scope(&mut self) {
@@ -173,10 +184,12 @@ impl std::fmt::Display for SymbolKind {
         let colored = match self {
             SymbolKind::Variable => "Variable".green(),
             SymbolKind::Function => "Function".blue(),
-            SymbolKind::Struct => "Struct".magenta(),
+            SymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
             SymbolKind::Trait => "Trait".cyan(),
-            SymbolKind::Enum => "Enum".yellow(),
+            SymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
             SymbolKind::TypeAlias => "TypeAlias".white(),
+            SymbolKind::StructField => "StructField".yellow(),
+            SymbolKind::EnumVariant => "EnumVariant".yellow(),
         };
         write!(f, "{}", colored)
     }
@@ -197,8 +210,8 @@ impl std::fmt::Display for Symbol {
             write!(f, " {}", "mut".red())?;
         }
 
-        if self.public == Some(true) {
-            write!(f, " {}", "pub".purple())?;
+        if let Some(qualifier) = self.qualifier {
+            write!(f, " {}", qualifier)?;
         }
         
         if !self.generic_parameters.is_empty() {
@@ -259,7 +272,7 @@ impl std::fmt::Display for SymbolTable {
 }
 
 impl SymbolTable {
-    fn display_scope(&self, scope_id: usize, indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn display_scope(&self, scope_id: ScopeId, indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let scope = match self.scopes.get(&scope_id) {
             Some(s) => s,
             None => return Ok(())
@@ -269,7 +282,7 @@ impl SymbolTable {
             writeln!(f, "{:indent$}{}", "", symbol, indent = indent)?;
         }
 
-        let mut child_scope_ids: Vec<usize> = self.scopes.values()
+        let mut child_scope_ids: Vec<ScopeId> = self.scopes.values()
             .filter(|s| s.parent == Some(scope_id))
             .map(|s| s.id)
             .collect();

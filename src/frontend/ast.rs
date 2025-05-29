@@ -105,8 +105,9 @@ pub enum AstNodeKind {
     // ENUMS //
     EnumDeclaration {
         name: String,
-        variants: IndexMap<String, Option<AstNode>>
+        variants: IndexMap<String, (AstNode, Option<AstNode>)>
     },
+    EnumVariant(String),
 
 
     // IMPLEMENTATIONS //
@@ -549,9 +550,10 @@ impl AstNode {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
                 
-                for (variant, expr) in variants {
+                for (_, (variant, expr)) in variants {
                     write!(f, "{}", " ".repeat(child_indent + 4))?;
                     write!(f, "{}", variant)?;
+
                     if let Some(expr) = expr {
                         write!(f, " = {}", expr)?;
                     }
@@ -560,6 +562,7 @@ impl AstNode {
                 
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             },
+            AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
             AstNodeKind::TypeReference { type_name, generic_types } => {
                 write!(f, "{}{}", indent_str, type_name.bright_blue())?;
                 if !generic_types.is_empty() {
