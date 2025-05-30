@@ -10,7 +10,7 @@ pub enum SymbolKind {
     Function,
     Struct(ScopeId),
     Enum(ScopeId),
-    Trait,
+    Trait(ScopeId),
     TypeAlias,
     StructField,
     EnumVariant
@@ -23,7 +23,9 @@ pub enum ScopeKind {
     Block,
     Enum,
     Struct,
-    Impl
+    Impl,
+    Trait,
+    Type
 }
 
 #[derive(Debug, Clone)]
@@ -185,7 +187,7 @@ impl std::fmt::Display for SymbolKind {
             SymbolKind::Variable => "Variable".green(),
             SymbolKind::Function => "Function".blue(),
             SymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
-            SymbolKind::Trait => "Trait".cyan(),
+            SymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
             SymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
             SymbolKind::TypeAlias => "TypeAlias".white(),
             SymbolKind::StructField => "StructField".yellow(),

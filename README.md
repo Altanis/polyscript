@@ -13,9 +13,10 @@
 - [x] custom types
 - [x] references
 - [x] function types
-- [ ] refactor parser/ast for consistency
-- [ ] refactor lexer/token for consistency
-- [ ] fix all error formats
+- [x] refactor parser/ast for consistency
+- [x] refactor lexer/token for consistency
+- [x] fix all error formats
+- [ ] add mutable parameters
 
 NOTE: stdlib should contain:
 - io functions (print, err, etc)
