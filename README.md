@@ -16,7 +16,7 @@
 - [x] refactor parser/ast for consistency
 - [x] refactor lexer/token for consistency
 - [x] fix all error formats
-- [ ] add mutable parameters
+- [x] add mutable parameters
 
 NOTE: stdlib should contain:
 - io functions (print, err, etc)

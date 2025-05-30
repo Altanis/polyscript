@@ -181,9 +181,9 @@ impl SemanticAnalyzer {
 
     fn collect_function_parameters(&mut self, params: &mut [AstNode]) -> Result<(), BoxedError> {
         for param in params {
-            if let AstNodeKind::FunctionParameter { name, .. } = &param.kind {
+            if let AstNodeKind::FunctionParameter { name, mutable, .. } = &param.kind {
                 param.symbol = Some((
-                    self.add_symbol(SymbolKind::Variable, name, false, param.span, None, vec![])?,
+                    self.add_symbol(SymbolKind::Variable, name, *mutable, param.span, None, vec![])?,
                     name.clone()
                 ));
             }

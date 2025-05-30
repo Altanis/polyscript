@@ -658,6 +658,7 @@ impl Parser {
                             name: "this".to_string(),
                             type_annotation,
                             initializer: None,
+                            mutable: false
                         })
                     } else {
                         let span = parser.previous().get_span();
@@ -679,6 +680,7 @@ impl Parser {
                             name: "this".to_string(),
                             type_annotation,
                             initializer: None,
+                            mutable: false
                         })
                     } else {
                         let span = parser.previous().get_span();
@@ -687,6 +689,25 @@ impl Parser {
                             span
                         ));
                     }
+                },
+                TokenKind::Keyword(KeywordKind::Mut) => {
+                    let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
+
+                    parser.consume(TokenKind::Colon)?;
+                    let type_annotation = Box::new(parser.parse_type()?);
+                    let mut initializer = None;
+
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                        parser.advance();
+                        initializer = Some(Box::new(parser.parse_expression()?));
+                    }
+
+                    Ok(AstNodeKind::FunctionParameter {
+                        name,
+                        type_annotation,
+                        initializer,
+                        mutable: true
+                    })
                 },
                 TokenKind::Identifier => {
                     let name = token.get_value().to_string();
@@ -703,6 +724,7 @@ impl Parser {
                         name,
                         type_annotation,
                         initializer,
+                        mutable: false
                     })
                 },
                 _ => {

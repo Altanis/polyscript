@@ -80,6 +80,7 @@ pub enum AstNodeKind {
         name: String,
         type_annotation: BoxedAstNode,
         initializer: Option<BoxedAstNode>,
+        mutable: bool
     },
     FunctionExpression {
         signature: BoxedAstNode,
@@ -473,9 +474,10 @@ impl AstNode {
                 name,
                 type_annotation,
                 initializer,
+                mutable
             } => {
                 write!(f, "{}", indent_str)?;
-                write!(f, "{}: {}", name.yellow(), type_annotation)?;
+                write!(f, "{}{}: {}", if *mutable { "mut ".purple() } else { "".white() }, name.yellow(), type_annotation)?;
                 if let Some(default) = initializer {
                     write!(f, " = ")?;
                     default.fmt_with_indent(f, 0)?;
