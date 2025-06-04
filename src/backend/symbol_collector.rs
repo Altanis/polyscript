@@ -18,43 +18,38 @@ impl SemanticAnalyzer {
     }
 
     fn collect_node_symbol(&mut self, node: &mut AstNode) -> Result<Option<(usize, String)>, BoxedError> {
+        use AstNodeKind::*;
+
         let declared_symbol_opt = match &mut node.kind {
-            AstNodeKind::VariableDeclaration { name, mutable, type_annotation, initializer } => 
+            VariableDeclaration { name, mutable, type_annotation, initializer } => 
                 self.collect_variable_symbol(name.clone(), *mutable, type_annotation, initializer, node.span),
-            AstNodeKind::UnaryOperation { operand, .. } => 
-                self.collect_unary_operation_symbols(operand),
-            AstNodeKind::BinaryOperation { left, right, .. } |
-            AstNodeKind::ConditionalOperation { left, right, .. } =>
-                self.collect_binary_operation_symbols(left, right),
-            AstNodeKind::Block(statements) => 
-                self.collect_block_symbols(statements),
-            AstNodeKind::IfStatement { condition, then_branch, else_if_branches, else_branch } =>
-                self.collect_conditional_symbols(condition, then_branch, else_if_branches, else_branch),
-            AstNodeKind::ForLoop { initializer, condition, increment, body } =>
-                self.collect_for_loop_symbols(initializer, condition, increment, body),
-            AstNodeKind::WhileLoop { condition, body } =>
-                self.collect_while_loop_symbols(condition, body),
-            AstNodeKind::Return(opt_expr) => 
-                self.collect_return_statement_symbols(opt_expr),
-            AstNodeKind::FunctionDeclaration { signature, body } => 
-                self.collect_function_declaration(signature, body, node.span),
-            AstNodeKind::FunctionExpression { signature, body } => 
+            FunctionDeclaration { signature, body } 
+                => self.collect_function_declaration(signature, body, node.span),
+            FunctionExpression { signature, body } => 
                 self.collect_function_expression_symbols(signature, body),
-            AstNodeKind::StructDeclaration { name, fields, generic_parameters } => 
+            StructDeclaration { name, fields, generic_parameters } =>
                 self.collect_struct_symbols(name.clone(), fields, generic_parameters, node.span),
-            AstNodeKind::EnumDeclaration { name, variants } => 
+            EnumDeclaration { name, variants } =>
                 self.collect_enum_symbols(name.clone(), variants, node.span),
-            AstNodeKind::ImplDeclaration { associated_constants, associated_functions, generic_parameters, .. } => 
+            ImplDeclaration { associated_constants, associated_functions, generic_parameters, .. } =>
                 self.collect_impl_symbols(associated_constants, associated_functions, generic_parameters),
-            AstNodeKind::TraitDeclaration { name, signatures } => 
+            TraitDeclaration { name, signatures } =>
                 self.collect_trait_symbols(name.clone(), signatures, node.span),
-            AstNodeKind::TypeDeclaration { name, generic_parameters, .. } => 
+            TypeDeclaration { name, generic_parameters, .. } =>
                 self.collect_type_symbols(name.clone(), generic_parameters, node.span),
-            _ => Ok(None)
+            Block(statements) =>
+                self.collect_block_symbols(statements),
+            _ => {
+                for child in node.children_mut() {
+                    self.collect_node_symbol(child)?;
+                }
+
+                Ok(None)
+            }
         };
 
-        if let Ok(Some(ref declared_symbol_info)) = declared_symbol_opt {
-            node.symbol = Some(declared_symbol_info.clone());
+        if let Ok(Some(ref info)) = declared_symbol_opt {
+            node.symbol = Some(info.clone());
         }
 
         declared_symbol_opt
@@ -308,64 +303,6 @@ impl SemanticAnalyzer {
         Ok(Some((symbol_id, name)))
     }
 
-    fn collect_conditional_symbols(
-        &mut self,
-        condition: &mut BoxedAstNode,
-        then_branch: &mut BoxedAstNode,
-        else_if_branches: &mut [(BoxedAstNode, BoxedAstNode)],
-        else_branch: &mut Option<BoxedAstNode>
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.collect_node_symbol(condition)?;
-        self.collect_node_symbol(then_branch)?;
-
-        for (cond, branch) in else_if_branches {
-            self.collect_node_symbol(cond)?;
-            self.collect_node_symbol(branch)?;
-        }
-
-        self.collect_optional_node(else_branch)?;
-
-        Ok(None)
-    }
-
-    fn collect_for_loop_symbols(
-        &mut self,
-        initializer: &mut Option<BoxedAstNode>,
-        condition: &mut Option<BoxedAstNode>,
-        increment: &mut Option<BoxedAstNode>,
-        body: &mut BoxedAstNode
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.symbol_table.enter_scope(ScopeKind::Block);
-
-        self.collect_optional_node(initializer)?;
-        self.collect_optional_node(condition)?;
-        self.collect_optional_node(increment)?;
-        self.collect_node_symbol(body)?;
-
-        self.symbol_table.exit_scope();
-        Ok(None)
-    }
-
-    fn collect_while_loop_symbols(
-        &mut self,
-        condition: &mut BoxedAstNode,
-        body: &mut BoxedAstNode
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.symbol_table.enter_scope(ScopeKind::Block);
-        self.collect_node_symbol(condition)?;
-        self.collect_node_symbol(body)?;
-        self.symbol_table.exit_scope();
-        Ok(None)
-    }
-
-    fn collect_return_statement_symbols(
-        &mut self,
-        opt_expr: &mut Option<BoxedAstNode>
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.collect_optional_node(opt_expr)?;
-        Ok(None)
-    }
-
     fn collect_optional_node(
         &mut self,
         node: &mut Option<BoxedAstNode>
@@ -375,23 +312,5 @@ impl SemanticAnalyzer {
         }
 
         Ok(())
-    }
-
-    fn collect_unary_operation_symbols(
-        &mut self,
-        operand: &mut BoxedAstNode
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.collect_node_symbol(operand)?;
-        Ok(None)
-    }
-
-    fn collect_binary_operation_symbols(
-        &mut self,
-        left: &mut BoxedAstNode,
-        right: &mut BoxedAstNode
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.collect_node_symbol(left)?;
-        self.collect_node_symbol(right)?;
-        Ok(None)
     }
 }

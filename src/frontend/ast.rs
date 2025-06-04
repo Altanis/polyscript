@@ -665,3 +665,260 @@ impl AstNode {
         Ok(())
     }
 }
+
+impl AstNode {
+    pub fn children_mut(&mut self) -> Vec<&mut AstNode> {
+        use AstNodeKind::*;
+        
+        match &mut self.kind {
+            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_) 
+            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_)
+                => vec![],
+
+            Program(statements) => statements.iter_mut().collect(),
+
+            VariableDeclaration { type_annotation, initializer, .. } => {
+                let mut children = vec![];
+
+                if let Some(node) = type_annotation.as_mut() {
+                    children.push(node.as_mut());
+                }
+
+                if let Some(node) = initializer.as_mut() {
+                    children.push(node.as_mut());
+                }
+
+                children
+            }
+
+            UnaryOperation { operand, .. } => vec![operand.as_mut()],
+
+            BinaryOperation { left, right, .. }
+            | ConditionalOperation { left, right, .. } =>
+                vec![left.as_mut(), right.as_mut()],
+
+            Block(statements) => statements.iter_mut().collect(),
+            IfStatement {
+                condition,
+                then_branch,
+                else_if_branches,
+                else_branch,
+            } => {
+                let mut children = vec![];
+
+                children.push(condition.as_mut());
+                children.push(then_branch.as_mut());
+
+                for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
+                    children.push(elif_cond.as_mut());
+                    children.push(elif_branch.as_mut());
+                }
+
+                if let Some(else_node) = else_branch.as_mut() {
+                    children.push(else_node.as_mut());
+                }
+
+                children
+            },
+            ForLoop {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => {
+                let mut children = vec![];
+
+                if let Some(init) = initializer.as_mut() {
+                    children.push(init.as_mut());
+                }
+
+                if let Some(cond) = condition.as_mut() {
+                    children.push(cond.as_mut());
+                }
+
+                if let Some(inc) = increment.as_mut() {
+                    children.push(inc.as_mut());
+                }
+
+                children.push(body.as_mut());
+
+                children
+            },
+            WhileLoop { condition, body } => vec![condition.as_mut(), body.as_mut()],
+            Return(opt_expr) => {
+                if let Some(expr) = opt_expr.as_mut() {
+                    vec![expr.as_mut()]
+                } else {
+                    vec![]
+                }
+            },
+            Break | Continue => vec![],
+
+            FunctionSignature {
+                generic_parameters,
+                parameters,
+                return_type,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter_mut() {
+                    children.push(gp);
+                }
+
+                for param in parameters.iter_mut() {
+                    children.push(param);
+                }
+
+                if let Some(ret) = return_type.as_mut() {
+                    children.push(ret.as_mut());
+                }
+
+                children
+            },
+            FunctionPointer { params, return_type } => {
+                let mut children = vec![];
+
+                for p in params.iter_mut() {
+                    children.push(p);
+                }
+
+                if let Some(ret) = return_type.as_mut() {
+                    children.push(ret.as_mut());
+                }
+
+                children
+            },
+            FunctionDeclaration { signature, body } => vec![signature.as_mut(), body.as_mut()],
+            FunctionParameter {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                children.push(type_annotation.as_mut());
+
+                if let Some(init) = initializer.as_mut() {
+                    children.push(init.as_mut());
+                }
+
+                children
+            },
+            FunctionExpression { signature, body } => vec![signature.as_mut(), body.as_mut()],
+
+            StructDeclaration {
+                generic_parameters,
+                fields,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter_mut() {
+                    children.push(gp);
+                }
+
+                for field_node in fields.iter_mut() {
+                    children.push(field_node);
+                }
+
+                children
+            },
+            StructField { type_annotation, .. } => vec![type_annotation.as_mut()],
+            StructLiteral { fields, .. } => fields.values_mut().collect(),
+
+            EnumDeclaration { variants, .. } => {
+                let mut children = vec![];
+
+                for (_, (variant_node, opt_payload)) in variants.iter_mut() {
+                    children.push(variant_node);
+
+                    if let Some(payload) = opt_payload.as_mut() {
+                        children.push(payload);
+                    }
+                }
+
+                children
+            },
+
+            ImplDeclaration {
+                generic_parameters,
+                type_reference,
+                associated_constants,
+                associated_functions,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter_mut() {
+                    children.push(gp);
+                }
+
+                children.push(type_reference.as_mut());
+
+                for const_node in associated_constants.iter_mut() {
+                    children.push(const_node);
+                }
+
+                for func_node in associated_functions.iter_mut() {
+                    children.push(func_node);
+                }
+
+                children
+            },
+            AssociatedConstant {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                if let Some(ta) = type_annotation.as_mut() {
+                    children.push(ta.as_mut());
+                }
+
+                children.push(initializer.as_mut());
+
+                children
+            },
+            AssociatedFunction { signature, body, .. } => vec![signature.as_mut(), body.as_mut()],
+
+            TraitDeclaration { signatures, .. } => signatures.iter_mut().collect(),
+
+            GenericParameter { .. } => vec![],
+
+            TypeReference { generic_types, .. } => generic_types.iter_mut().collect(),
+            TypeDeclaration {
+                generic_parameters,
+                value,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter_mut() {
+                    children.push(gp);
+                }
+
+                children.push(value.as_mut());
+
+                children
+            }
+
+            FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
+            FunctionCall {
+                function,
+                arguments,
+            } => {
+                let mut children = vec![];
+
+                children.push(function.as_mut());
+
+                for arg in arguments.iter_mut() {
+                    children.push(arg);
+                }
+
+                children
+            }
+        }
+    }
+}

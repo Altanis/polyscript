@@ -92,7 +92,7 @@ fn test_main_script() {
 }
 
 fn assert_scripts_work() {
-    let mut paths = Vec::new();
+    let mut paths = vec![];
     let path = Path::new("scripts/tests");
 
     if let Ok(entries) = fs::read_dir(path) {
