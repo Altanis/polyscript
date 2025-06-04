@@ -380,7 +380,6 @@ impl Lexer {
             RETURN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Return), span.set_end_from_values(self.index, self.line, self.column))),
             BREAK_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Break), span.set_end_from_values(self.index, self.line, self.column))),
             CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Continue), span.set_end_from_values(self.index, self.line, self.column))),
-            THROW_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Throw), span.set_end_from_values(self.index, self.line, self.column))),
             IF_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::If), span.set_end_from_values(self.index, self.line, self.column))),
             ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Else), span.set_end_from_values(self.index, self.line, self.column))),
             THIS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::This), span.set_end_from_values(self.index, self.line, self.column))),

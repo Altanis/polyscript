@@ -51,7 +51,7 @@ pub struct TypeInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionTypeData {
     pub params: Vec<TypeInfo>,
-    pub return_type: Box<TypeInfo>,
+    pub return_type: Option<Box<TypeInfo>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,12 +71,12 @@ impl TypeInfo {
         }
     }
 
-    pub fn from_function_expression(generic_parameters: Vec<TypeInfo>, function_data: FunctionTypeData, reference_kind: ReferenceKind) -> Self {
+    pub fn from_function_expression(generic_parameters: Vec<TypeInfo>, function_data: FunctionTypeData) -> Self {
         Self {
             base_type: String::new(),
             generic_parameters,
             function_data: Some(function_data),
-            reference_kind,
+            reference_kind: ReferenceKind::Value
         }
     }
 }
@@ -99,6 +99,15 @@ impl Scope {
         } else {
             None
         }
+    }
+
+    pub fn find_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut Symbol> {
+        let owner_id = symbol_table.find_symbol_owner(name, self.id)?;
+
+        symbol_table
+            .scopes
+            .get_mut(&owner_id)
+            .and_then(|scope| scope.variables.get_mut(name))
     }
 
     pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<ScopeId, BoxedError> {
@@ -145,6 +154,24 @@ impl SymbolTable {
         }
     }
 
+    fn find_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
+        let mut scope_id = start_scope_id;
+        loop {
+            let scope = &self.scopes[&scope_id];
+            if scope.variables.contains_key(name) {
+                return Some(scope_id);
+            }
+            match scope.parent {
+                Some(parent_id) => scope_id = parent_id,
+                None => return None,
+            }
+        }
+    }
+
+    pub fn direct_symbol_lookup(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut Symbol> {
+        self.scopes.get_mut(&scope_id).and_then(|scope| scope.variables.get_mut(name))
+    }
+    
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
         let new_id = self.next_scope_id;
         let parent_id = self.current_scope_id;
@@ -262,8 +289,14 @@ impl std::fmt::Display for FunctionTypeData {
             .map(|p| p.to_string().green().to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        let return_type = self.return_type.to_string().magenta();
-        write!(f, "({}) -> {}", params, return_type)
+        write!(f, "({})", params)?;
+
+        if let Some(return_type) = &self.return_type {
+            let return_type = return_type.to_string().magenta();
+            write!(f, ": {}", return_type)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -322,7 +355,12 @@ impl SemanticAnalyzer {
     pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
         /* PASS STRUCTURE
             * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
-            * 1: Collect type information about symbols.
+            * 1: Collect type information about nodes.
+            * 2: Verify type information is correct.
+                * Verify operator is valid on certain types (Unary/BinaryOp).
+                * Verify lhs and rhs resolve to `bool` (ConditionalOp).
+                * Verify return type of function matches with explicit return type.
+                * 
          */
 
         macro_rules! pass {

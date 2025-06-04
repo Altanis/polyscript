@@ -1,6 +1,6 @@
-use crate::{frontend::ast::{AstNode, AstNodeKind}, utils::{error::*, kind::*}};
+use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::*}};
 
-use super::semantic_analyzer::{ReferenceKind, SemanticAnalyzer, Symbol, TypeInfo};
+use super::semantic_analyzer::{FunctionTypeData, ReferenceKind, SemanticAnalyzer, TypeInfo};
 
 impl SemanticAnalyzer {
     fn primitive_type(&self, name: &str) -> TypeInfo {
@@ -28,7 +28,7 @@ impl SemanticAnalyzer {
     }
 
     fn resolve_expression_pair(
-        &mut self,
+        &self,
         left: &mut AstNode,
         right: &mut AstNode,
     ) -> Result<TypeInfo, BoxedError> {
@@ -46,7 +46,100 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn get_type_from_node(&mut self, node: &mut AstNode) -> Result<TypeInfo, BoxedError> {
+    fn resolve_returns(
+        &self,
+        stmts: &mut [AstNode],
+    ) -> Result<TypeInfo, BoxedError> {
+        let mut return_type: Option<TypeInfo> = None;
+        
+        for stmt in stmts {
+            if let AstNodeKind::Return(expr) = &mut stmt.kind {
+                let ty = expr.as_mut().map_or_else(
+                    || Ok(self.primitive_type(NULL_TYPE)),
+                    |e| self.get_type_from_node(e),
+                )?;
+
+                if let Some(existing) = &return_type {
+                    if existing != &ty {
+                        return Err(self.create_error(
+                            ErrorKind::MismatchedTypes(existing.clone(), ty),
+                            stmt.span,
+                            &[stmt.span],
+                        ));
+                    }
+                } else {
+                    return_type = Some(ty);
+                }
+            }
+        }
+
+        Ok(return_type.unwrap_or_else(|| self.primitive_type(NULL_TYPE)))
+    }
+
+    fn resolve_if_statement(
+        &self,
+        then_branch: &mut AstNode,
+        else_if_branches: &mut [(BoxedAstNode, BoxedAstNode)],
+        else_branch: &mut Option<BoxedAstNode>
+    ) -> Result<TypeInfo, BoxedError> {
+        let then_type = self.get_type_from_node(then_branch)?;
+        let else_type = else_branch.as_mut().map_or_else(
+            || Ok(then_type.clone()),
+            |else_node| self.get_type_from_node(else_node)
+        )?;
+
+        if then_type != else_type {
+            return Err(self.create_error(
+                ErrorKind::MismatchedTypes(then_type, else_type),
+                else_branch.as_ref().unwrap().span,
+                &[then_branch.span, else_branch.as_ref().unwrap().span]
+            ));
+        }
+
+        for (_, branch) in else_if_branches {
+            let branch_type = self.get_type_from_node(branch)?;
+            if branch_type != then_type {
+                return Err(self.create_error(
+                    ErrorKind::MismatchedTypes(then_type.clone(), branch_type),
+                    branch.span,
+                    &[then_branch.span, branch.span]
+                ));
+            }
+        }
+
+        Ok(then_type)
+    }
+
+    fn resolve_fn_expr(&self, signature: &mut BoxedAstNode) -> Result<TypeInfo, BoxedError> {
+        let AstNodeKind::FunctionSignature { generic_parameters, parameters, return_type, .. } = &mut signature.kind else {
+            panic!("fnexpr does not hold FunctionSignature node");
+        };
+
+        let resolved_generics: Vec<TypeInfo> = generic_parameters
+            .iter_mut()
+            .map(|node| self.get_type_from_node(node))
+            .collect::<Result<_, _>>()?;
+
+        let resolved_parameters: Vec<TypeInfo> = parameters
+            .iter_mut()
+            .map(|node| self.get_type_from_node(node))
+            .collect::<Result<_, _>>()?;
+
+        let resolved_return_type: Option<Box<TypeInfo>> = match return_type {
+            Some(node) => Some(Box::new(self.get_type_from_node(node)?)),
+            None => None,
+        };
+
+        Ok(TypeInfo::from_function_expression(
+            resolved_generics,
+            FunctionTypeData {
+                params: resolved_parameters,
+                return_type: resolved_return_type,
+            }
+        ))
+    }
+
+    fn get_type_from_node(&self, node: &mut AstNode) -> Result<TypeInfo, BoxedError> {
         use AstNodeKind::*;
 
         match &mut node.kind {
@@ -56,18 +149,34 @@ impl SemanticAnalyzer {
             StringLiteral(_) => Ok(self.primitive_type(STRING_TYPE)),
             CharLiteral(_) => Ok(self.primitive_type(CHAR_TYPE)),
             Identifier(name) => self.lookup_type_from_symbol(name, node.span),
-            ConditionalOperation { .. } => Ok(self.primitive_type(BOOL_TYPE)),
             UnaryOperation { operand, .. } => self.get_type_from_node(operand),
-            BinaryOperation { left, right, .. } => self.resolve_expression_pair(left, right),
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. }
+                => self.resolve_expression_pair(left, right),
+            Block(statements) => self.resolve_returns(statements),
+            IfStatement { then_branch, else_if_branches, else_branch, .. }
+                => self.resolve_if_statement(then_branch, else_if_branches, else_branch),
+            FunctionExpression { signature, .. }
+                => self.resolve_fn_expr(signature),
+            StructLiteral { name } => {
+
+            }
+            // FnExpr, StructLiteral, FieldAccess, FunctionCall
             _ => return Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
+        }
+    }
+
+    fn associate_node_with_type(&mut self, node: &mut AstNode, type_info: TypeInfo) {
+        node.ty = Some(type_info.clone());
+        if let Some((scope_id, name)) = &node.symbol {
+            if let Some(sym) = self.symbol_table.direct_symbol_lookup(*scope_id, name) {
+                sym.type_info = Some(type_info);
+            }
         }
     }
 }
 
 impl SemanticAnalyzer {
     pub fn type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
-        let errors: Vec<Error> = vec![];
-
         let mut errors = vec![];
 
         let AstNodeKind::Program(statements) = &mut program.kind else { panic!("fed node that is not a Program"); };

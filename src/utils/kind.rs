@@ -40,7 +40,6 @@ pub const BREAK_KEYWORD: &str = "break";
 pub const CONTINUE_KEYWORD: &str = "continue";
 pub const IF_KEYWORD: &str = "if";
 pub const ELSE_KEYWORD: &str = "else";
-pub const THROW_KEYWORD: &str = "throw";
 pub const THIS_KEYWORD: &str = "this";
 pub const PUBLIC_KEYWORD: &str = "public";
 pub const PRIVATE_KEYWORD: &str = "private";

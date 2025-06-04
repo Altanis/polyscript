@@ -36,8 +36,6 @@ impl SemanticAnalyzer {
                 self.collect_while_loop_symbols(condition, body),
             AstNodeKind::Return(opt_expr) => 
                 self.collect_return_statement_symbols(opt_expr),
-            AstNodeKind::Throw(expr) => 
-                self.collect_throw_statement_symbols(expr),
             AstNodeKind::FunctionDeclaration { signature, body } => 
                 self.collect_function_declaration(signature, body, node.span),
             AstNodeKind::FunctionExpression { signature, body } => 
@@ -366,14 +364,6 @@ impl SemanticAnalyzer {
         opt_expr: &mut Option<BoxedAstNode>
     ) -> Result<Option<(usize, String)>, BoxedError> {
         self.collect_optional_node(opt_expr)?;
-        Ok(None)
-    }
-
-    fn collect_throw_statement_symbols(
-        &mut self,
-        expr: &mut BoxedAstNode
-    ) -> Result<Option<(usize, String)>, BoxedError> {
-        self.collect_node_symbol(expr)?;
         Ok(None)
     }
 

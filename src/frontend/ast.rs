@@ -58,7 +58,6 @@ pub enum AstNodeKind {
     Return(Option<BoxedAstNode>),
     Break,
     Continue,
-    Throw(BoxedAstNode),
     
     // FUNCTIONS //
     FunctionSignature {
@@ -182,9 +181,9 @@ pub type BoxedAstNode = Box<AstNode>;
 
 impl AstNode {
     pub fn get_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a Symbol> {
-        if let Some(symbol) = &self.symbol {
-            if let Some(scope) = symbol_table.scopes.get(&symbol.0) {
-                return scope.find_symbol(&symbol.1, symbol_table);
+        if let Some((scope_id, name)) = &self.symbol {
+            if let Some(scope) = symbol_table.scopes.get(scope_id) {
+                return scope.find_symbol(name, symbol_table);
             }
         }
 
@@ -465,10 +464,6 @@ impl AstNode {
             AstNodeKind::Return(None) => write!(f, "{}return", indent_str)?,
             AstNodeKind::Break => write!(f, "{}break", indent_str)?,
             AstNodeKind::Continue => write!(f, "{}continue", indent_str)?,
-            AstNodeKind::Throw(expr) => {
-                write!(f, "{}throw ", indent_str)?;
-                expr.fmt_with_indent(f, 0)?
-            }
 
             AstNodeKind::FunctionParameter {
                 name,

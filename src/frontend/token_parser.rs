@@ -495,7 +495,6 @@ impl Parser {
             KeywordKind::Return => self.parse_return_statement(),
             KeywordKind::Break => self.parse_break_statement(),
             KeywordKind::Continue => self.parse_continue_statement(),
-            KeywordKind::Throw => self.parse_throw_statement(),
             KeywordKind::Impl => self.parse_impl_statement(),
             KeywordKind::Enum => self.parse_enum_statement(),
             KeywordKind::Trait => self.parse_trait_declaration(),
@@ -962,16 +961,6 @@ impl Parser {
             };
 
             Ok(AstNodeKind::Return(expression))
-        })
-    }
-
-    fn parse_throw_statement(&mut self) -> Result<AstNode, Box<Error>> {
-        self.spanned_node(|parser| {
-            parser.advance();
-
-            let expression = Box::new(parser.parse_expression_statement()?);
-
-            Ok(AstNodeKind::Throw(expression))
         })
     }
 
