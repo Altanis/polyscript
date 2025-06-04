@@ -50,7 +50,6 @@ impl SemanticAnalyzer {
                 self.collect_trait_symbols(name.clone(), signatures, node.span),
             AstNodeKind::TypeDeclaration { name, generic_parameters, .. } => 
                 self.collect_type_symbols(name.clone(), generic_parameters, node.span),
-            // fn expr
             _ => Ok(None)
         };
 

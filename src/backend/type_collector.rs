@@ -157,9 +157,9 @@ impl SemanticAnalyzer {
                 => self.resolve_if_statement(then_branch, else_if_branches, else_branch),
             FunctionExpression { signature, .. }
                 => self.resolve_fn_expr(signature),
-            StructLiteral { name } => {
+            // StructLiteral { name } => {
 
-            }
+            // }
             // FnExpr, StructLiteral, FieldAccess, FunctionCall
             _ => return Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
         }

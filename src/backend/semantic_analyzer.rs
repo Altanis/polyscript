@@ -46,6 +46,7 @@ pub struct TypeInfo {
     pub generic_parameters: Vec<TypeInfo>,
     pub function_data: Option<FunctionTypeData>,
     pub reference_kind: ReferenceKind,
+    pub scope_reference: Option<ScopeId>
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +69,22 @@ impl TypeInfo {
             generic_parameters,
             function_data: None,
             reference_kind,
+            scope_reference: None
+        }
+    }
+
+    pub fn from_scope_reference(
+        base_type: impl Into<String>, 
+        generic_parameters: Vec<TypeInfo>, 
+        reference_kind: ReferenceKind, 
+        scope_reference: ScopeId
+    ) -> Self {
+        Self {
+            base_type: base_type.into(),
+            generic_parameters,
+            function_data: None,
+            reference_kind,
+            scope_reference: Some(scope_reference)
         }
     }
 
@@ -76,7 +93,8 @@ impl TypeInfo {
             base_type: String::new(),
             generic_parameters,
             function_data: Some(function_data),
-            reference_kind: ReferenceKind::Value
+            reference_kind: ReferenceKind::Value,
+            scope_reference: None
         }
     }
 }
