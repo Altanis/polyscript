@@ -92,7 +92,6 @@ pub enum Operation {
     BitwiseXorEq,
     RightBitShiftEq,
     LeftBitShiftEq,
-    NotEqual,
 
     // CONDITIONAL
     And,
@@ -101,7 +100,8 @@ pub enum Operation {
     Geq, // ≥
     LessThan,
     Leq, // ≤
-    Equivalence,
+    Equivalence, // ==
+    NotEqual, // !=
 
     // CALL
     FieldAccess,
@@ -173,6 +173,7 @@ impl Operation {
                 | Operation::LessThan
                 | Operation::Leq
                 | Operation::Equivalence
+                | Operation::NotEqual
         )
     }
 

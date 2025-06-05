@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 use colored::*;
-use crate::{frontend::ast::AstNode, utils::{error::*, kind::{QualifierKind, Span}}};
+use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
 
 pub type ScopeId = usize;
 
@@ -153,13 +153,15 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new(lines: Rc<Vec<String>>) -> Self {
-        let root_scope = Scope {
+        let mut root_scope = Scope {
             variables: HashMap::new(),
             parent: None,
             lines: lines.clone(),
             id: 0,
             kind: ScopeKind::Root
         };
+
+        SymbolTable::populate_with_defaults(&mut root_scope);
 
         let mut scopes = HashMap::new();
         scopes.insert(0, root_scope);
@@ -169,6 +171,16 @@ impl SymbolTable {
             lines,
             current_scope_id: 0,
             next_scope_id: 1,
+        }
+    }
+
+    fn populate_with_defaults(scope: &mut Scope) {
+        for ty in [INT_TYPE, FLOAT_TYPE, BOOL_TYPE, STRING_TYPE, CHAR_TYPE, NULL_TYPE] {
+            scope.add_symbol(Symbol {
+                name: ty.clone(),
+                kind: SymbolKind::TypeAlias,
+                type_info
+            })
         }
     }
 
@@ -350,6 +362,7 @@ impl SymbolTable {
         Ok(())
     }
 }
+
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     errors: Vec<Error>,
@@ -373,7 +386,9 @@ impl SemanticAnalyzer {
     pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
         /* PASS STRUCTURE
             * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
-            * 1: Collect type information about nodes.
+            * 1: Collect type information for symbols.
+
+
             * 2: Verify type information is correct.
                 * Verify operator is valid on certain types (Unary/BinaryOp).
                 * Verify lhs and rhs resolve to `bool` (ConditionalOp).

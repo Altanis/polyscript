@@ -1,5 +1,5 @@
-use crate::{backend::semantic_analyzer::{ReferenceKind, TypeInfo}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::*}};
-use super::semantic_analyzer::SemanticAnalyzer;
+use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::*}};
+use super::semantic_analyzer::{FunctionTypeData, ReferenceKind, SemanticAnalyzer, TypeInfo};
 
 impl SemanticAnalyzer {
     fn primitive_type(&self, name: &str) -> TypeInfo {
@@ -155,11 +155,11 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn associate_node_with_type(&mut self, node: &mut AstNode, type_info: &TypeInfo) {
+    fn associate_node_with_type(&mut self, node: &mut AstNode, type_info: TypeInfo) {
         node.ty = Some(type_info.clone());
         if let Some((scope_id, name)) = &node.symbol {
             if let Some(sym) = self.symbol_table.direct_symbol_lookup(*scope_id, name) {
-                sym.type_info = Some(type_info.clone());
+                sym.type_info = Some(type_info);
             }
         }
     }
@@ -169,64 +169,20 @@ impl SemanticAnalyzer {
     pub fn type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
-        if let AstNodeKind::Program(statements) = &mut program.kind {
-            for statement in statements {
-                if let Err(err) = self.collect_type_symbol(statement) {
-                    errors.push(*err);
-                }
+        let AstNodeKind::Program(statements) = &mut program.kind else { panic!("fed node that is not a Program"); };
+        for statement in statements {
+            match self.solve_type(statement) {
+                Ok(ty) => statement.ty = ty,
+                Err(err) => errors.push(*err),
             }
-        } else {
-            panic!("Fed node that is not a Program");
         }
 
         errors
     }
 
-    fn collect_type_symbol(&mut self, node: &mut AstNode) -> Result<Option<TypeInfo>, BoxedError> {
-        use AstNodeKind::*;
-
-        let declared_type_opt: Result<Option<TypeInfo>, BoxedError> = match &mut node.kind {
-            VariableDeclaration { name, mutable, type_annotation, initializer } => 
-                self.collect_variable_type(name.clone(), *mutable, type_annotation, initializer, node.span),
-            // FunctionDeclaration { signature, body } 
-            //     => self.collect_function_declaration(signature, body, node.span),
-            // FunctionExpression { signature, body } => 
-            //     self.collect_function_expression_symbols(signature, body),
-            // StructDeclaration { name, fields, generic_parameters } =>
-            //     self.collect_struct_symbols(name.clone(), fields, generic_parameters, node.span),
-            // EnumDeclaration { name, variants } =>
-            //     self.collect_enum_symbols(name.clone(), variants, node.span),
-            // ImplDeclaration { associated_constants, associated_functions, generic_parameters, .. } =>
-            //     self.collect_impl_symbols(associated_constants, associated_functions, generic_parameters),
-            // TraitDeclaration { name, signatures } =>
-            //     self.collect_trait_symbols(name.clone(), signatures, node.span),
-            // TypeDeclaration { name, generic_parameters, .. } =>
-            //     self.collect_type_symbols(name.clone(), generic_parameters, node.span),
-            // Block(statements) =>
-            //     self.collect_block_symbols(statements),
-            _ => {
-                for child in node.children_mut() {
-                    self.collect_type_symbol(child)?;
-                }
-
-                Ok(None)
-            }
-        };
-
-        if let Ok(Some(ref info)) = declared_type_opt {
-            self.associate_node_with_type(node, info);
+    fn solve_type(&mut self, statement: &mut AstNode) -> Result<Option<TypeInfo>, BoxedError> {
+        match &mut statement.kind {
+            _ => Ok(None)
         }
-
-        declared_type_opt
-    }
-
-    fn collect_variable_type(
-        &mut self,
-        name: &mut String, 
-        mutable: bool, 
-        type_annotation: &mut Option<BoxedAstNode>,
-        initializer: &mut Option<BoxedAstNode>
-    ) -> Result<Option<TypeInfo>, BoxedError> {
-        
     }
 }

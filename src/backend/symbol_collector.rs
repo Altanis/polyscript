@@ -5,6 +5,7 @@ use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, Symbol, SymbolKind, 
 impl SemanticAnalyzer {
     pub fn symbol_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
+
         if let AstNodeKind::Program(statements) = &mut program.kind {
             for statement in statements {
                 if let Err(err) = self.collect_node_symbol(statement) {
@@ -14,6 +15,7 @@ impl SemanticAnalyzer {
         } else {
             panic!("Fed node that is not a Program");
         }
+        
         errors
     }
 
