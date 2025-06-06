@@ -573,3 +573,10 @@ impl std::fmt::Display for Token {
         )
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReferenceKind {
+    Value,
+    Reference,
+    MutableReference
+}

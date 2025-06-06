@@ -111,7 +111,7 @@ impl SemanticAnalyzer {
 
     // fn resolve_fn_expr(&self, signature: &mut BoxedAstNode) -> Result<TypeInfo, BoxedError> {
     //     let AstNodeKind::FunctionSignature { generic_parameters, parameters, return_type, .. } = &mut signature.kind else {
-    //         panic!("fnexpr does not hold FunctionSignature node");
+    //          unreachable!();
     //     };
 
     //     let resolved_generics: Vec<TypeInfo> = generic_parameters
@@ -169,7 +169,7 @@ impl SemanticAnalyzer {
     pub fn type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
-        let AstNodeKind::Program(statements) = &mut program.kind else { panic!("fed node that is not a Program"); };
+        let AstNodeKind::Program(statements) = &mut program.kind else { unreachable!(); };
         for statement in statements {
             match self.solve_type(statement) {
                 Ok(ty) => statement.ty = ty,

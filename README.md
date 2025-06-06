@@ -18,6 +18,8 @@
 - [x] fix all error formats
 - [x] add mutable parameters
 
+- [ ] check if scope_id is necessary for value and type symbols
+
 NOTE: stdlib should contain:
 - io functions (print, err, etc)
 - math functions

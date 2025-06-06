@@ -1,6 +1,5 @@
 use colored::Colorize;
 
-use crate::backend::semantic_analyzer::TypeInfo;
 use super::kind::Span;
 
 #[derive(Debug, Clone)]
@@ -18,8 +17,9 @@ pub enum ErrorKind {
     UnresolvedType(String),
     AlreadyDeclared(String),
     UnknownType,
-    MismatchedTypes(TypeInfo, TypeInfo),
-    BadVariableDeclaration
+    // InvalidOperation()
+    // MismatchedTypes(TypeInfo, TypeInfo),
+    // BadVariableDeclaration
 }
 
 impl ErrorKind {
@@ -39,8 +39,6 @@ impl ErrorKind {
             ErrorKind::UnresolvedType(name) => format!("type for symbol \"{}\" has not been determined by this line", name),
             ErrorKind::AlreadyDeclared(variable) => format!("attempted to declare {}, but it already exists in scope", variable),
             ErrorKind::UnknownType => "could not determine type of data at compile-time".to_string(),
-            ErrorKind::MismatchedTypes(t1, t2) => format!("expected two of the same types, instead found {} and {}", t1, t2),
-            ErrorKind::BadVariableDeclaration => "variable must be assigned a type or value upon declaration".to_string()
         }
     }
 }
@@ -55,6 +53,14 @@ pub struct Error {
 pub type BoxedError = Box<Error>;
 
 impl Error {
+    pub fn new(kind: ErrorKind) -> BoxedError {
+        Box::new(Error {
+            kind,
+            span: Span::default(),
+            source_lines: vec![]
+        })
+    }
+
     pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> BoxedError {
         Box::new(Error {
             kind,

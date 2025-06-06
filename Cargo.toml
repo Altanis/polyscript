@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 colored = "3.0.0"
 indexmap = "2.9.0"
+strum = "0.27.1"
+strum_macros = "0.27.1"

@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{Symbol, SymbolTable, TypeInfo}, utils::kind::*};
+use crate::{backend::semantic_analyzer::{ValueSymbol, SymbolId, SymbolTable, TypeSymbol}, utils::kind::*};
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
@@ -173,18 +173,40 @@ pub enum AstNodeKind {
 pub struct AstNode {
     pub kind: AstNodeKind,
     pub span: Span,
-    pub ty: Option<TypeInfo>,
-    pub symbol: Option<(usize, String)>
+    pub value_id: Option<SymbolId>,
+    pub type_id: Option<SymbolId>
 }
 
 pub type BoxedAstNode = Box<AstNode>;
 
 impl AstNode {
-    pub fn get_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a Symbol> {
-        if let Some((scope_id, name)) = &self.symbol {
-            if let Some(scope) = symbol_table.scopes.get(scope_id) {
-                return scope.find_symbol(name, symbol_table);
-            }
+    pub fn get_value_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
+        if let Some(id) = &self.value_id {
+            return symbol_table.direct_value_symbol_lookup(id);
+        }
+
+        None
+    }
+
+    pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
+        if let Some(id) = &self.value_id {
+            return symbol_table.direct_value_symbol_lookup_mut(id);
+        }
+
+        None
+    }
+
+    pub fn get_type_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
+        if let Some(id) = &self.value_id {
+            return symbol_table.direct_type_symbol_lookup(id);
+        }
+
+        None
+    }
+
+    pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
+        if let Some(id) = &self.value_id {
+            return symbol_table.direct_type_symbol_lookup_mut(id);
         }
 
         None
@@ -652,13 +674,13 @@ impl AstNode {
             }
         }
 
-        if let Some(ty) = &self.ty {
+        if let Some((scope, str)) = &self.type_id {
             write!(f, " {}",
-                format_args!("[type: {}]", ty.to_string())
+                format_args!("[type: ({}, {})]", scope, str)
             )?;
         }
 
-        if let Some((_, name)) = &self.symbol {
+        if let Some((_, name)) = &self.value_id {
             write!(f, " [symbol: {}]", name.magenta().bold())?;
         }
 

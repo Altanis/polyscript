@@ -111,7 +111,7 @@ impl Parser {
         let kind = builder(self)?;
         let finished = initial.set_end_from_span(self.previous().get_span());
 
-        Ok(AstNode { kind, span: finished, ty: None, symbol: None })
+        Ok(AstNode { kind, span: finished, type_id: None, value_id: None })
     }
 }
 
@@ -133,8 +133,8 @@ impl Parser {
                             operand: Box::new(lhs),
                             prefix: false
                         },
-                        ty: None,
-                        symbol: None
+                        type_id: None,
+                        value_id: None
                     };
 
                     self.advance();
@@ -181,8 +181,8 @@ impl Parser {
                     },
                     _ => unreachable!()
                 },
-                ty: None,
-                symbol: None
+                type_id: None,
+                value_id: None
             };
         }
 
@@ -208,8 +208,8 @@ impl Parser {
                     function: Box::new(lhs),
                     arguments,
                 },
-                ty: None,
-                symbol: None
+                type_id: None,
+                value_id: None
             };
         }
 
@@ -256,8 +256,8 @@ impl Parser {
                         operand,
                         prefix: true
                     },
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::NumberLiteral(_) => {
@@ -294,8 +294,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: if is_integer { AstNodeKind::IntegerLiteral(value as i64) } else { AstNodeKind::FloatLiteral(value) },
                     span: token.get_span(),
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::BooleanLiteral => {
@@ -305,8 +305,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::BooleanLiteral(value),
                     span: token.get_span(),
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::StringLiteral => {
@@ -318,8 +318,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::StringLiteral(value),
                     span: token.get_span(),
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::CharLiteral => {
@@ -331,8 +331,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::CharLiteral(value),
                     span: token.get_span(),
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::Identifier => {
@@ -355,8 +355,8 @@ impl Parser {
                             AstNode {
                                 kind: AstNodeKind::Identifier(name.clone()),
                                 span: name_token.get_span(),
-                                ty: None,
-                                symbol: None
+                                type_id: None,
+                                value_id: None
                             }
                         };
 
@@ -376,15 +376,15 @@ impl Parser {
                             fields
                         },
                         span: span.set_end_from_span(self.previous().get_span()),
-                        ty: None,
-                        symbol: None
+                        type_id: None,
+                        value_id: None
                     })
                 } else {
                     Ok(AstNode {
                         kind: AstNodeKind::Identifier(name),
                         span,
-                        ty: None,
-                        symbol: None
+                        type_id: None,
+                        value_id: None
                     })
                 }
             },
@@ -399,8 +399,8 @@ impl Parser {
                 Ok(AstNode {
                     kind: AstNodeKind::SelfValue,
                     span: span.set_end_from_span(self.previous().get_span()),
-                    ty: None,
-                    symbol: None
+                    type_id: None,
+                    value_id: None
                 })
             },
             TokenKind::Keyword(KeywordKind::Fn) => {
@@ -469,8 +469,8 @@ impl Parser {
                     column: self.tokens.last().unwrap().get_span().end_pos.column,
                 }
             },
-            ty: None,
-            symbol: None
+            type_id: None,
+            value_id: None
         }
     }
 
@@ -1137,8 +1137,8 @@ impl Parser {
                     instance: Some(instance)
                 },
                 span: Span::default(),
-                ty: None,
-                symbol: None
+                type_id: None,
+                value_id: None
             });
 
             let body = Box::new(parser.parse_block()?);

@@ -1,20 +1,59 @@
 use std::{collections::HashMap, rc::Rc};
 use colored::*;
+use strum::IntoEnumIterator;
 use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
 
 pub type ScopeId = usize;
+pub type SymbolId = (usize, String);
 
 #[derive(Debug, Clone)]
-pub enum SymbolKind {
+pub struct FunctionData {
+    pub params: Vec<SymbolId>,
+    pub return_type: SymbolId
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ValueSymbolKind {
     Variable,
     Function,
-    Struct(ScopeId),
-    Enum(ScopeId),
-    Trait(ScopeId),
-    TypeAlias,
     StructField,
     EnumVariant
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, strum_macros::EnumIter, strum_macros::Display)]
+pub enum BuiltinKind {
+    Int,
+    Float,
+    Bool,
+    String,
+    Char,
+    Null
+}
+
+impl BuiltinKind {
+    pub fn to_symbol(&self) -> String {
+        (match self {
+            BuiltinKind::Int => INT_TYPE,
+            BuiltinKind::Float => FLOAT_TYPE,
+            BuiltinKind::Bool => BOOL_TYPE,
+            BuiltinKind::String => STRING_TYPE,
+            BuiltinKind::Char => CHAR_TYPE,
+            BuiltinKind::Null => NULL_TYPE
+        }).to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TypeSymbolKind {
+    Builtin(BuiltinKind),
+    Enum(ScopeId),
+    Struct(ScopeId),
+    Trait(ScopeId),
+    TypeAlias,
+    Generic,
+    Custom
+}
+
 
 #[derive(Debug, Clone)]
 pub enum ScopeKind {
@@ -29,79 +68,36 @@ pub enum ScopeKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct Symbol {
+pub struct ValueSymbol {
     pub name: String,
-    pub kind: SymbolKind,
-    pub type_info: Option<TypeInfo>,
+    pub kind: ValueSymbolKind,
     pub mutable: bool,
     pub span: Span,
-    pub qualifier: Option<QualifierKind>,
-    pub generic_parameters: Vec<TypeInfo>,
-    pub scope_id: ScopeId
+    pub qualifier: QualifierKind,
+    pub scope_id: ScopeId,
+    pub type_id: Option<SymbolId>
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypeInfo {
-    pub base_type: String,
-    pub generic_parameters: Vec<TypeInfo>,
-    pub function_data: Option<FunctionTypeData>,
-    pub reference_kind: ReferenceKind,
-    pub scope_reference: Option<ScopeId>
+#[derive(Debug, Clone)]
+pub struct TypeSymbol {
+    pub name: String,
+    pub kind: TypeSymbolKind,
+    pub generic_parameters: Vec<SymbolId>,
+    pub function_data: Option<FunctionData>,
+    pub scope_id: ScopeId,
+    pub span: Option<Span>
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct FunctionTypeData {
-    pub params: Vec<TypeInfo>,
-    pub return_type: Option<Box<TypeInfo>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ReferenceKind {
-    Value,
-    Reference,
-    MutableReference,
-}
-
-impl TypeInfo {
-    pub fn new(base_type: impl Into<String>, generic_parameters: Vec<TypeInfo>, reference_kind: ReferenceKind) -> Self {
-        Self {
-            base_type: base_type.into(),
-            generic_parameters,
-            function_data: None,
-            reference_kind,
-            scope_reference: None
-        }
-    }
-
-    pub fn from_scope_reference(
-        base_type: impl Into<String>, 
-        generic_parameters: Vec<TypeInfo>, 
-        reference_kind: ReferenceKind, 
-        scope_reference: ScopeId
-    ) -> Self {
-        Self {
-            base_type: base_type.into(),
-            generic_parameters,
-            function_data: None,
-            reference_kind,
-            scope_reference: Some(scope_reference)
-        }
-    }
-
-    pub fn from_function_expression(generic_parameters: Vec<TypeInfo>, function_data: FunctionTypeData) -> Self {
-        Self {
-            base_type: String::new(),
-            generic_parameters,
-            function_data: Some(function_data),
-            reference_kind: ReferenceKind::Value,
-            scope_reference: None
-        }
+impl TypeSymbol {
+    pub fn can_assign(&self, other: TypeSymbol) -> bool {
+        self.name == other.name // lol
     }
 }
 
 #[derive(Debug)]
 pub struct Scope {
-    variables: HashMap<String, Symbol>,
+    values: HashMap<String, ValueSymbol>,
+    types: HashMap<String, TypeSymbol>,
     parent: Option<ScopeId>,
     lines: Rc<Vec<String>>,
     id: ScopeId,
@@ -109,29 +105,29 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn find_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a Symbol> {
-        if let Some(symbol) = self.variables.get(name) {
+    pub fn find_value_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
+        if let Some(symbol) = self.values.get(name) {
             Some(symbol)
         } else if let Some(parent_id) = self.parent {
-            symbol_table.scopes.get(&parent_id)?.find_symbol(name, symbol_table)
+            symbol_table.scopes.get(&parent_id)?.find_value_symbol(name, symbol_table)
         } else {
             None
         }
     }
 
-    pub fn find_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut Symbol> {
-        let owner_id = symbol_table.find_symbol_owner(name, self.id)?;
+    pub fn find_value_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
+        let owner_id = symbol_table.find_value_symbol_owner(name, self.id)?;
 
         symbol_table
             .scopes
             .get_mut(&owner_id)
-            .and_then(|scope| scope.variables.get_mut(name))
+            .and_then(|scope| scope.values.get_mut(name))
     }
 
-    pub fn add_symbol(&mut self, mut symbol: Symbol) -> Result<ScopeId, BoxedError> {
+    pub fn add_value_symbol(&mut self, mut symbol: ValueSymbol) -> Result<ScopeId, BoxedError> {
         symbol.scope_id = self.id;
 
-        if let Some(existing) = self.variables.get(&symbol.name) {
+        if let Some(existing) = self.values.get(&symbol.name) {
             return Err(Error::from_multiple_errors(
                 ErrorKind::AlreadyDeclared(symbol.name),
                 symbol.span,
@@ -139,7 +135,58 @@ impl Scope {
             ));
         }
 
-        self.variables.insert(symbol.name.clone(), symbol);
+        self.values.insert(symbol.name.clone(), symbol);
+        Ok(self.id)
+    }
+
+    pub fn find_type_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
+        if let Some(symbol) = self.types.get(name) {
+            Some(symbol)
+        } else if let Some(parent_id) = self.parent {
+            symbol_table.scopes.get(&parent_id)?.find_type_symbol(name, symbol_table)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_type_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
+        let owner_id = symbol_table.find_type_symbol_owner(name, self.id)?;
+
+        symbol_table
+            .scopes
+            .get_mut(&owner_id)
+            .and_then(|scope| scope.types.get_mut(name))
+    }
+
+    pub fn add_type_symbol(&mut self, mut symbol: TypeSymbol) -> Result<ScopeId, BoxedError> {
+        symbol.scope_id = self.id;
+
+        if let Some(existing) = self.types.get(&symbol.name) {
+            let (existing_span, symbol_span) = (existing.span, symbol.span);
+
+            match (existing_span, symbol_span) {
+                (None, None) => return Err(Error::new(ErrorKind::AlreadyDeclared(symbol.name))),
+                (Some(span), None) => return Err(Error::from_one_error(
+                    ErrorKind::AlreadyDeclared(symbol.name),
+                    span,
+                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
+                )),
+                (None, Some(span)) => return Err(Error::from_one_error(
+                    ErrorKind::AlreadyDeclared(symbol.name),
+                    span,
+                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
+                )),
+                (Some(existing_span), Some(symbol_span)) => {
+                    return Err(Error::from_multiple_errors(
+                        ErrorKind::AlreadyDeclared(symbol.name),
+                        symbol_span,
+                        Span::get_all_lines(self.lines.clone(), &[existing_span, symbol_span]),
+                    ));
+                }
+            }
+        }
+
+        self.types.insert(symbol.name.clone(), symbol);
         Ok(self.id)
     }
 }
@@ -153,44 +200,60 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new(lines: Rc<Vec<String>>) -> Self {
-        let mut root_scope = Scope {
-            variables: HashMap::new(),
+        let mut root = Scope {
+            values: HashMap::new(),
+            types: HashMap::new(),
             parent: None,
             lines: lines.clone(),
             id: 0,
             kind: ScopeKind::Root
         };
 
-        SymbolTable::populate_with_defaults(&mut root_scope);
+        let init = Scope {
+            values: HashMap::new(),
+            types: HashMap::new(),
+            parent: Some(0),
+            lines: lines.clone(),
+            id: 1,
+            kind: ScopeKind::Block
+        };
+
+        SymbolTable::populate_with_defaults(&mut root);
 
         let mut scopes = HashMap::new();
-        scopes.insert(0, root_scope);
+        scopes.insert(0, root);
+        scopes.insert(1, init);
 
         SymbolTable {
             scopes,
             lines,
-            current_scope_id: 0,
-            next_scope_id: 1,
+            current_scope_id: 1,
+            next_scope_id: 2,
         }
     }
 
     fn populate_with_defaults(scope: &mut Scope) {
-        for ty in [INT_TYPE, FLOAT_TYPE, BOOL_TYPE, STRING_TYPE, CHAR_TYPE, NULL_TYPE] {
-            scope.add_symbol(Symbol {
-                name: ty.clone(),
-                kind: SymbolKind::TypeAlias,
-                type_info
-            })
+        for ty in BuiltinKind::iter() {
+            scope.add_type_symbol(TypeSymbol {
+                name: ty.to_symbol(),
+                kind: TypeSymbolKind::Builtin(ty),
+                generic_parameters: vec![],
+                function_data: None,
+                scope_id: 0,
+                span: None
+            }).unwrap();
         }
     }
 
-    fn find_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
+    fn find_value_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
         let mut scope_id = start_scope_id;
         loop {
             let scope = &self.scopes[&scope_id];
-            if scope.variables.contains_key(name) {
+
+            if scope.values.contains_key(name) {
                 return Some(scope_id);
             }
+
             match scope.parent {
                 Some(parent_id) => scope_id = parent_id,
                 None => return None,
@@ -198,8 +261,36 @@ impl SymbolTable {
         }
     }
 
-    pub fn direct_symbol_lookup(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut Symbol> {
-        self.scopes.get_mut(&scope_id).and_then(|scope| scope.variables.get_mut(name))
+    fn find_type_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
+        let mut scope_id = start_scope_id;
+        loop {
+            let scope = &self.scopes[&scope_id];
+
+            if scope.types.contains_key(name) {
+                return Some(scope_id);
+            }
+
+            match scope.parent {
+                Some(parent_id) => scope_id = parent_id,
+                None => return None,
+            }
+        }
+    }
+
+    pub fn direct_value_symbol_lookup(&self, (scope_id, name): &SymbolId) -> Option<&ValueSymbol> {
+        self.scopes.get(scope_id).and_then(|scope| scope.values.get(name))
+    }
+
+    pub fn direct_value_symbol_lookup_mut(&mut self, (scope_id, name): &SymbolId) -> Option<&mut ValueSymbol> {
+        self.scopes.get_mut(scope_id).and_then(|scope| scope.values.get_mut(name))
+    }
+    
+    pub fn direct_type_symbol_lookup(&self, (scope_id, name): &SymbolId) -> Option<&TypeSymbol> {
+        self.scopes.get(&scope_id).and_then(|scope| scope.types.get(name))
+    }
+
+    pub fn direct_type_symbol_lookup_mut(&mut self, (scope_id, name): &SymbolId) -> Option<&mut TypeSymbol> {
+        self.scopes.get_mut(&scope_id).and_then(|scope| scope.types.get_mut(name))
     }
     
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
@@ -207,7 +298,8 @@ impl SymbolTable {
         let parent_id = self.current_scope_id;
 
         let new_scope = Scope {
-            variables: HashMap::new(),
+            values: HashMap::new(),
+            types: HashMap::new(),
             parent: Some(parent_id),
             lines: self.lines.clone(),
             id: new_id,
@@ -238,101 +330,56 @@ impl SymbolTable {
     }
 }
 
-impl std::fmt::Display for SymbolKind {
+impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
-            SymbolKind::Variable => "Variable".green(),
-            SymbolKind::Function => "Function".blue(),
-            SymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
-            SymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
-            SymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
-            SymbolKind::TypeAlias => "TypeAlias".white(),
-            SymbolKind::StructField => "StructField".yellow(),
-            SymbolKind::EnumVariant => "EnumVariant".yellow(),
+            ValueSymbolKind::Variable => "Variable".green(),
+            ValueSymbolKind::Function => "Function".blue(),
+            ValueSymbolKind::StructField => "StructField".yellow(),
+            ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };
         write!(f, "{}", colored)
     }
 }
 
-impl std::fmt::Display for Symbol {
+impl std::fmt::Display for ValueSymbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name.cyan().bold())?;
         write!(f, " ({})", self.kind)?;
 
-        if let Some(type_info) = &self.type_info {
-            write!(f, " : {}", type_info)?;
-        } else {
-            write!(f, " : undetermined_type")?;
-        }
-        
         if self.mutable {
             write!(f, " {}", "mut".red())?;
         }
 
-        if let Some(qualifier) = self.qualifier {
-            write!(f, " {}", qualifier)?;
-        }
+        write!(f, " {}", self.qualifier)?;
         
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for TypeSymbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let type_variant = match self.kind {
+            TypeSymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
+            TypeSymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
+            TypeSymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
+            TypeSymbolKind::TypeAlias => "TypeAlias".white(),
+            TypeSymbolKind::Builtin(name) => format!("Builtin({})", name).green(),
+            TypeSymbolKind::Custom => "Custom".white(),
+            TypeSymbolKind::Generic => "Generic".white()
+        };
+
+        write!(f, "[{}] {}", type_variant, self.name.cyan().bold())?;
+
         if !self.generic_parameters.is_empty() {
-            let generics = self.generic_parameters.iter()
-                .map(|g| g.to_string().dimmed().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            write!(f, " <{}>", generics)?;
-        }
-        
-        Ok(())
-    }
-}
-
-impl std::fmt::Display for TypeInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let reference = match self.reference_kind {
-            ReferenceKind::Value => "".normal(),
-            ReferenceKind::Reference => "&".red(),
-            ReferenceKind::MutableReference => "&mut ".red().bold(),
-        };
-
-        if let Some(func_data) = &self.function_data {
-            return write!(f, "{}{}", reference, func_data);
+            write!(f, "<{}>", self.generic_parameters.iter().map(|(id, name)| format!("{}:{}", id, name)).collect::<Vec<_>>().join(", "))?;
         }
 
-        let base = self.base_type.yellow().bold();
-        let generics = if !self.generic_parameters.is_empty() {
-            format!("<{}>", 
-                self.generic_parameters.iter()
-                    .map(|g| g.to_string().blue().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else {
-            String::new()
-        };
-
-        write!(f, "{}{}{}", reference, base, generics)
-    }
-}
-
-impl std::fmt::Display for FunctionTypeData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let params = self.params.iter()
-            .map(|p| p.to_string().green().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        write!(f, "({})", params)?;
-
-        if let Some(return_type) = &self.return_type {
-            let return_type = return_type.to_string().magenta();
-            write!(f, ": {}", return_type)?;
+        if let Some(data) = &self.function_data {
+            write!(f, ": {:?}", data.return_type)?;
         }
 
         Ok(())
-    }
-}
-
-impl std::fmt::Display for SymbolTable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.display_scope(0, 0, f)
     }
 }
 
@@ -343,8 +390,12 @@ impl SymbolTable {
             None => return Ok(())
         };
 
-        for symbol in scope.variables.values() {
-            writeln!(f, "{:indent$}{}", "", symbol, indent = indent)?;
+        for symbol in scope.values.values() {
+            writeln!(f, "{:indent$}[val] {}", "", symbol, indent = indent)?;
+        }
+
+        for symbol in scope.types.values() {
+            writeln!(f, "{:indent$}[type] {}", "", symbol, indent = indent)?;
         }
 
         let mut child_scope_ids: Vec<ScopeId> = self.scopes.values()
@@ -354,17 +405,28 @@ impl SymbolTable {
         child_scope_ids.sort();
 
         for child_id in child_scope_ids {
+            println!();
+
             writeln!(f, "{:indent$}{{", "", indent = indent)?;
             self.display_scope(child_id, indent + 4, f)?;
             writeln!(f, "{:indent$}}}", "", indent = indent)?;
-        }
 
+            println!();
+        }
+        
         Ok(())
+    }
+}
+
+impl std::fmt::Display for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.display_scope(0, 0, f)
     }
 }
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
+    pub builtins: Vec<SymbolId>,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>
 }
@@ -373,6 +435,7 @@ impl SemanticAnalyzer {
     pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
         SemanticAnalyzer {
             symbol_table: SymbolTable::new(lines.clone()),
+            builtins: BuiltinKind::iter().map(|k| (0, k.to_symbol())).collect(),
             errors: vec![],
             lines
         }
