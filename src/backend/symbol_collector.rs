@@ -35,7 +35,7 @@ impl SemanticAnalyzer {
                 self.collect_enum_symbols(name.clone(), variants, node.span),
             ImplDeclaration { associated_constants, associated_functions, generic_parameters, .. } =>
                 self.collect_impl_symbols(associated_constants, associated_functions, generic_parameters),
-            TraitDeclaration { name, signatures } =>
+            TraitDeclaration { name, signatures, .. } =>
                 self.collect_trait_symbols(name.clone(), signatures, node.span),
             TypeDeclaration { name, generic_parameters, .. } =>
                 self.collect_type_symbols(name.clone(), generic_parameters, node.span),

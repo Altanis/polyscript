@@ -1037,17 +1037,15 @@ impl Parser {
             parser.advance();
             let generic_parameters = parser.parse_generic_parameter_list()?;
 
-            let (type_node, trait_name) = {
-                let first = parser.advance().clone();
-
+            let (type_node, trait_node) = {
+                let first = parser.parse_type()?;
                 if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::For) {
                     parser.advance();
-                    let type_node = parser.parse_type()?;
-                    let trait_name = Some(first.get_value().to_string());
-                    (type_node, trait_name)
+                    let second = parser.parse_type()?;
+
+                    (Box::new(second), Some(Box::new(first)))
                 } else {
-                    parser.back();
-                    (parser.parse_type()?, None)
+                    (Box::new(first), None)
                 }
             };
 
@@ -1086,8 +1084,8 @@ impl Parser {
 
             Ok(AstNodeKind::ImplDeclaration {
                 generic_parameters,
-                type_reference: Box::new(type_node),
-                trait_name,
+                type_reference: type_node,
+                trait_node,
                 associated_constants,
                 associated_functions
             })
@@ -1191,7 +1189,9 @@ impl Parser {
     fn parse_trait_declaration(&mut self) -> Result<AstNode, Box<Error>> {
         self.spanned_node(|parser| {
             parser.advance();
+
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
+            let generic_parameters = parser.parse_generic_parameter_list()?;
             let mut signatures = vec![];
 
             parser.consume(TokenKind::OpenBrace)?;
@@ -1199,9 +1199,10 @@ impl Parser {
                 signatures.push(parser.parse_function_signature(false, true, true)?);
                 parser.consume(TokenKind::Semicolon)?;
             }
+
             parser.consume(TokenKind::CloseBrace)?;
 
-            Ok(AstNodeKind::TraitDeclaration { name, signatures })
+            Ok(AstNodeKind::TraitDeclaration { name, generic_parameters, signatures })
         })
     }
 

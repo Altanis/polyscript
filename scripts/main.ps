@@ -1,48 +1,30 @@
-fn x(mut a: int) {}
+let x = 1;
+if (x == 1) {
+    let x = "4";
+} else if (x == 2) {
+    let x = "5";
+} else {
+    let x = "6";
+}
 
-let a = 4;
-let z = usjfiko;
-let y = "20";
+type Integer = int;
 
-fn add[T](a: T, b: T): T {
+fn add[T: Add](a: T, b: T): T {
     return a + b;
 }
 
-struct Normalize[T] {
+struct Point[T] {
     public x: T;
     public y: T;
 }
 
-enum NormalizationFactor {
-    High,
-    Medium,
-    Low
+trait VectorLike[T] {
+    fn new(): Point;
+    fn operation[T](a: Point[T], b: Point[T]): Integer;
 }
 
-trait Normalizer {
-    fn normalize(&this);
-}
-
-type NormalizeType[T] = T;
-
-{
-    let y = 34;
-    let z = 92;
-}
-
-if (x == 1) {
-    let jessie = "hi";
-} else if (x == 2) {
-    let james = "bye"; 
-} else {
-    let meowth = "that's right";
-}
-
-impl Normalize {
-    public const NORMALIZATION_CONST = 3;
-
-    public fn let_me() {}
-    public fn let_us(this) {}
-    public fn let_him(&this) {}
-    public fn let_her(&mut this) {}
+impl VectorLike[Integer] for Point[Integer] {
+    fn add(a: Point[Integer], b: Point[Integer]): Integer {
+        return add(a.x, a.y);
+    }
 }

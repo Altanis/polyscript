@@ -114,7 +114,7 @@ pub enum AstNodeKind {
     ImplDeclaration {
         generic_parameters: Vec<AstNode>,
         type_reference: BoxedAstNode,
-        trait_name: Option<String>,
+        trait_node: Option<BoxedAstNode>,
         associated_constants: Vec<AstNode>,
         associated_functions: Vec<AstNode>
     },
@@ -145,6 +145,7 @@ pub enum AstNodeKind {
     // TRAITS //
     TraitDeclaration {
         name: String,
+        generic_parameters: Vec<AstNode>,
         signatures: Vec<AstNode>
     },
 
@@ -347,7 +348,7 @@ impl AstNode {
             AstNodeKind::ImplDeclaration {
                 generic_parameters,
                 type_reference: name,
-                trait_name,
+                trait_node: trait_name,
                 associated_constants,
                 associated_functions
             } => {
@@ -632,8 +633,21 @@ impl AstNode {
                 }
                 write!(f, ")")?
             }
-            AstNodeKind::TraitDeclaration { name, signatures } => {
-                write!(f, "{}trait {}", indent_str, name.yellow())?;
+            AstNodeKind::TraitDeclaration { name, generic_parameters, signatures } => {
+                write!(f, "{}trait", indent_str)?;
+                if !generic_parameters.is_empty() {
+                    write!(f, "[")?;
+                    for (i, param) in generic_parameters.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        param.fmt_with_indent(f, 0)?;
+                    }
+                    write!(f, "]")?;
+                }
+
+                write!(f, " {}", name.yellow())?;
+
                 writeln!(f, " {}", "{".dimmed())?;
                 
                 for signature in signatures {
