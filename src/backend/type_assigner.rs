@@ -1,8 +1,8 @@
-use crate::{backend::semantic_analyzer::{BuiltinKind, SymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, Span}}};
+use crate::{backend::semantic_analyzer::{PrimitiveKind, SymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, Span}}};
 use super::semantic_analyzer::SemanticAnalyzer;
 
 impl SemanticAnalyzer {
-    fn get_builtin_type(&self, builtin: BuiltinKind) -> SymbolId {
+    fn get_builtin_type(&self, builtin: PrimitiveKind) -> SymbolId {
         self.builtins[builtin as usize].clone()
     }
 
@@ -36,11 +36,11 @@ impl SemanticAnalyzer {
         }
 
         let id = (match &mut node.kind {
-            IntegerLiteral(_) => Ok(self.get_builtin_type(BuiltinKind::Int)),
-            FloatLiteral(_) => Ok(self.get_builtin_type(BuiltinKind::Float)),
-            BooleanLiteral(_) => Ok(self.get_builtin_type(BuiltinKind::Bool)),
-            StringLiteral(_) => Ok(self.get_builtin_type(BuiltinKind::String)),
-            CharLiteral(_) => Ok(self.get_builtin_type(BuiltinKind::Char)),
+            IntegerLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Int)),
+            FloatLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Float)),
+            BooleanLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Bool)),
+            StringLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::String)),
+            CharLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Char)),
             Identifier(name) => self.get_type_from_identifier(name, node.span),
             // UnaryOperation { operator, operand, .. } 
                 // => Ok(self.get_builtin_type(self.get_type_from_unary_operation(*operator, operand)?)),

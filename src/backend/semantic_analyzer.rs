@@ -21,7 +21,7 @@ pub enum ValueSymbolKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, strum_macros::EnumIter, strum_macros::Display)]
-pub enum BuiltinKind {
+pub enum PrimitiveKind {
     Int,
     Float,
     Bool,
@@ -30,22 +30,22 @@ pub enum BuiltinKind {
     Null
 }
 
-impl BuiltinKind {
+impl PrimitiveKind {
     pub fn to_symbol(&self) -> String {
         (match self {
-            BuiltinKind::Int => INT_TYPE,
-            BuiltinKind::Float => FLOAT_TYPE,
-            BuiltinKind::Bool => BOOL_TYPE,
-            BuiltinKind::String => STRING_TYPE,
-            BuiltinKind::Char => CHAR_TYPE,
-            BuiltinKind::Null => NULL_TYPE
+            PrimitiveKind::Int => INT_TYPE,
+            PrimitiveKind::Float => FLOAT_TYPE,
+            PrimitiveKind::Bool => BOOL_TYPE,
+            PrimitiveKind::String => STRING_TYPE,
+            PrimitiveKind::Char => CHAR_TYPE,
+            PrimitiveKind::Null => NULL_TYPE
         }).to_string()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TypeSymbolKind {
-    Builtin(BuiltinKind),
+    Primitive(PrimitiveKind),
     Enum(ScopeId),
     Struct(ScopeId),
     Trait(ScopeId),
@@ -90,7 +90,7 @@ pub struct TypeSymbol {
 
 impl TypeSymbol {
     pub fn can_assign(&self, other: TypeSymbol) -> bool {
-        self.name == other.name // lol
+        self.scope_id == other.scope_id && self.name == other.name // lol
     }
 }
 
@@ -233,10 +233,11 @@ impl SymbolTable {
     }
 
     fn populate_with_defaults(scope: &mut Scope) {
-        for ty in BuiltinKind::iter() {
+        // PRIMITIVE TYPES //
+        for ty in PrimitiveKind::iter() {
             scope.add_type_symbol(TypeSymbol {
                 name: ty.to_symbol(),
-                kind: TypeSymbolKind::Builtin(ty),
+                kind: TypeSymbolKind::Primitive(ty),
                 generic_parameters: vec![],
                 function_data: None,
                 scope_id: 0,
@@ -286,11 +287,11 @@ impl SymbolTable {
     }
     
     pub fn direct_type_symbol_lookup(&self, (scope_id, name): &SymbolId) -> Option<&TypeSymbol> {
-        self.scopes.get(&scope_id).and_then(|scope| scope.types.get(name))
+        self.scopes.get(scope_id).and_then(|scope| scope.types.get(name))
     }
 
     pub fn direct_type_symbol_lookup_mut(&mut self, (scope_id, name): &SymbolId) -> Option<&mut TypeSymbol> {
-        self.scopes.get_mut(&scope_id).and_then(|scope| scope.types.get_mut(name))
+        self.scopes.get_mut(scope_id).and_then(|scope| scope.types.get_mut(name))
     }
     
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
@@ -364,7 +365,7 @@ impl std::fmt::Display for TypeSymbol {
             TypeSymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
             TypeSymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
             TypeSymbolKind::TypeAlias => "TypeAlias".white(),
-            TypeSymbolKind::Builtin(name) => format!("Builtin({})", name).green(),
+            TypeSymbolKind::Primitive(name) => format!("Builtin({})", name).green(),
             TypeSymbolKind::Custom => "Custom".white(),
             TypeSymbolKind::Generic => "Generic".white()
         };
@@ -435,7 +436,7 @@ impl SemanticAnalyzer {
     pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
         SemanticAnalyzer {
             symbol_table: SymbolTable::new(lines.clone()),
-            builtins: BuiltinKind::iter().map(|k| (0, k.to_symbol())).collect(),
+            builtins: PrimitiveKind::iter().map(|k| (0, k.to_symbol())).collect(),
             errors: vec![],
             lines
         }
