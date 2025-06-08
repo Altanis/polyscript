@@ -19,12 +19,25 @@ struct Point[T] {
 }
 
 trait VectorLike[T] {
-    fn new(): Point;
-    fn operation[T](a: Point[T], b: Point[T]): Integer;
+    type Thingy;
+    const EUCLIDEAN_DEFINITION: string;
+
+    fn new(): Point[T];
+    fn operation(a: Point[T], b: Point[T]): Integer;
 }
 
 impl VectorLike[Integer] for Point[Integer] {
-    fn add(a: Point[Integer], b: Point[Integer]): Integer {
+    type Thingy = Integer;
+    const EUCLIDEAN_DEFINITION = "";
+
+    fn new(): Point[Integer] {
+        return Point { x: 0, y: 0 };
+    }
+
+    fn operation(a: Point[Integer], b: Point[Integer]): Integer {
         return add(a.x, a.y);
     }
 }
+
+let point_1 = Point { x: 0, y: 0 };
+let point_2 = Point { x: 0, y: 0 };

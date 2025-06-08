@@ -234,6 +234,51 @@ impl Operation {
             | Operation::MutableAddressOf => (15, 16)
         }
     }
+
+    /// Returns the trait name and whether it is a unary or binary operation.
+    fn to_trait_data(&self) -> (String, bool) {
+        match self {
+            Operation::Not => ("Not".to_string(), false),
+            Operation::BitwiseNegate => ("BitwiseNegate".to_string(), false),
+            Operation::Increment => ("Increment".to_string(), false),
+            Operation::Decrement => ("Decrement".to_string(), false),
+            Operation::Plus => ("Add".to_string(), true),
+            Operation::Minus => ("Subtract".to_string(), true),
+            Operation::Mul => ("Multiply".to_string(), true),
+            Operation::Exp => ("Exponentiate".to_string(), true),
+            Operation::Div => ("Divide".to_string(), true),
+            Operation::Mod => ("Modulo".to_string(), true),
+            Operation::BitwiseAnd => ("BitwiseAnd".to_string(), true),
+            Operation::BitwiseOr => ("BitwiseOr".to_string(), true),
+            Operation::BitwiseXor => ("BitwiseXor".to_string(), true),
+            Operation::RightBitShift => ("RightBitShift".to_string(), true),
+            Operation::LeftBitShift => ("LeftBitShift".to_string(), true),
+            Operation::Assign => ("Assign".to_string(), true),
+            Operation::PlusEq => ("AddAssign".to_string(), true),
+            Operation::MinusEq => ("SubtractAssign".to_string(), true),
+            Operation::MulEq => ("MultiplyAssign".to_string(), true),
+            Operation::ExpEq => ("ExponentiateAssign".to_string(), true),
+            Operation::DivEq => ("DivideAssign".to_string(), true),
+            Operation::ModEq => ("ModuloAssign".to_string(), true),
+            Operation::BitwiseAndEq => ("BitwiseAndAssign".to_string(), true),
+            Operation::BitwiseOrEq => ("BitwiseOrAssign".to_string(), true),
+            Operation::BitwiseXorEq => ("BitwiseXorAssign".to_string(), true),
+            Operation::RightBitShiftEq => ("RightBitShiftAssign".to_string(), true),
+            Operation::LeftBitShiftEq => ("LeftBitShiftAssign".to_string(), true),
+            Operation::NotEqual => ("NotEqual".to_string(), true),
+            Operation::And => ("And".to_string(), true),
+            Operation::Or => ("Or".to_string(), true),
+            Operation::GreaterThan => ("GreaterThan".to_string(), true),
+            Operation::Geq => ("GreaterThanOrEqual".to_string(), true),
+            Operation::LessThan => ("LessThan".to_string(), true),
+            Operation::Leq => ("LessThanOrEqual".to_string(), true),
+            Operation::Equivalence => ("Equivalence".to_string(), true),
+            Operation::FieldAccess => ("FieldAccess".to_string(), true),
+            Operation::Dereference => ("Dereference".to_string(), false),
+            Operation::ImmutableAddressOf => ("ImmutableAddressOf".to_string(), false),
+            Operation::MutableAddressOf => ("MutableAddressOf".to_string(), false)
+        }
+    }
 }
 
 impl std::fmt::Display for Operation {

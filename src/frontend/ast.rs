@@ -116,7 +116,8 @@ pub enum AstNodeKind {
         type_reference: BoxedAstNode,
         trait_node: Option<BoxedAstNode>,
         associated_constants: Vec<AstNode>,
-        associated_functions: Vec<AstNode>
+        associated_functions: Vec<AstNode>,
+        associated_types: Vec<AstNode>
     },
     AssociatedConstant {
         qualifier: QualifierKind,
@@ -128,6 +129,11 @@ pub enum AstNodeKind {
         qualifier: QualifierKind,
         signature: BoxedAstNode,
         body: BoxedAstNode,
+    },
+    AssociatedType {
+        qualifier: QualifierKind,
+        name: String,
+        value: BoxedAstNode
     },
 
     SelfValue,
@@ -146,8 +152,15 @@ pub enum AstNodeKind {
     TraitDeclaration {
         name: String,
         generic_parameters: Vec<AstNode>,
+        types: Vec<AstNode>,
+        constants: Vec<AstNode>,
         signatures: Vec<AstNode>
     },
+    TraitConstant {
+        name: String,
+        type_annotation: BoxedAstNode
+    },
+    TraitType(String),
 
     // GENERICS //
     GenericParameter {
@@ -350,7 +363,8 @@ impl AstNode {
                 type_reference: name,
                 trait_node: trait_name,
                 associated_constants,
-                associated_functions
+                associated_functions,
+                associated_types
             } => {
                 write!(f, "{}{} ", indent_str, "impl".bright_cyan())?;
                 if !generic_parameters.is_empty() {
@@ -370,6 +384,9 @@ impl AstNode {
                 write!(f, "{}", name)?;
 
                 writeln!(f, " {}", "{".dimmed())?;
+                for type_node in associated_types {
+                    writeln!(f, "    {}", type_node)?;
+                }
                 for constant in associated_constants {
                     writeln!(f, "    {}", constant)?;
                 }
@@ -377,6 +394,17 @@ impl AstNode {
                     writeln!(f, "    {}", function)?;
                 }
                 write!(f, "{}", "}".dimmed())?
+            }
+
+            AstNodeKind::AssociatedType { qualifier, name, value } => {
+                write!(f, "{} ", match qualifier {
+                    QualifierKind::Public => "public",
+                    QualifierKind::Private => "private"
+                }.purple())?;
+
+                write!(f, "type ")?;
+                write!(f, "{}", name.yellow())?;
+                write!(f, " = {}", value)?;
             }
 
             AstNodeKind::AssociatedConstant {
@@ -633,7 +661,7 @@ impl AstNode {
                 }
                 write!(f, ")")?
             }
-            AstNodeKind::TraitDeclaration { name, generic_parameters, signatures } => {
+            AstNodeKind::TraitDeclaration { name, generic_parameters, signatures, types, constants } => {
                 write!(f, "{}trait", indent_str)?;
                 if !generic_parameters.is_empty() {
                     write!(f, "[")?;
@@ -649,6 +677,18 @@ impl AstNode {
                 write!(f, " {}", name.yellow())?;
 
                 writeln!(f, " {}", "{".dimmed())?;
+
+                for type_node in types {
+                    write!(f, "{}    ", indent_str)?;
+                    type_node.fmt_with_indent(f, 0)?;
+                    writeln!(f)?;
+                }
+
+                for constant in constants {
+                    write!(f, "{}    ", indent_str)?;
+                    constant.fmt_with_indent(f, 0)?;
+                    writeln!(f)?;
+                }
                 
                 for signature in signatures {
                     signature.fmt_with_indent(f, child_indent)?;
@@ -656,6 +696,12 @@ impl AstNode {
                 }
                 
                 write!(f, "{}{}", indent_str, "}".dimmed())?
+            }
+            AstNodeKind::TraitConstant { name, type_annotation } => {
+                write!(f, "{}const {}: {}", indent_str, name.yellow(), type_annotation)?;
+            }
+            AstNodeKind::TraitType(name) => {
+                write!(f, "{}type {}", indent_str, name.bright_blue())?;
             }
             AstNodeKind::GenericParameter { name, constraints } => {
                 write!(f, "{}{}", indent_str, name.yellow())?;
@@ -707,9 +753,8 @@ impl AstNode {
         use AstNodeKind::*;
         
         match &mut self.kind {
-            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_) 
-            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_)
-                => vec![],
+            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_)
+            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
 
@@ -734,6 +779,7 @@ impl AstNode {
                 vec![left.as_mut(), right.as_mut()],
 
             Block(statements) => statements.iter_mut().collect(),
+
             IfStatement {
                 condition,
                 then_branch,
@@ -755,7 +801,8 @@ impl AstNode {
                 }
 
                 children
-            },
+            }
+
             ForLoop {
                 initializer,
                 condition,
@@ -779,15 +826,18 @@ impl AstNode {
                 children.push(body.as_mut());
 
                 children
-            },
+            }
+
             WhileLoop { condition, body } => vec![condition.as_mut(), body.as_mut()],
+
             Return(opt_expr) => {
                 if let Some(expr) = opt_expr.as_mut() {
                     vec![expr.as_mut()]
                 } else {
                     vec![]
                 }
-            },
+            }
+
             Break | Continue => vec![],
 
             FunctionSignature {
@@ -811,7 +861,8 @@ impl AstNode {
                 }
 
                 children
-            },
+            }
+
             FunctionPointer { params, return_type } => {
                 let mut children = vec![];
 
@@ -824,15 +875,17 @@ impl AstNode {
                 }
 
                 children
-            },
-            FunctionDeclaration { signature, body } => vec![signature.as_mut(), body.as_mut()],
+            }
+
+            FunctionDeclaration { signature, body } =>
+                vec![signature.as_mut(), body.as_mut()],
+
             FunctionParameter {
                 type_annotation,
                 initializer,
                 ..
             } => {
                 let mut children = vec![];
-
                 children.push(type_annotation.as_mut());
 
                 if let Some(init) = initializer.as_mut() {
@@ -840,8 +893,10 @@ impl AstNode {
                 }
 
                 children
-            },
-            FunctionExpression { signature, body } => vec![signature.as_mut(), body.as_mut()],
+            }
+
+            FunctionExpression { signature, body } =>
+                vec![signature.as_mut(), body.as_mut()],
 
             StructDeclaration {
                 generic_parameters,
@@ -859,8 +914,10 @@ impl AstNode {
                 }
 
                 children
-            },
+            }
+
             StructField { type_annotation, .. } => vec![type_annotation.as_mut()],
+
             StructLiteral { fields, .. } => fields.values_mut().collect(),
 
             EnumDeclaration { variants, .. } => {
@@ -868,20 +925,20 @@ impl AstNode {
 
                 for (_, (variant_node, opt_payload)) in variants.iter_mut() {
                     children.push(variant_node);
-
                     if let Some(payload) = opt_payload.as_mut() {
                         children.push(payload);
                     }
                 }
 
                 children
-            },
+            }
 
             ImplDeclaration {
                 generic_parameters,
                 type_reference,
                 associated_constants,
                 associated_functions,
+                associated_types,
                 ..
             } => {
                 let mut children = vec![];
@@ -900,8 +957,13 @@ impl AstNode {
                     children.push(func_node);
                 }
 
+                for type_node in associated_types.iter_mut() {
+                    children.push(type_node);
+                }
+
                 children
-            },
+            }
+
             AssociatedConstant {
                 type_annotation,
                 initializer,
@@ -914,16 +976,49 @@ impl AstNode {
                 }
 
                 children.push(initializer.as_mut());
+                children
+            }
+
+            AssociatedFunction { signature, body, .. } =>
+                vec![signature.as_mut(), body.as_mut()],
+
+            AssociatedType { value, .. } => vec![value.as_mut()],
+
+            TraitDeclaration {
+                generic_parameters,
+                types,
+                constants,
+                signatures,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter_mut() {
+                    children.push(gp);
+                }
+
+                for t in types.iter_mut() {
+                    children.push(t);
+                }
+
+                for c in constants.iter_mut() {
+                    children.push(c);
+                }
+
+                for s in signatures.iter_mut() {
+                    children.push(s);
+                }
 
                 children
-            },
-            AssociatedFunction { signature, body, .. } => vec![signature.as_mut(), body.as_mut()],
+            }
 
-            TraitDeclaration { signatures, .. } => signatures.iter_mut().collect(),
+            TraitConstant { type_annotation, .. } => vec![type_annotation.as_mut()],
 
-            GenericParameter { .. } => vec![],
+            TraitType(_) => vec![],
 
-            TypeReference { generic_types, .. } => generic_types.iter_mut().collect(),
+            TypeReference { generic_types, .. } =>
+                generic_types.iter_mut().collect(),
+
             TypeDeclaration {
                 generic_parameters,
                 value,
@@ -936,17 +1031,13 @@ impl AstNode {
                 }
 
                 children.push(value.as_mut());
-
                 children
             }
 
             FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
-            FunctionCall {
-                function,
-                arguments,
-            } => {
-                let mut children = vec![];
 
+            FunctionCall { function, arguments } => {
+                let mut children = vec![];
                 children.push(function.as_mut());
 
                 for arg in arguments.iter_mut() {
@@ -954,7 +1045,9 @@ impl AstNode {
                 }
 
                 children
-            }
+            },
+
+            GenericParameter { .. } => vec![]
         }
     }
 }

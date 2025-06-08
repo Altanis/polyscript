@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::{HashMap, HashSet}, rc::Rc};
 use colored::*;
 use strum::IntoEnumIterator;
 use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
@@ -84,6 +84,7 @@ pub struct TypeSymbol {
     pub kind: TypeSymbolKind,
     pub generic_parameters: Vec<SymbolId>,
     pub function_data: Option<FunctionData>,
+    pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub span: Option<Span>
 }
@@ -200,36 +201,38 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new(lines: Rc<Vec<String>>) -> Self {
+        let mut table = SymbolTable {
+            scopes: HashMap::new(),
+            lines: lines.clone(),
+            current_scope_id: 0,
+            next_scope_id: 0
+        };
+
         let mut root = Scope {
             values: HashMap::new(),
             types: HashMap::new(),
             parent: None,
             lines: lines.clone(),
-            id: 0,
+            id: table.get_next_scope_id(),
             kind: ScopeKind::Root
         };
+
+        SymbolTable::populate_with_defaults(&mut root);
 
         let init = Scope {
             values: HashMap::new(),
             types: HashMap::new(),
             parent: Some(0),
-            lines: lines.clone(),
-            id: 1,
+            lines,
+            id: table.get_next_scope_id(),
             kind: ScopeKind::Block
         };
 
-        SymbolTable::populate_with_defaults(&mut root);
-
         let mut scopes = HashMap::new();
-        scopes.insert(0, root);
-        scopes.insert(1, init);
+        scopes.insert(root.id, root);
+        scopes.insert(init.id, init);
 
-        SymbolTable {
-            scopes,
-            lines,
-            current_scope_id: 1,
-            next_scope_id: 2,
-        }
+        table
     }
 
     fn populate_with_defaults(scope: &mut Scope) {
@@ -240,6 +243,7 @@ impl SymbolTable {
                 kind: TypeSymbolKind::Primitive(ty),
                 generic_parameters: vec![],
                 function_data: None,
+                qualifier: QualifierKind::Public,
                 scope_id: 0,
                 span: None
             }).unwrap();
@@ -294,8 +298,15 @@ impl SymbolTable {
         self.scopes.get_mut(scope_id).and_then(|scope| scope.types.get_mut(name))
     }
     
-    pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
+    pub fn get_next_scope_id(&mut self) -> ScopeId {
         let new_id = self.next_scope_id;
+        self.current_scope_id = new_id;
+        self.next_scope_id += 1;
+        new_id
+    }
+
+    pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
+        let new_id = self.get_next_scope_id();
         let parent_id = self.current_scope_id;
 
         let new_scope = Scope {
@@ -308,9 +319,6 @@ impl SymbolTable {
         };
 
         self.scopes.insert(new_id, new_scope);
-        self.current_scope_id = new_id;
-        self.next_scope_id += 1;
-
         new_id
     }
 
@@ -425,9 +433,70 @@ impl std::fmt::Display for SymbolTable {
     }
 }
 
+pub struct TraitRegistry {
+    pub register: HashMap<SymbolId, HashSet<SymbolId>>
+}
+
+impl TraitRegistry {
+    pub fn new() -> Self {
+        TraitRegistry { register: HashMap::new() }
+    }
+
+    pub fn register(&mut self, trait_id: SymbolId, type_id: SymbolId) {
+        self.register.entry(trait_id)
+            .or_default()
+            .insert(type_id);
+    }
+
+    pub fn implements(&self, trait_id: &SymbolId, type_id: &SymbolId) -> bool {
+        self.register
+            .get(trait_id)
+            .map_or(false, |types| types.contains(type_id))
+    }
+
+    pub fn types_for_trait(&self, trait_id: &SymbolId) -> Option<&HashSet<SymbolId>> {
+        self.register.get(trait_id)
+    }
+
+    pub fn traits_for_type(&self, type_id: &SymbolId) -> Vec<SymbolId> {
+        self.register.iter()
+            .filter_map(|(trait_id, types)| {
+                if types.contains(type_id) {
+                    Some(trait_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
+impl std::fmt::Display for TraitRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for ((trait_scope, trait_name), types) in &self.register {
+            writeln!(f, "{}({})", trait_name, trait_scope)?;
+            for (type_scope, type_name) in types {
+                writeln!(f, "  - {}({})", type_name, type_scope)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub enum Obligations {
+    TraitObligation {
+        trait_kind: SymbolId,
+        type_kind: SymbolId,
+        result_type: Option<SymbolId>,
+        span: Span
+    }
+}
+
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     pub builtins: Vec<SymbolId>,
+    pub trait_registry: TraitRegistry,
+    pub obligations: Vec<Obligations>,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>
 }
@@ -437,6 +506,8 @@ impl SemanticAnalyzer {
         SemanticAnalyzer {
             symbol_table: SymbolTable::new(lines.clone()),
             builtins: PrimitiveKind::iter().map(|k| (0, k.to_symbol())).collect(),
+            trait_registry: TraitRegistry::new(),
+            obligations: vec![],
             errors: vec![],
             lines
         }
@@ -451,13 +522,6 @@ impl SemanticAnalyzer {
         /* PASS STRUCTURE
             * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
             * 1: Collect type information for symbols.
-
-
-            * 2: Verify type information is correct.
-                * Verify operator is valid on certain types (Unary/BinaryOp).
-                * Verify lhs and rhs resolve to `bool` (ConditionalOp).
-                * Verify return type of function matches with explicit return type.
-                * 
          */
 
         macro_rules! pass {
@@ -474,5 +538,15 @@ impl SemanticAnalyzer {
         // pass!(self, type_collector_pass, &mut program);
 
         Ok(program)
+    }
+}
+
+impl std::fmt::Display for SemanticAnalyzer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Symbol Table:")?;
+        writeln!(f, "{}", self.symbol_table)?;
+        writeln!(f, "\nTrait Registry:")?;
+        writeln!(f, "{}", self.trait_registry)?;
+        Ok(())
     }
 }

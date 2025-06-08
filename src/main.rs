@@ -85,8 +85,8 @@ fn test_main_script() {
             println!("--- ANNOTATED AST ---");
             println!("{}", program);
 
-            println!("--- SYMBOL TABLE ---");
-            println!("{}", analyzer.symbol_table);
+            println!("--- SEMANTIC ANALYZER ---");
+            println!("{}", analyzer);
         }
     }
 }
