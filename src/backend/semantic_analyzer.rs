@@ -4,7 +4,42 @@ use strum::IntoEnumIterator;
 use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
 
 pub type ScopeId = usize;
-pub type SymbolId = (usize, String);
+pub type ValueNameId = usize;
+pub type TypeNameId = usize;
+pub type ValueSymbolId = usize;
+pub type TypeSymbolId = usize;
+
+#[derive(Default, Debug)]
+pub struct NameInterner {
+    map: HashMap<String, usize>,
+    vec: Vec<String>,
+}
+
+impl NameInterner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn intern(&mut self, s: &str) -> usize {
+        if let Some(&id) = self.map.get(s) {
+            return id;
+        }
+
+        let id = self.vec.len();
+        self.map.insert(s.to_string(), id);
+        self.vec.push(s.to_string());
+
+        id
+    }
+
+    pub fn lookup(&self, id: usize) -> &str {
+        &self.vec[id]
+    }
+
+    pub fn get_id(&self, s: &str) -> Option<usize> {
+        self.map.get(s).copied()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
@@ -25,15 +60,15 @@ pub enum PrimitiveKind {
 }
 
 impl PrimitiveKind {
-    pub fn to_symbol(&self) -> String {
-        (match self {
+    pub fn to_symbol_str(&self) -> &'static str {
+        match self {
             PrimitiveKind::Int => INT_TYPE,
             PrimitiveKind::Float => FLOAT_TYPE,
             PrimitiveKind::Bool => BOOL_TYPE,
             PrimitiveKind::String => STRING_TYPE,
             PrimitiveKind::Char => CHAR_TYPE,
             PrimitiveKind::Null => NULL_TYPE
-        }).to_string()
+        }
     }
 }
 
@@ -43,17 +78,16 @@ pub enum TypeSymbolKind {
     Enum(ScopeId),
     Struct(ScopeId),
     Trait(ScopeId),
-    TypeAlias(Option<SymbolId>),
+    TypeAlias(Option<TypeSymbolId>),
     FunctionSignature {
-        params: Vec<SymbolId>,
-        return_type: SymbolId,
+        params: Vec<TypeSymbolId>,
+        return_type: TypeSymbolId,
         instance: Option<ReferenceKind>
     },
     UnfulfilledObligation(usize),
     Generic,
     Custom
 }
-
 
 #[derive(Debug, Clone)]
 pub enum ScopeKind {
@@ -69,311 +103,269 @@ pub enum ScopeKind {
 
 #[derive(Debug, Clone)]
 pub struct ValueSymbol {
-    pub name: String,
+    pub id: ValueSymbolId,
+    pub name_id: ValueNameId,
     pub kind: ValueSymbolKind,
     pub mutable: bool,
     pub span: Option<Span>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
-    pub type_id: Option<SymbolId>
+    pub type_id: Option<TypeSymbolId>
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeSymbol {
-    pub name: String,
+    pub id: TypeSymbolId,
+    pub name_id: TypeNameId,
     pub kind: TypeSymbolKind,
-    pub generic_parameters: Vec<SymbolId>,
+    pub generic_parameters: Vec<TypeSymbolId>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub span: Option<Span>
 }
 
 impl TypeSymbol {
-    pub fn can_assign(&self, other: TypeSymbol) -> bool {
-        self.scope_id == other.scope_id && self.name == other.name // lol
+    pub fn can_assign(&self, other: &TypeSymbol) -> bool {
+        self.id == other.id
     }
 }
 
 #[derive(Debug)]
 pub struct Scope {
-    values: HashMap<String, ValueSymbol>,
-    types: HashMap<String, TypeSymbol>,
+    values: HashMap<ValueNameId, ValueSymbolId>,
+    types: HashMap<TypeNameId, TypeSymbolId>,
     parent: Option<ScopeId>,
-    lines: Rc<Vec<String>>,
     id: ScopeId,
     kind: ScopeKind
 }
 
-impl Scope {
-    pub fn find_value_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
-        if let Some(symbol) = self.values.get(name) {
-            Some(symbol)
-        } else if let Some(parent_id) = self.parent {
-            symbol_table.scopes.get(&parent_id)?.find_value_symbol(name, symbol_table)
-        } else {
-            None
-        }
-    }
-
-    pub fn find_value_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
-        let owner_id = symbol_table.find_value_symbol_owner(name, self.id)?;
-
-        symbol_table
-            .scopes
-            .get_mut(&owner_id)
-            .and_then(|scope| scope.values.get_mut(name))
-    }
-
-    pub fn add_value_symbol(&mut self, mut symbol: ValueSymbol) -> Result<ScopeId, BoxedError> {
-        symbol.scope_id = self.id;
-
-        if let Some(existing) = self.values.get(&symbol.name) {
-            let (existing_span, symbol_span) = (existing.span, symbol.span);
-
-            match (existing_span, symbol_span) {
-                (None, None) => return Err(Error::new(ErrorKind::AlreadyDeclared(symbol.name))),
-                (Some(span), None) => return Err(Error::from_one_error(
-                    ErrorKind::AlreadyDeclared(symbol.name),
-                    span,
-                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
-                )),
-                (None, Some(span)) => return Err(Error::from_one_error(
-                    ErrorKind::AlreadyDeclared(symbol.name),
-                    span,
-                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
-                )),
-                (Some(existing_span), Some(symbol_span)) => {
-                    return Err(Error::from_multiple_errors(
-                        ErrorKind::AlreadyDeclared(symbol.name),
-                        symbol_span,
-                        Span::get_all_lines(self.lines.clone(), &[existing_span, symbol_span]),
-                    ));
-                }
-            }
-
-            // return Err(Error::from_multiple_errors(
-            //     ErrorKind::AlreadyDeclared(symbol.name),
-            //     symbol.span,
-            //     Span::get_all_lines(self.lines.clone(), &[existing.span, symbol.span]),
-            // ));
-        }
-
-        self.values.insert(symbol.name.clone(), symbol);
-        Ok(self.id)
-    }
-
-    pub fn find_type_symbol<'a>(&'a self, name: &str, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
-        if let Some(symbol) = self.types.get(name) {
-            Some(symbol)
-        } else if let Some(parent_id) = self.parent {
-            symbol_table.scopes.get(&parent_id)?.find_type_symbol(name, symbol_table)
-        } else {
-            None
-        }
-    }
-
-    pub fn find_type_symbol_mut<'a>(&self, name: &str, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
-        let owner_id = symbol_table.find_type_symbol_owner(name, self.id)?;
-
-        symbol_table
-            .scopes
-            .get_mut(&owner_id)
-            .and_then(|scope| scope.types.get_mut(name))
-    }
-
-    pub fn add_type_symbol(&mut self, mut symbol: TypeSymbol) -> Result<ScopeId, BoxedError> {
-        symbol.scope_id = self.id;
-
-        if let Some(existing) = self.types.get(&symbol.name) {
-            let (existing_span, symbol_span) = (existing.span, symbol.span);
-
-            match (existing_span, symbol_span) {
-                (None, None) => return Err(Error::new(ErrorKind::AlreadyDeclared(symbol.name))),
-                (Some(span), None) => return Err(Error::from_one_error(
-                    ErrorKind::AlreadyDeclared(symbol.name),
-                    span,
-                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
-                )),
-                (None, Some(span)) => return Err(Error::from_one_error(
-                    ErrorKind::AlreadyDeclared(symbol.name),
-                    span,
-                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
-                )),
-                (Some(existing_span), Some(symbol_span)) => {
-                    return Err(Error::from_multiple_errors(
-                        ErrorKind::AlreadyDeclared(symbol.name),
-                        symbol_span,
-                        Span::get_all_lines(self.lines.clone(), &[existing_span, symbol_span]),
-                    ));
-                }
-            }
-        }
-
-        self.types.insert(symbol.name.clone(), symbol);
-        Ok(self.id)
-    }
-}
-
 pub struct SymbolTable {
+    pub value_symbols: HashMap<ValueSymbolId, ValueSymbol>,
+    pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>,
+    value_names: NameInterner,
+    type_names: NameInterner,
+
     pub scopes: HashMap<ScopeId, Scope>,
+    
     lines: Rc<Vec<String>>,
     current_scope_id: ScopeId,
     next_scope_id: ScopeId,
+    next_value_symbol_id: ValueSymbolId,
+    next_type_symbol_id: TypeSymbolId,
 }
 
 impl SymbolTable {
     pub fn new(lines: Rc<Vec<String>>) -> Self {
         let mut table = SymbolTable {
+            value_symbols: HashMap::new(),
+            type_symbols: HashMap::new(),
             scopes: HashMap::new(),
+            value_names: NameInterner::new(),
+            type_names: NameInterner::new(),
             lines: lines.clone(),
             current_scope_id: 0,
-            next_scope_id: 0
+            next_scope_id: 0,
+            next_value_symbol_id: 0,
+            next_type_symbol_id: 0,
         };
 
-        let mut root = Scope {
+        let root_scope_id = table.get_next_scope_id();
+        let root_scope = Scope {
             values: HashMap::new(),
             types: HashMap::new(),
             parent: None,
-            lines: lines.clone(),
-            id: table.get_next_scope_id(),
-            kind: ScopeKind::Root
+            id: root_scope_id,
+            kind: ScopeKind::Root,
         };
+        table.scopes.insert(root_scope_id, root_scope);
+        table.populate_with_defaults();
 
-        SymbolTable::populate_with_defaults(&mut root, &mut table);
-
-        let init = Scope {
+        let init_scope_id = table.get_next_scope_id();
+        let init_scope = Scope {
             values: HashMap::new(),
             types: HashMap::new(),
-            parent: Some(0),
-            lines,
-            id: table.get_next_scope_id(),
-            kind: ScopeKind::Block
+            parent: Some(root_scope_id),
+            id: init_scope_id,
+            kind: ScopeKind::Block,
         };
+        table.scopes.insert(init_scope_id, init_scope);
 
-        table.scopes.insert(root.id, root);
-        table.scopes.insert(init.id, init);
+        table.current_scope_id = init_scope_id;
 
         table
     }
 
-    fn populate_with_defaults(scope: &mut Scope, symbol_table: &mut SymbolTable) {
+    fn populate_with_defaults(&mut self) {
         // PRIMITIVE TYPES //
         for ty in PrimitiveKind::iter() {
-            scope.add_type_symbol(TypeSymbol {
-                name: ty.to_symbol(),
-                kind: TypeSymbolKind::Primitive(ty),
-                generic_parameters: vec![],
-                qualifier: QualifierKind::Public,
-                scope_id: 0,
-                span: None
-            }).unwrap();
+            self.add_type_symbol(
+                ty.to_symbol_str(),
+                TypeSymbolKind::Primitive(ty),
+                vec![],
+                QualifierKind::Public,
+                None
+            ).unwrap();
         }
 
-        // for op in Operation::iter() {
-        //     let (trait_name, is_binary) = op.to_trait_data();
-
-        //     let scope_id = symbol_table.enter_scope(ScopeKind::Trait);
-
-        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
-        //         name: "Output".to_string(),
-        //         kind: TypeSymbolKind::Custom,
-        //         generic_parameters: vec![],
-        //         qualifier: QualifierKind::Public,
-        //         scope_id: 0,
-        //         span: None
-        //     }).unwrap_or_else(|_| panic!("[output_type] couldn't add builtin trait {}", trait_name));
-
-        //     // let self_type = symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
-        //     //     name: "Self".to_uppercase(),
-        //     //     kind: TypeSymbolKind::TypeAlias,
-        //     //     span: None,
-        //     //     qualifier: QualifierKind::Public,
-        //     //     scope_id: 0,
-        //     //     generic_parameters: vec![]
-        //     // }).unwrap_or_else(|_| panic!("[self_type] couldn't add builtin trait {}", trait_name));
-
-        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
-        //         name: trait_name.clone().to_lowercase(),
-        //         kind: TypeSymbolKind::FunctionSignature {
-        //             params: if is_binary {
-        //                 vec![TypeSymbol {
-
-        //                 }]
-        //             } else {
-        //                 vec![]
-        //             },
-        //             // return_type: 
-        //         },
-        //         span: None,
-        //         qualifier: QualifierKind::Public,
-        //         scope_id: 0,
-        //         generic_parameters: vec![]
-        //     }).unwrap_or_else(|_| panic!("[fn_signature] couldn't add builtin trait {}", trait_name));
-
-        //     symbol_table.exit_scope();
-
-        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
-        //         name: trait_name.clone(),
-        //         kind: TypeSymbolKind::Trait(scope_id),
-        //         generic_parameters: vec![],
-        //         qualifier: QualifierKind::Public,
-        //         scope_id: 0,
-        //         span: None
-        //     }).unwrap_or_else(|_| panic!("[trait] couldn't add builtin trait {}", trait_name));
-        // }
-    }
-
-    fn find_value_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
-        let mut scope_id = start_scope_id;
-        loop {
-            let scope = &self.scopes[&scope_id];
-
-            if scope.values.contains_key(name) {
-                return Some(scope_id);
-            }
-
-            match scope.parent {
-                Some(parent_id) => scope_id = parent_id,
-                None => return None,
-            }
-        }
-    }
-
-    fn find_type_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
-        let mut scope_id = start_scope_id;
-        loop {
-            let scope = &self.scopes[&scope_id];
-
-            if scope.types.contains_key(name) {
-                return Some(scope_id);
-            }
-
-            match scope.parent {
-                Some(parent_id) => scope_id = parent_id,
-                None => return None,
-            }
-        }
-    }
-
-    pub fn direct_value_symbol_lookup(&self, (scope_id, name): &SymbolId) -> Option<&ValueSymbol> {
-        self.scopes.get(scope_id).and_then(|scope| scope.values.get(name))
-    }
-
-    pub fn direct_value_symbol_lookup_mut(&mut self, (scope_id, name): &SymbolId) -> Option<&mut ValueSymbol> {
-        self.scopes.get_mut(scope_id).and_then(|scope| scope.values.get_mut(name))
+        // add default traits
     }
     
-    pub fn direct_type_symbol_lookup(&self, (scope_id, name): &SymbolId) -> Option<&TypeSymbol> {
-        self.scopes.get(scope_id).and_then(|scope| scope.types.get(name))
+    /// Adds a new value symbol to the current scope.
+    pub fn add_value_symbol(
+        &mut self,
+        name: &str,
+        kind: ValueSymbolKind,
+        mutable: bool,
+        qualifier: QualifierKind,
+        type_id: Option<TypeSymbolId>,
+        span: Option<Span>,
+    ) -> Result<ValueSymbolId, BoxedError> {
+        let name_id = self.value_names.intern(name);
+        let scope_id = self.current_scope_id;
+
+        if let Some(existing_id) = self.scopes[&scope_id].values.get(&name_id) {
+            let existing_symbol = &self.value_symbols[existing_id];
+            let err = self.create_redeclaration_error(
+                name.to_string(),
+                existing_symbol.span,
+                span
+            );
+            return Err(err);
+        }
+
+        let id = self.next_value_symbol_id;
+        self.next_value_symbol_id += 1;
+
+        let symbol = ValueSymbol {
+            id, name_id, kind, mutable, qualifier, type_id, span, scope_id,
+        };
+
+        self.value_symbols.insert(id, symbol);
+        self.current_scope_mut().values.insert(name_id, id);
+
+        Ok(id)
     }
 
-    pub fn direct_type_symbol_lookup_mut(&mut self, (scope_id, name): &SymbolId) -> Option<&mut TypeSymbol> {
-        self.scopes.get_mut(scope_id).and_then(|scope| scope.types.get_mut(name))
+    pub fn add_type_symbol(
+        &mut self,
+        name: &str,
+        kind: TypeSymbolKind,
+        generic_parameters: Vec<TypeSymbolId>,
+        qualifier: QualifierKind,
+        span: Option<Span>,
+    ) -> Result<TypeSymbolId, BoxedError> {
+        let name_id = self.type_names.intern(name);
+        let scope_id = self.current_scope_id;
+
+        if let Some(existing_id) = self.scopes[&scope_id].types.get(&name_id) {
+            let existing_symbol = &self.type_symbols[existing_id];
+            let err = self.create_redeclaration_error(
+                name.to_string(),
+                existing_symbol.span,
+                span
+            );
+            return Err(err);
+        }
+
+        let id = self.next_type_symbol_id;
+        self.next_type_symbol_id += 1;
+
+        let symbol = TypeSymbol {
+            id, name_id, kind, generic_parameters, qualifier, span, scope_id,
+        };
+
+        self.type_symbols.insert(id, symbol);
+        self.current_scope_mut().types.insert(name_id, id);
+
+        Ok(id)
+    }
+
+    pub fn find_value_symbol(&self, name: &str) -> Option<&ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let mut scope_id = Some(self.current_scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.values.get(&name_id) {
+                return self.value_symbols.get(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+        None
     }
     
+    pub fn find_value_symbol_mut(&mut self, name: &str) -> Option<&mut ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let mut scope_id = Some(self.current_scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.values.get(&name_id) {
+                return self.value_symbols.get_mut(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+        None
+    }
+    
+    pub fn find_type_symbol(&self, name: &str) -> Option<&TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let mut scope_id = Some(self.current_scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.types.get(&name_id) {
+                return self.type_symbols.get(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+        None
+    }
+
+    pub fn find_type_symbol_mut(&mut self, name: &str) -> Option<&mut TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let mut scope_id = Some(self.current_scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.types.get(&name_id) {
+                return self.type_symbols.get_mut(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+        None
+    }
+
+    pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> {
+        self.value_symbols.get(&id)
+    }
+
+    pub fn get_value_symbol_mut(&mut self, id: ValueSymbolId) -> Option<&mut ValueSymbol> {
+        self.value_symbols.get_mut(&id)
+    }
+    
+    pub fn get_type_symbol(&self, id: TypeSymbolId) -> Option<&TypeSymbol> {
+        self.type_symbols.get(&id)
+    }
+
+    pub fn get_type_symbol_mut(&mut self, id: TypeSymbolId) -> Option<&mut TypeSymbol> {
+        self.type_symbols.get_mut(&id)
+    }
+
+    pub fn get_value_name(&self, id: ValueNameId) -> &str {
+        self.value_names.lookup(id)
+    }
+    
+    pub fn get_type_name(&self, id: TypeNameId) -> &str {
+        self.type_names.lookup(id)
+    }
+
     pub fn get_next_scope_id(&mut self) -> ScopeId {
         let new_id = self.next_scope_id;
-        self.current_scope_id = new_id;
         self.next_scope_id += 1;
         new_id
     }
@@ -386,12 +378,12 @@ impl SymbolTable {
             values: HashMap::new(),
             types: HashMap::new(),
             parent: Some(parent_id),
-            lines: self.lines.clone(),
             id: new_id,
             kind
         };
 
         self.scopes.insert(new_id, new_scope);
+        self.current_scope_id = new_id;
         new_id
     }
 
@@ -410,6 +402,22 @@ impl SymbolTable {
     pub fn current_scope(&self) -> &Scope {
         self.scopes.get(&self.current_scope_id).expect("Scope should exist")
     }
+
+    fn create_redeclaration_error(&self, name: String, span1: Option<Span>, span2: Option<Span>) -> BoxedError {
+        match (span1, span2) {
+            (Some(s1), Some(s2)) => Error::from_multiple_errors(
+                ErrorKind::AlreadyDeclared(name),
+                s2,
+                Span::get_all_lines(self.lines.clone(), &[s1, s2]),
+            ),
+            (Some(s), None) | (None, Some(s)) => Error::from_one_error(
+                ErrorKind::AlreadyDeclared(name),
+                s,
+                (self.lines[s.start_pos.line - 1].clone(), s.start_pos.line)
+            ),
+            (None, None) => Error::new(ErrorKind::AlreadyDeclared(name)),
+        }
+    }
 }
 
 impl std::fmt::Display for ValueSymbolKind {
@@ -424,74 +432,86 @@ impl std::fmt::Display for ValueSymbolKind {
     }
 }
 
-impl std::fmt::Display for ValueSymbol {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name.cyan().bold())?;
-        write!(f, " ({})", self.kind)?;
-
-        if self.mutable {
-            write!(f, " {}", "mut".red())?;
+impl SymbolTable {
+    pub fn display_value_symbol<'a>(&'a self, symbol: &'a ValueSymbol) -> impl std::fmt::Display + 'a {
+        struct Displayer<'a> {
+            symbol: &'a ValueSymbol,
+            table: &'a SymbolTable,
         }
 
-        write!(f, " {}", self.qualifier)?;
-        
-        Ok(())
-    }
-}
+        impl std::fmt::Display for Displayer<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let name = self.table.get_value_name(self.symbol.name_id);
+                write!(f, "{}", name.cyan().bold())?;
+                write!(f, " ({})", self.symbol.kind)?;
+                if self.symbol.mutable { write!(f, " {}", "mut".red())?; }
+                write!(f, " {}", self.symbol.qualifier)?;
+                Ok(())
+            }
+        }
 
-impl std::fmt::Display for TypeSymbol {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let type_variant = match &self.kind {
-            TypeSymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
-            TypeSymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
-            TypeSymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
-            TypeSymbolKind::TypeAlias(scope_id) => format!("TypeAlias({:?})", scope_id).white(),
-            TypeSymbolKind::Primitive(name) => format!("Builtin({})", name).green(),
-            TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
-                let instance_str = match instance {
-                    Some(ReferenceKind::Value) => "self",
-                    Some(ReferenceKind::Reference) => "&self",
-                    Some(ReferenceKind::MutableReference) => "&mut self",
-                    None => ""
+        Displayer { symbol, table: self }
+    }
+
+    pub fn display_type_symbol<'a>(&'a self, symbol: &'a TypeSymbol) -> impl std::fmt::Display + 'a {
+        struct Displayer<'a> {
+            symbol: &'a TypeSymbol,
+            table: &'a SymbolTable,
+        }
+
+        impl std::fmt::Display for Displayer<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let name = self.table.get_type_name(self.symbol.name_id);
+                let type_variant = match &self.symbol.kind {
+                    TypeSymbolKind::Struct(id) => format!("Struct({})", id).blue(),
+                    TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
+                    TypeSymbolKind::Enum(id) => format!("Enum({})", id).blue(),
+                    TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
+                    TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
+                    TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
+                        let instance_str = match instance {
+                            Some(ReferenceKind::Value) => "self",
+                            Some(ReferenceKind::Reference) => "&self",
+                            Some(ReferenceKind::MutableReference) => "&mut self",
+                            None => ""
+                        };
+                        let params_str = params.iter()
+                            .map(|id| self.table.get_type_name(self.table.type_symbols[id].name_id))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let return_type_str = self.table.get_type_name(self.table.type_symbols[return_type].name_id);
+                        format!("fn({}({}), {})", instance_str, params_str, return_type_str).blue()
+                    },
+                    TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
+                    TypeSymbolKind::Custom => "Custom".white(),
+                    TypeSymbolKind::Generic => "Generic".white()
                 };
 
-                let params_str = params.iter()
-                    .map(|(scope_id, name)| format!("{}:{}", scope_id, name))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                
-                let return_type_str = format!(": {}", return_type.1);
+                write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
 
-                format!("FunctionSignature({}({}), {})", instance_str, params_str, return_type_str).blue()
-            },
-            TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
-            TypeSymbolKind::Custom => "Custom".white(),
-            TypeSymbolKind::Generic => "Generic".white()
-        };
-
-        write!(f, "[{}] {}", type_variant, self.name.cyan().bold())?;
-
-        if !self.generic_parameters.is_empty() {
-            write!(f, "<{}>", self.generic_parameters.iter().map(|(id, name)| format!("{}:{}", id, name)).collect::<Vec<_>>().join(", "))?;
+                if !self.symbol.generic_parameters.is_empty() {
+                    let params = self.symbol.generic_parameters.iter()
+                        .map(|id| self.table.get_type_name(self.table.type_symbols[id].name_id))
+                        .collect::<Vec<_>>().join(", ");
+                    write!(f, "<{}>", params)?;
+                }
+                Ok(())
+            }
         }
-
-        Ok(())
+        Displayer { symbol, table: self }
     }
-}
 
-impl SymbolTable {
     fn display_scope(&self, scope_id: ScopeId, indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let scope = match self.scopes.get(&scope_id) {
-            Some(s) => s,
-            None => return Ok(())
-        };
+        let scope = self.scopes.get(&scope_id).unwrap();
 
-        for symbol in scope.values.values() {
-            writeln!(f, "{:indent$}[val] {}", "", symbol, indent = indent)?;
+        for symbol_id in scope.values.values() {
+            let symbol = &self.value_symbols[symbol_id];
+            writeln!(f, "{:indent$}[val] {}", "", self.display_value_symbol(symbol), indent = indent)?;
         }
 
-        for symbol in scope.types.values() {
-            writeln!(f, "{:indent$}[type] {}", "", symbol, indent = indent)?;
+        for symbol_id in scope.types.values() {
+            let symbol = &self.type_symbols[symbol_id];
+            writeln!(f, "{:indent$}[type] {}", "", self.display_type_symbol(symbol), indent = indent)?;
         }
 
         let mut child_scope_ids: Vec<ScopeId> = self.scopes.values()
@@ -501,13 +521,9 @@ impl SymbolTable {
         child_scope_ids.sort();
 
         for child_id in child_scope_ids {
-            println!();
-
             writeln!(f, "{:indent$}{{", "", indent = indent)?;
             self.display_scope(child_id, indent + 4, f)?;
             writeln!(f, "{:indent$}}}", "", indent = indent)?;
-
-            println!();
         }
         
         Ok(())
@@ -516,12 +532,13 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Start displaying from the root scope (ID 0)
         self.display_scope(0, 0, f)
     }
 }
 
 pub struct TraitRegistry {
-    pub register: HashMap<SymbolId, HashSet<SymbolId>>
+    pub register: HashMap<TypeSymbolId, HashSet<TypeSymbolId>>
 }
 
 impl TraitRegistry {
@@ -529,59 +546,68 @@ impl TraitRegistry {
         TraitRegistry { register: HashMap::new() }
     }
 
-    pub fn register(&mut self, trait_id: SymbolId, type_id: SymbolId) {
+    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId) {
         self.register.entry(trait_id)
             .or_default()
             .insert(type_id);
     }
 
-    pub fn implements(&self, trait_id: &SymbolId, type_id: &SymbolId) -> bool {
+    pub fn implements(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> bool {
         self.register
-            .get(trait_id)
-            .map_or(false, |types| types.contains(type_id))
+            .get(&trait_id)
+            .map_or(false, |types| types.contains(&type_id))
     }
 
-    pub fn types_for_trait(&self, trait_id: &SymbolId) -> Option<&HashSet<SymbolId>> {
-        self.register.get(trait_id)
+    pub fn types_for_trait(&self, trait_id: TypeSymbolId) -> Option<&HashSet<TypeSymbolId>> {
+        self.register.get(&trait_id)
     }
 
-    pub fn traits_for_type(&self, type_id: &SymbolId) -> Vec<SymbolId> {
+    pub fn traits_for_type(&self, type_id: TypeSymbolId) -> Vec<TypeSymbolId> {
         self.register.iter()
             .filter_map(|(trait_id, types)| {
-                if types.contains(type_id) {
-                    Some(trait_id.clone())
-                } else {
-                    None
-                }
+                if types.contains(&type_id) { Some(*trait_id) } else { None }
             })
             .collect()
     }
 }
 
-impl std::fmt::Display for TraitRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for ((trait_scope, trait_name), types) in &self.register {
-            writeln!(f, "{}({})", trait_name, trait_scope)?;
-            for (type_scope, type_name) in types {
-                writeln!(f, "  - {}({})", type_name, type_scope)?;
+impl TraitRegistry {
+    pub fn display<'a>(&'a self, symbol_table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
+        struct Displayer<'a> {
+            registry: &'a TraitRegistry,
+            table: &'a SymbolTable,
+        }
+
+        impl std::fmt::Display for Displayer<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                for (trait_id, types) in &self.registry.register {
+                    let trait_name = self.table.get_type_name(self.table.type_symbols[trait_id].name_id);
+                    writeln!(f, "{}({})", trait_name, trait_id)?;
+                    for type_id in types {
+                        let type_name = self.table.get_type_name(self.table.type_symbols[type_id].name_id);
+                        writeln!(f, "  - {}({})", type_name, type_id)?;
+                    }
+                }
+                Ok(())
             }
         }
-        Ok(())
+
+        Displayer { registry: self, table: symbol_table }
     }
 }
 
 pub enum Obligations {
     TraitObligation {
-        trait_kind: SymbolId,
-        type_kind: SymbolId,
-        result_type: Option<SymbolId>,
+        trait_kind: TypeSymbolId,
+        type_kind: TypeSymbolId,
+        result_type: Option<TypeSymbolId>,
         span: Span
     }
 }
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    pub builtins: Vec<SymbolId>,
+    pub builtins: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub obligations: Vec<Obligations>,
     errors: Vec<Error>,
@@ -590,9 +616,15 @@ pub struct SemanticAnalyzer {
 
 impl SemanticAnalyzer {
     pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
+        let symbol_table = SymbolTable::new(lines.clone());
+        
+        let builtins = PrimitiveKind::iter()
+            .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
+            .collect();
+
         SemanticAnalyzer {
-            symbol_table: SymbolTable::new(lines.clone()),
-            builtins: PrimitiveKind::iter().map(|k| (0, k.to_symbol())).collect(),
+            symbol_table,
+            builtins,
             trait_registry: TraitRegistry::new(),
             obligations: vec![],
             errors: vec![],
@@ -621,8 +653,7 @@ impl SemanticAnalyzer {
                 }
             }};
         }
-
-
+        
         pass!(self, symbol_collector_pass, &mut program);
         // pass!(self, type_collector_pass, &mut program);
 
@@ -635,7 +666,7 @@ impl std::fmt::Display for SemanticAnalyzer {
         writeln!(f, "Symbol Table:")?;
         writeln!(f, "{}", self.symbol_table)?;
         writeln!(f, "\nTrait Registry:")?;
-        writeln!(f, "{}", self.trait_registry)?;
+        writeln!(f, "{}", self.trait_registry.display(&self.symbol_table))?;
         Ok(())
     }
 }

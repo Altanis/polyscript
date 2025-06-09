@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{ValueSymbol, SymbolId, SymbolTable, TypeSymbol}, utils::kind::*};
+use crate::{backend::semantic_analyzer::{SymbolTable, TypeSymbol, TypeSymbolId, ValueSymbol, ValueSymbolId}, utils::kind::*};
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
@@ -187,40 +187,40 @@ pub enum AstNodeKind {
 pub struct AstNode {
     pub kind: AstNodeKind,
     pub span: Span,
-    pub value_id: Option<SymbolId>,
-    pub type_id: Option<SymbolId>
+    pub value_id: Option<ValueSymbolId>,
+    pub type_id: Option<TypeSymbolId>
 }
 
 pub type BoxedAstNode = Box<AstNode>;
 
 impl AstNode {
     pub fn get_value_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
-        if let Some(id) = &self.value_id {
-            return symbol_table.direct_value_symbol_lookup(id);
+        if let Some(id) = self.value_id {
+            return symbol_table.get_value_symbol(id);
         }
 
         None
     }
 
     pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
-        if let Some(id) = &self.value_id {
-            return symbol_table.direct_value_symbol_lookup_mut(id);
+        if let Some(id) = self.value_id {
+            return symbol_table.get_value_symbol_mut(id);
         }
 
         None
     }
 
     pub fn get_type_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
-        if let Some(id) = &self.value_id {
-            return symbol_table.direct_type_symbol_lookup(id);
+        if let Some(id) = self.value_id {
+            return symbol_table.get_type_symbol(id);
         }
 
         None
     }
 
     pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
-        if let Some(id) = &self.value_id {
-            return symbol_table.direct_type_symbol_lookup_mut(id);
+        if let Some(id) = self.value_id {
+            return symbol_table.get_type_symbol_mut(id);
         }
 
         None
@@ -736,14 +736,14 @@ impl AstNode {
             }
         }
 
-        if let Some((scope, str)) = &self.type_id {
+        if let Some(id) = self.type_id {
             write!(f, " {}",
-                format_args!("[type: ({}, {})]", scope, str)
+                format_args!("[Type({})]", id)
             )?;
         }
 
-        if let Some((_, name)) = &self.value_id {
-            write!(f, " [symbol: {}]", name.magenta().bold())?;
+        if let Some(id) = self.value_id {
+            write!(f, " [Symbol({})]", id)?;
         }
 
         Ok(())

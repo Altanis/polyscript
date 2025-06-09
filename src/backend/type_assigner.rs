@@ -1,52 +1,52 @@
-use crate::{backend::semantic_analyzer::{PrimitiveKind, SymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, Span}}};
-use super::semantic_analyzer::SemanticAnalyzer;
+// use crate::{backend::semantic_analyzer::{PrimitiveKind, SymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, Span}}};
+// use super::semantic_analyzer::SemanticAnalyzer;
 
-impl SemanticAnalyzer {
-    fn get_builtin_type(&self, builtin: PrimitiveKind) -> SymbolId {
-        self.builtins[builtin as usize].clone()
-    }
+// impl SemanticAnalyzer {
+//     fn get_builtin_type(&self, builtin: PrimitiveKind) -> SymbolId {
+//         self.builtins[builtin as usize].clone()
+//     }
 
-    fn get_type_from_identifier(&self, name: &String, span: Span) -> Result<SymbolId, BoxedError> {
-        match self.symbol_table.current_scope().find_value_symbol(name, &self.symbol_table) {
-            Some(value_symbol) => {
-                match value_symbol.type_id.clone() {
-                    Some(type_id) => Ok(type_id),
-                    None => Err(self.create_error(ErrorKind::UnresolvedType(name.to_string()), span, &[span]))
-                }
-            },
-            None => Err(self.create_error(ErrorKind::UnknownVariable(name.to_string()), span, &[span]))
-        }
-    }
+//     fn get_type_from_identifier(&self, name: &String, span: Span) -> Result<SymbolId, BoxedError> {
+//         match self.symbol_table.current_scope().find_value_symbol(name, &self.symbol_table) {
+//             Some(value_symbol) => {
+//                 match value_symbol.type_id.clone() {
+//                     Some(type_id) => Ok(type_id),
+//                     None => Err(self.create_error(ErrorKind::UnresolvedType(name.to_string()), span, &[span]))
+//                 }
+//             },
+//             None => Err(self.create_error(ErrorKind::UnknownVariable(name.to_string()), span, &[span]))
+//         }
+//     }
 
-    // fn get_type_from_unary_operation(&self, operator: Operation, operand: &mut BoxedAstNode) -> Result<SymbolId, BoxedError> {
-    //     let operand_type_id = self.associate_node_with_type(operand)?;
+//     // fn get_type_from_unary_operation(&self, operator: Operation, operand: &mut BoxedAstNode) -> Result<SymbolId, BoxedError> {
+//     //     let operand_type_id = self.associate_node_with_type(operand)?;
         
-    // }
+//     // }
 
-    fn associate_node_with_type(&self, node: &mut AstNode) -> Result<SymbolId, BoxedError> {
-        use AstNodeKind::*;
+//     fn associate_node_with_type(&self, node: &mut AstNode) -> Result<SymbolId, BoxedError> {
+//         use AstNodeKind::*;
 
-        if let Some(id) = &node.type_id {
-            return Ok(id.clone());
-        }
+//         if let Some(id) = &node.type_id {
+//             return Ok(id.clone());
+//         }
 
-        let id = (match &mut node.kind {
-            IntegerLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Int)),
-            FloatLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Float)),
-            BooleanLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Bool)),
-            StringLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::String)),
-            CharLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Char)),
-            Identifier(name) => self.get_type_from_identifier(name, node.span),
-            // UnaryOperation { operator, operand, .. } 
-                // => Ok(self.get_builtin_type(self.get_type_from_unary_operation(*operator, operand)?)),
-            _ => Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
-        })?;
+//         let id = (match &mut node.kind {
+//             IntegerLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Int)),
+//             FloatLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Float)),
+//             BooleanLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Bool)),
+//             StringLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::String)),
+//             CharLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Char)),
+//             Identifier(name) => self.get_type_from_identifier(name, node.span),
+//             // UnaryOperation { operator, operand, .. } 
+//                 // => Ok(self.get_builtin_type(self.get_type_from_unary_operation(*operator, operand)?)),
+//             _ => Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
+//         })?;
 
-        node.type_id = Some(id.clone());
+//         node.type_id = Some(id.clone());
 
-        Ok(id)
-    }
-}
+//         Ok(id)
+//     }
+// }
 
 // impl SemanticAnalyzer {
 //     pub fn type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
