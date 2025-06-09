@@ -6,12 +6,6 @@ use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
 pub type ScopeId = usize;
 pub type SymbolId = (usize, String);
 
-#[derive(Debug, Clone)]
-pub struct FunctionData {
-    pub params: Vec<SymbolId>,
-    pub return_type: SymbolId
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
@@ -43,13 +37,19 @@ impl PrimitiveKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeSymbolKind {
     Primitive(PrimitiveKind),
     Enum(ScopeId),
     Struct(ScopeId),
     Trait(ScopeId),
-    TypeAlias,
+    TypeAlias(Option<SymbolId>),
+    FunctionSignature {
+        params: Vec<SymbolId>,
+        return_type: SymbolId,
+        instance: Option<ReferenceKind>
+    },
+    UnfulfilledObligation(usize),
     Generic,
     Custom
 }
@@ -72,7 +72,7 @@ pub struct ValueSymbol {
     pub name: String,
     pub kind: ValueSymbolKind,
     pub mutable: bool,
-    pub span: Span,
+    pub span: Option<Span>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<SymbolId>
@@ -83,7 +83,6 @@ pub struct TypeSymbol {
     pub name: String,
     pub kind: TypeSymbolKind,
     pub generic_parameters: Vec<SymbolId>,
-    pub function_data: Option<FunctionData>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub span: Option<Span>
@@ -129,11 +128,34 @@ impl Scope {
         symbol.scope_id = self.id;
 
         if let Some(existing) = self.values.get(&symbol.name) {
-            return Err(Error::from_multiple_errors(
-                ErrorKind::AlreadyDeclared(symbol.name),
-                symbol.span,
-                Span::get_all_lines(self.lines.clone(), &[existing.span, symbol.span]),
-            ));
+            let (existing_span, symbol_span) = (existing.span, symbol.span);
+
+            match (existing_span, symbol_span) {
+                (None, None) => return Err(Error::new(ErrorKind::AlreadyDeclared(symbol.name))),
+                (Some(span), None) => return Err(Error::from_one_error(
+                    ErrorKind::AlreadyDeclared(symbol.name),
+                    span,
+                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
+                )),
+                (None, Some(span)) => return Err(Error::from_one_error(
+                    ErrorKind::AlreadyDeclared(symbol.name),
+                    span,
+                    (self.lines[span.start_pos.line - 1].clone(), span.start_pos.line)
+                )),
+                (Some(existing_span), Some(symbol_span)) => {
+                    return Err(Error::from_multiple_errors(
+                        ErrorKind::AlreadyDeclared(symbol.name),
+                        symbol_span,
+                        Span::get_all_lines(self.lines.clone(), &[existing_span, symbol_span]),
+                    ));
+                }
+            }
+
+            // return Err(Error::from_multiple_errors(
+            //     ErrorKind::AlreadyDeclared(symbol.name),
+            //     symbol.span,
+            //     Span::get_all_lines(self.lines.clone(), &[existing.span, symbol.span]),
+            // ));
         }
 
         self.values.insert(symbol.name.clone(), symbol);
@@ -217,7 +239,7 @@ impl SymbolTable {
             kind: ScopeKind::Root
         };
 
-        SymbolTable::populate_with_defaults(&mut root);
+        SymbolTable::populate_with_defaults(&mut root, &mut table);
 
         let init = Scope {
             values: HashMap::new(),
@@ -228,26 +250,77 @@ impl SymbolTable {
             kind: ScopeKind::Block
         };
 
-        let mut scopes = HashMap::new();
-        scopes.insert(root.id, root);
-        scopes.insert(init.id, init);
+        table.scopes.insert(root.id, root);
+        table.scopes.insert(init.id, init);
 
         table
     }
 
-    fn populate_with_defaults(scope: &mut Scope) {
+    fn populate_with_defaults(scope: &mut Scope, symbol_table: &mut SymbolTable) {
         // PRIMITIVE TYPES //
         for ty in PrimitiveKind::iter() {
             scope.add_type_symbol(TypeSymbol {
                 name: ty.to_symbol(),
                 kind: TypeSymbolKind::Primitive(ty),
                 generic_parameters: vec![],
-                function_data: None,
                 qualifier: QualifierKind::Public,
                 scope_id: 0,
                 span: None
             }).unwrap();
         }
+
+        // for op in Operation::iter() {
+        //     let (trait_name, is_binary) = op.to_trait_data();
+
+        //     let scope_id = symbol_table.enter_scope(ScopeKind::Trait);
+
+        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
+        //         name: "Output".to_string(),
+        //         kind: TypeSymbolKind::Custom,
+        //         generic_parameters: vec![],
+        //         qualifier: QualifierKind::Public,
+        //         scope_id: 0,
+        //         span: None
+        //     }).unwrap_or_else(|_| panic!("[output_type] couldn't add builtin trait {}", trait_name));
+
+        //     // let self_type = symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
+        //     //     name: "Self".to_uppercase(),
+        //     //     kind: TypeSymbolKind::TypeAlias,
+        //     //     span: None,
+        //     //     qualifier: QualifierKind::Public,
+        //     //     scope_id: 0,
+        //     //     generic_parameters: vec![]
+        //     // }).unwrap_or_else(|_| panic!("[self_type] couldn't add builtin trait {}", trait_name));
+
+        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
+        //         name: trait_name.clone().to_lowercase(),
+        //         kind: TypeSymbolKind::FunctionSignature {
+        //             params: if is_binary {
+        //                 vec![TypeSymbol {
+
+        //                 }]
+        //             } else {
+        //                 vec![]
+        //             },
+        //             // return_type: 
+        //         },
+        //         span: None,
+        //         qualifier: QualifierKind::Public,
+        //         scope_id: 0,
+        //         generic_parameters: vec![]
+        //     }).unwrap_or_else(|_| panic!("[fn_signature] couldn't add builtin trait {}", trait_name));
+
+        //     symbol_table.exit_scope();
+
+        //     symbol_table.current_scope_mut().add_type_symbol(TypeSymbol {
+        //         name: trait_name.clone(),
+        //         kind: TypeSymbolKind::Trait(scope_id),
+        //         generic_parameters: vec![],
+        //         qualifier: QualifierKind::Public,
+        //         scope_id: 0,
+        //         span: None
+        //     }).unwrap_or_else(|_| panic!("[trait] couldn't add builtin trait {}", trait_name));
+        // }
     }
 
     fn find_value_symbol_owner(&self, name: &str, start_scope_id: ScopeId) -> Option<ScopeId> {
@@ -306,8 +379,8 @@ impl SymbolTable {
     }
 
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
-        let new_id = self.get_next_scope_id();
         let parent_id = self.current_scope_id;
+        let new_id = self.get_next_scope_id();
 
         let new_scope = Scope {
             values: HashMap::new(),
@@ -368,12 +441,30 @@ impl std::fmt::Display for ValueSymbol {
 
 impl std::fmt::Display for TypeSymbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let type_variant = match self.kind {
+        let type_variant = match &self.kind {
             TypeSymbolKind::Struct(scope_id) => format!("Struct({})", scope_id).blue(),
             TypeSymbolKind::Trait(scope_id) => format!("Trait({})", scope_id).cyan(),
             TypeSymbolKind::Enum(scope_id) => format!("Enum({})", scope_id).blue(),
-            TypeSymbolKind::TypeAlias => "TypeAlias".white(),
+            TypeSymbolKind::TypeAlias(scope_id) => format!("TypeAlias({:?})", scope_id).white(),
             TypeSymbolKind::Primitive(name) => format!("Builtin({})", name).green(),
+            TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
+                let instance_str = match instance {
+                    Some(ReferenceKind::Value) => "self",
+                    Some(ReferenceKind::Reference) => "&self",
+                    Some(ReferenceKind::MutableReference) => "&mut self",
+                    None => ""
+                };
+
+                let params_str = params.iter()
+                    .map(|(scope_id, name)| format!("{}:{}", scope_id, name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
+                let return_type_str = format!(": {}", return_type.1);
+
+                format!("FunctionSignature({}({}), {})", instance_str, params_str, return_type_str).blue()
+            },
+            TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
             TypeSymbolKind::Custom => "Custom".white(),
             TypeSymbolKind::Generic => "Generic".white()
         };
@@ -382,10 +473,6 @@ impl std::fmt::Display for TypeSymbol {
 
         if !self.generic_parameters.is_empty() {
             write!(f, "<{}>", self.generic_parameters.iter().map(|(id, name)| format!("{}:{}", id, name)).collect::<Vec<_>>().join(", "))?;
-        }
-
-        if let Some(data) = &self.function_data {
-            write!(f, ": {:?}", data.return_type)?;
         }
 
         Ok(())
@@ -522,6 +609,8 @@ impl SemanticAnalyzer {
         /* PASS STRUCTURE
             * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
             * 1: Collect type information for symbols.
+            * 2: Trait linking.
+            * 3: Obligation resolution.
          */
 
         macro_rules! pass {

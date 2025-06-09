@@ -2,10 +2,10 @@ while (false || x == 10) {
     let x = 4;
 }
 
-for (let i = 0; i < 10; ++i) {}
+for (let i = 0; i < 10; i += 1) {}
 
 let j = 0;
-for (;j < 10; ++j) {}
+for (;j < 10; i += 1) {}
 
 for (;;) {}
 
@@ -13,7 +13,7 @@ while (true) {
     break;
 }
 
-for (let i = 0; i < 5; ++i) {
+for (let i = 0; i < 5; i += 1) {
     continue;
 }
 

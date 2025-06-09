@@ -18,14 +18,9 @@ impl SemanticAnalyzer {
         }
     }
 
-    // fn get_type_from_unary_operation(&self, operator: Operation, operand: &mut BoxedAstNode) -> Result<BuiltinKind, BoxedError> {
+    // fn get_type_from_unary_operation(&self, operator: Operation, operand: &mut BoxedAstNode) -> Result<SymbolId, BoxedError> {
     //     let operand_type_id = self.associate_node_with_type(operand)?;
-    //     let operand_type = self.symbol_table.direct_type_symbol_lookup_mut(&operand_type_id).unwrap();
-
-    //     match operator {
-    //         Operation::Not => BuiltinKind::Bool,
-    //         _ => unreachable!()
-    //     }
+        
     // }
 
     fn associate_node_with_type(&self, node: &mut AstNode) -> Result<SymbolId, BoxedError> {

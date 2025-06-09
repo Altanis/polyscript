@@ -198,10 +198,6 @@ impl Lexer {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::PlusEq)
                     },
-                    Ok(c) if c == ADD_TOKEN => {
-                        operator.push(self.consume()?);
-                        TokenKind::Operator(Operation::Increment)
-                    },
                     _ => TokenKind::Operator(Operation::Plus),
                 };
                 Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
@@ -211,10 +207,6 @@ impl Lexer {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::MinusEq)
-                    },
-                    Ok(c) if c == SUB_TOKEN => {
-                        operator.push(self.consume()?);
-                        TokenKind::Operator(Operation::Decrement)
                     },
                     _ => TokenKind::Operator(Operation::Minus),
                 };

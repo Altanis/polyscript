@@ -60,13 +60,11 @@ pub const COLON: char = ':';
 pub const STRING_DELIMITER: char = '"';
 pub const CHAR_DELIMITER: char = '\'';
 
-#[derive(Debug, Hash, Eq, Clone, Copy, PartialEq)]
+#[derive(Debug, Hash, Eq, Clone, Copy, PartialEq, strum_macros::EnumIter)]
 pub enum Operation {
     // UNARY
     Not, // !
     BitwiseNegate,
-    Increment,
-    Decrement,
 
     // BINARY
     Plus,
@@ -113,17 +111,11 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn is_postfix(self) -> bool {
-        matches!(self, Operation::Increment | Operation::Decrement)
-    }
-
     pub fn is_unary(self) -> bool {
         matches!(
             self,
             Operation::Not
                 | Operation::BitwiseNegate
-                | Operation::Increment
-                | Operation::Decrement
                 | Operation::Plus
                 | Operation::Minus
                 | Operation::Mul
@@ -223,9 +215,7 @@ impl Operation {
             Operation::Exp => (12, 11),
     
             Operation::Not 
-            | Operation::BitwiseNegate 
-            | Operation::Increment 
-            | Operation::Decrement => (13, 14),
+            | Operation::BitwiseNegate => (13, 14),
 
             Operation::FieldAccess => (14, 15),
 
@@ -236,12 +226,10 @@ impl Operation {
     }
 
     /// Returns the trait name and whether it is a unary or binary operation.
-    fn to_trait_data(&self) -> (String, bool) {
+    pub fn to_trait_data(&self) -> (String, bool) {
         match self {
             Operation::Not => ("Not".to_string(), false),
             Operation::BitwiseNegate => ("BitwiseNegate".to_string(), false),
-            Operation::Increment => ("Increment".to_string(), false),
-            Operation::Decrement => ("Decrement".to_string(), false),
             Operation::Plus => ("Add".to_string(), true),
             Operation::Minus => ("Subtract".to_string(), true),
             Operation::Mul => ("Multiply".to_string(), true),
@@ -286,8 +274,6 @@ impl std::fmt::Display for Operation {
         let s = match self {
             Operation::Not => NOT_TOKEN.to_string(),
             Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
-            Operation::Increment => format!("{}{}", ADD_TOKEN, ADD_TOKEN),
-            Operation::Decrement => format!("{}{}", SUB_TOKEN, SUB_TOKEN),
 
             Operation::Plus => ADD_TOKEN.to_string(),
             Operation::Minus => SUB_TOKEN.to_string(),

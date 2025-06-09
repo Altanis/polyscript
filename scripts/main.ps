@@ -22,8 +22,8 @@ trait VectorLike[T] {
     type Thingy;
     const EUCLIDEAN_DEFINITION: string;
 
-    fn new(): Point[T];
-    fn operation(a: Point[T], b: Point[T]): Integer;
+    fn new(): Self;
+    fn operation(&this, other: &Self, op: fn(T, T): T): Integer;
 }
 
 impl VectorLike[Integer] for Point[Integer] {
@@ -34,10 +34,22 @@ impl VectorLike[Integer] for Point[Integer] {
         return Point { x: 0, y: 0 };
     }
 
-    fn operation(a: Point[Integer], b: Point[Integer]): Integer {
-        return add(a.x, a.y);
+    fn operation(&this, other: &Point[Integer], op: fn(Integer, Integer): Integer): Integer {
+        return op(this.x, other.y);
     }
 }
 
 let point_1 = Point { x: 0, y: 0 };
 let point_2 = Point { x: 0, y: 0 };
+
+let result = point_1.operation(&point_2, add);
+
+impl Point[Integer] {
+    public fn t1(): Self {
+        return Point { x: 0, y: 0 };
+    }
+
+    public fn t2(this) {}
+    public fn t3(&this) {}
+    public fn t4(&mut this) {}
+}

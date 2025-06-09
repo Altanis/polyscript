@@ -94,7 +94,7 @@ impl std::fmt::Display for Error {
             writeln!(f, "    {}", content)?;
             
             if *number == self.span.start_pos.line {
-                writeln!(f, "    {}^{}^", " ".repeat(self.span.start_pos.column - 1), "^".repeat(self.span.end_pos.column - self.span.start_pos.column))?;
+                writeln!(f, "    {}^{}^", " ".repeat(self.span.start_pos.column - 1), "^".repeat(self.span.end_pos.column.saturating_sub(self.span.start_pos.column)))?;
             }
         }
 

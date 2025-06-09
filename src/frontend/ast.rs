@@ -23,8 +23,7 @@ pub enum AstNodeKind {
     // OPERATIONS //
     UnaryOperation {
         operator: Operation,
-        operand: BoxedAstNode,
-        prefix: bool
+        operand: BoxedAstNode
     },
     BinaryOperation {
         operator: Operation,
@@ -65,7 +64,7 @@ pub enum AstNodeKind {
         generic_parameters: Vec<AstNode>,
         parameters: Vec<AstNode>,
         return_type: Option<BoxedAstNode>,
-        instance: Option<bool>
+        instance: Option<ReferenceKind>
     },
     FunctionPointer {
         params: Vec<AstNode>,
@@ -171,7 +170,8 @@ pub enum AstNodeKind {
     // TYPES //
     TypeReference {
         type_name: String,
-        generic_types: Vec<AstNode>
+        generic_types: Vec<AstNode>,
+        reference_kind: ReferenceKind
     },
     TypeDeclaration {
         name: String,
@@ -277,13 +277,9 @@ impl AstNode {
                     write!(f, " = {}", init)?;
                 }
             }
-            AstNodeKind::UnaryOperation { operator, operand, prefix } => {
+            AstNodeKind::UnaryOperation { operator, operand } => {
                 write!(f, "{}", indent_str)?;
-                if *prefix {
-                    write!(f, "{}{}", operator, operand)?
-                } else {
-                    write!(f, "{}{}", operand, operator)?
-                }
+                write!(f, "{}{}", operator, operand)?
             }
             AstNodeKind::BinaryOperation { operator, left, right } => {
                 write!(f, "{}(", indent_str)?;
@@ -611,7 +607,13 @@ impl AstNode {
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             },
             AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
-            AstNodeKind::TypeReference { type_name, generic_types } => {
+            AstNodeKind::TypeReference { type_name, generic_types, reference_kind } => {
+                let type_name = match reference_kind {
+                    ReferenceKind::Value => type_name.clone(),
+                    ReferenceKind::MutableReference => format!("&mut {type_name}"),
+                    ReferenceKind::Reference => format!("&{type_name}"),
+                };
+
                 write!(f, "{}{}", indent_str, type_name.bright_blue())?;
                 if !generic_types.is_empty() {
                     write!(f, "[")?;
