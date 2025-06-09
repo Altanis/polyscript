@@ -207,10 +207,64 @@ impl SymbolTable {
             ).unwrap();
         }
 
-        // add default traits
+        // TRAITS //
+        for op in Operation::iter() {
+            let (trait_name, is_binary) = op.to_trait_data();
+
+            let fn_name = trait_name.chars().enumerate().map(|(i, c)| {
+                if i != 0 && c.is_uppercase() {
+                    format!("_{}", c.to_lowercase())
+                } else {
+                    c.to_lowercase().to_string()
+                }
+            }).collect::<String>();
+
+            let scope_id = self.enter_scope(ScopeKind::Trait);
+
+            let self_type = self.add_type_symbol(
+                "Self",
+                TypeSymbolKind::TypeAlias(None), 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            ).unwrap_or_else(|_| panic!("[self_type] couldn't add default trait {}", trait_name));
+
+            let output_type = self.add_type_symbol(
+                "Output",
+                TypeSymbolKind::TypeAlias(None), 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            ).unwrap_or_else(|_| panic!("[output_type] couldn't add default trait {}", trait_name));
+
+            self.add_type_symbol(
+                &fn_name,
+                TypeSymbolKind::FunctionSignature {
+                    params: if is_binary {
+                        vec![self_type, self_type]
+                    } else {
+                        vec![self_type]
+                    },
+                    return_type: output_type,
+                    instance: Some(ReferenceKind::Value)
+                }, 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            ).unwrap_or_else(|_| panic!("[fn_signature] couldn't add default trait {}", trait_name));
+
+            self.exit_scope();
+
+            self.add_type_symbol(
+                &trait_name, 
+                TypeSymbolKind::Trait(scope_id), 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            ).unwrap_or_else(|_| panic!("[trait] couldn't add default trait {}", trait_name));
+        }
     }
     
-    /// Adds a new value symbol to the current scope.
     pub fn add_value_symbol(
         &mut self,
         name: &str,
