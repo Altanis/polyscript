@@ -1,55 +1,19 @@
-let x = 1;
-if (x == 1) {
-    let x = "4";
-} else if (x == 2) {
-    let x = "5";
-} else {
-    let x = "6";
-}
-
-type Integer = int;
-
-fn add[T: Add](a: T, b: T): T {
-    return a + b;
-}
-
 struct Point[T] {
     public x: T;
     public y: T;
 }
 
-trait VectorLike[T] {
-    type Thingy;
-    const EUCLIDEAN_DEFINITION: string;
-
-    fn new(): Self;
-    fn operation(&this, other: &Self, op: fn(T, T): T): Integer;
-}
-
-impl VectorLike[Integer] for Point[Integer] {
-    type Thingy = Integer;
-    const EUCLIDEAN_DEFINITION = "";
-
-    fn new(): Point[Integer] {
-        return Point { x: 0, y: 0 };
-    }
-
-    fn operation(&this, other: &Point[Integer], op: fn(Integer, Integer): Integer): Integer {
-        return op(this.x, other.y);
+impl Point[int] {
+    public fn new(): Self {
+        return Self {
+            x: 0,
+            y: 0
+        };
     }
 }
 
-let point_1 = Point { x: 0, y: 0 };
-let point_2 = Point { x: 0, y: 0 };
-
-let result = point_1.operation(&point_2, add);
-
-impl Point[Integer] {
-    public fn t1(): Self {
-        return Point { x: 0, y: 0 };
+impl[T] Point[T] {
+    public fn new(x: T, y: T): Self {
+        return Self { x, y };
     }
-
-    public fn t2(this) {}
-    public fn t3(&this) {}
-    public fn t4(&mut this) {}
 }

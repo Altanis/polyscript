@@ -14,7 +14,7 @@ impl SemanticAnalyzer {
                     None => Err(self.create_error(ErrorKind::UnresolvedType(name.to_string()), span, &[span]))
                 }
             },
-            None => Err(self.create_error(ErrorKind::UnknownVariable(name.to_string()), span, &[span]))
+            None => Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span]))
         }
     }
 

@@ -14,8 +14,8 @@ pub enum AstNodeKind {
     // VARIABLES //
     Identifier(String),
     VariableDeclaration {
-        mutable: bool,
         name: String,
+        mutable: bool,
         type_annotation: Option<BoxedAstNode>,
         initializer: Option<BoxedAstNode>,
     },
@@ -224,6 +224,38 @@ impl AstNode {
         }
 
         None
+    }
+
+    pub fn get_name(&self) -> Option<String> {
+        match &self.kind {
+            AstNodeKind::Identifier(name) => Some(name.clone()),
+
+            AstNodeKind::VariableDeclaration { name, .. } => Some(name.clone()),
+            AstNodeKind::FunctionSignature { name, .. } => Some(name.clone()),
+            AstNodeKind::FunctionParameter { name, .. } => Some(name.clone()),
+
+            AstNodeKind::StructDeclaration { name, .. } => Some(name.clone()),
+            AstNodeKind::StructField { name, .. } => Some(name.clone()),
+            AstNodeKind::StructLiteral { name, .. } => Some(name.clone()),
+
+            AstNodeKind::EnumDeclaration { name, .. } => Some(name.clone()),
+            AstNodeKind::EnumVariant(name) => Some(name.clone()),
+
+            AstNodeKind::TraitDeclaration { name, .. } => Some(name.clone()),
+            AstNodeKind::TraitConstant { name, .. } => Some(name.clone()),
+            AstNodeKind::TraitType(name) => Some(name.clone()),
+
+            AstNodeKind::AssociatedConstant { name, .. } => Some(name.clone()),
+            AstNodeKind::AssociatedFunction { signature, .. } => signature.get_name(),
+            AstNodeKind::AssociatedType { name, .. } => Some(name.clone()),
+
+            AstNodeKind::GenericParameter { name, .. } => Some(name.clone()),
+
+            AstNodeKind::TypeReference { type_name, .. } => Some(type_name.clone()),
+            AstNodeKind::TypeDeclaration { name, .. } => Some(name.clone()),
+
+            _ => None,
+        }
     }
 }
 

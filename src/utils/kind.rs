@@ -1,6 +1,8 @@
 use colored::*;
 use std::rc::Rc;
 
+use crate::backend::semantic_analyzer::PrimitiveKind;
+
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
 pub const ADD_TOKEN: char = '+';
@@ -226,45 +228,159 @@ impl Operation {
     }
 
     /// Returns the trait name and whether it is a unary or binary operation.
-    pub fn to_trait_data(&self) -> (String, bool) {
+    pub fn to_trait_data(&self) -> Option<(String, bool)> {
         match self {
-            Operation::Not => ("Not".to_string(), false),
-            Operation::BitwiseNegate => ("BitwiseNegate".to_string(), false),
-            Operation::Plus => ("Add".to_string(), true),
-            Operation::Minus => ("Subtract".to_string(), true),
-            Operation::Mul => ("Multiply".to_string(), true),
-            Operation::Exp => ("Exponentiate".to_string(), true),
-            Operation::Div => ("Divide".to_string(), true),
-            Operation::Mod => ("Modulo".to_string(), true),
-            Operation::BitwiseAnd => ("BitwiseAnd".to_string(), true),
-            Operation::BitwiseOr => ("BitwiseOr".to_string(), true),
-            Operation::BitwiseXor => ("BitwiseXor".to_string(), true),
-            Operation::RightBitShift => ("RightBitShift".to_string(), true),
-            Operation::LeftBitShift => ("LeftBitShift".to_string(), true),
-            Operation::Assign => ("Assign".to_string(), true),
-            Operation::PlusEq => ("AddAssign".to_string(), true),
-            Operation::MinusEq => ("SubtractAssign".to_string(), true),
-            Operation::MulEq => ("MultiplyAssign".to_string(), true),
-            Operation::ExpEq => ("ExponentiateAssign".to_string(), true),
-            Operation::DivEq => ("DivideAssign".to_string(), true),
-            Operation::ModEq => ("ModuloAssign".to_string(), true),
-            Operation::BitwiseAndEq => ("BitwiseAndAssign".to_string(), true),
-            Operation::BitwiseOrEq => ("BitwiseOrAssign".to_string(), true),
-            Operation::BitwiseXorEq => ("BitwiseXorAssign".to_string(), true),
-            Operation::RightBitShiftEq => ("RightBitShiftAssign".to_string(), true),
-            Operation::LeftBitShiftEq => ("LeftBitShiftAssign".to_string(), true),
-            Operation::NotEqual => ("NotEqual".to_string(), true),
-            Operation::And => ("And".to_string(), true),
-            Operation::Or => ("Or".to_string(), true),
-            Operation::GreaterThan => ("GreaterThan".to_string(), true),
-            Operation::Geq => ("GreaterThanOrEqual".to_string(), true),
-            Operation::LessThan => ("LessThan".to_string(), true),
-            Operation::Leq => ("LessThanOrEqual".to_string(), true),
-            Operation::Equivalence => ("Equivalence".to_string(), true),
-            Operation::FieldAccess => ("FieldAccess".to_string(), true),
-            Operation::Dereference => ("Dereference".to_string(), false),
-            Operation::ImmutableAddressOf => ("ImmutableAddressOf".to_string(), false),
-            Operation::MutableAddressOf => ("MutableAddressOf".to_string(), false)
+            Operation::Not => Some(("Not".to_string(), false)),
+            Operation::BitwiseNegate => Some(("BitwiseNegate".to_string(), false)),
+            Operation::Plus => Some(("Add".to_string(), true)),
+            Operation::Minus => Some(("Subtract".to_string(), true)),
+            Operation::Mul => Some(("Multiply".to_string(), true)),
+            Operation::Exp => Some(("Exponentiate".to_string(), true)),
+            Operation::Div => Some(("Divide".to_string(), true)),
+            Operation::Mod => Some(("Modulo".to_string(), true)),
+            Operation::BitwiseAnd => Some(("BitwiseAnd".to_string(), true)),
+            Operation::BitwiseOr => Some(("BitwiseOr".to_string(), true)),
+            Operation::BitwiseXor => Some(("BitwiseXor".to_string(), true)),
+            Operation::RightBitShift => Some(("RightBitShift".to_string(), true)),
+            Operation::LeftBitShift => Some(("LeftBitShift".to_string(), true)),
+            Operation::Assign => None,
+            Operation::PlusEq => Some(("AddAssign".to_string(), true)),
+            Operation::MinusEq => Some(("SubtractAssign".to_string(), true)),
+            Operation::MulEq => Some(("MultiplyAssign".to_string(), true)),
+            Operation::ExpEq => Some(("ExponentiateAssign".to_string(), true)),
+            Operation::DivEq => Some(("DivideAssign".to_string(), true)),
+            Operation::ModEq => Some(("ModuloAssign".to_string(), true)),
+            Operation::BitwiseAndEq => Some(("BitwiseAndAssign".to_string(), true)),
+            Operation::BitwiseOrEq => Some(("BitwiseOrAssign".to_string(), true)),
+            Operation::BitwiseXorEq => Some(("BitwiseXorAssign".to_string(), true)),
+            Operation::RightBitShiftEq => Some(("RightBitShiftAssign".to_string(), true)),
+            Operation::LeftBitShiftEq => Some(("LeftBitShiftAssign".to_string(), true)),
+            Operation::NotEqual => Some(("NotEqual".to_string(), true)),
+            Operation::And => Some(("And".to_string(), true)),
+            Operation::Or => Some(("Or".to_string(), true)),
+            Operation::GreaterThan => Some(("GreaterThan".to_string(), true)),
+            Operation::Geq => Some(("GreaterThanOrEqual".to_string(), true)),
+            Operation::LessThan => Some(("LessThan".to_string(), true)),
+            Operation::Leq => Some(("LessThanOrEqual".to_string(), true)),
+            Operation::Equivalence => Some(("Equivalence".to_string(), true)),
+            Operation::FieldAccess => None,
+            Operation::Dereference => None,
+            Operation::ImmutableAddressOf => None,
+            Operation::MutableAddressOf => None,
+        }
+    }
+
+    /// Gives the output type for a default Operation implementation of a trait on a primitive type.
+    pub fn to_default_trait_return_type(&self, primitive: PrimitiveKind) -> Option<PrimitiveKind> {
+        use Operation::*;
+        use PrimitiveKind::*;
+
+        match primitive {
+            Int => match self {
+                Not => Some(Bool),
+                BitwiseNegate => Some(Int),
+
+                Plus | Minus | Mul | Div | Mod |
+                Exp | BitwiseAnd | BitwiseOr | BitwiseXor |
+                RightBitShift | LeftBitShift |
+                Assign | PlusEq | MinusEq | MulEq | DivEq |
+                ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq |
+                BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Int),
+
+                And | Or |
+                GreaterThan | Geq | LessThan | Leq |
+                Equivalence | NotEqual => Some(Bool),
+
+                FieldAccess => None,
+                Dereference => None,
+                ImmutableAddressOf => None,
+                MutableAddressOf => None,
+            },
+
+            Float => match self {
+                Not => Some(Bool),
+                BitwiseNegate => None,
+
+                Plus | Minus | Mul | Div | Mod | Exp |
+                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq => Some(Float),
+
+                BitwiseAnd | BitwiseOr | BitwiseXor |
+                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
+                RightBitShift | LeftBitShift |
+                RightBitShiftEq | LeftBitShiftEq => None,
+
+                And | Or |
+                GreaterThan | Geq | LessThan | Leq |
+                Equivalence | NotEqual => Some(Bool),
+
+                FieldAccess => None,
+                Dereference => None,
+                ImmutableAddressOf => None,
+                MutableAddressOf => None,
+            },
+
+            Bool => match self {
+                Not => Some(Bool),
+                BitwiseNegate => None,
+
+                And | Or |
+                Equivalence | NotEqual |
+                Assign => Some(Bool),
+
+                Plus | Minus | Mul | Div | Mod | Exp |
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
+                BitwiseAnd | BitwiseOr | BitwiseXor |
+                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
+                GreaterThan | Geq | LessThan | Leq |
+                RightBitShift | LeftBitShift |
+                RightBitShiftEq | LeftBitShiftEq => None,
+
+                FieldAccess => None,
+                Dereference => None,
+                ImmutableAddressOf => None,
+                MutableAddressOf => None,
+            },
+
+            String => match self {
+                Plus | PlusEq => Some(String),
+                Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
+                Assign => Some(String),
+
+                Not | BitwiseNegate |
+                Minus | Mul | Div | Mod | Exp |
+                MinusEq | MulEq | DivEq | ModEq | ExpEq |
+                BitwiseAnd | BitwiseOr | BitwiseXor |
+                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
+                RightBitShift | LeftBitShift |
+                RightBitShiftEq | LeftBitShiftEq |
+                And | Or => None,
+
+                FieldAccess => None,
+                Dereference => None,
+                ImmutableAddressOf => None,
+                MutableAddressOf => None,
+            },
+
+            Char => match self {
+                Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
+                Assign => Some(Char),
+
+                Plus | Minus | Mul | Div | Mod | Exp |
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
+                BitwiseAnd | BitwiseOr | BitwiseXor |
+                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
+                RightBitShift | LeftBitShift |
+                RightBitShiftEq | LeftBitShiftEq |
+                Not | BitwiseNegate |
+                And | Or => None,
+
+                FieldAccess => None,
+                Dereference => None,
+                ImmutableAddressOf => None,
+                MutableAddressOf => None,
+            },
+
+            Null => None,
         }
     }
 }

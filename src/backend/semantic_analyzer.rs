@@ -44,7 +44,7 @@ impl NameInterner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function,
+    Function(ScopeId),
     StructField,
     EnumVariant
 }
@@ -72,13 +72,20 @@ impl PrimitiveKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
+pub struct InherentImpl {
+    pub scope_id: ScopeId,
+    pub specialization: Vec<TypeSymbolId>,
+    pub generic_params: Vec<TypeSymbolId>
+}
+
+#[derive(Debug, Clone)]
 pub enum TypeSymbolKind {
     Primitive(PrimitiveKind),
-    Enum(ScopeId),
-    Struct(ScopeId),
+    Enum((ScopeId, Vec<InherentImpl>)),
+    Struct((ScopeId, Vec<InherentImpl>)),
     Trait(ScopeId),
-    TypeAlias(Option<TypeSymbolId>),
+    TypeAlias((Option<ScopeId>, Option<TypeSymbolId>)),
     FunctionSignature {
         params: Vec<TypeSymbolId>,
         return_type: TypeSymbolId,
@@ -209,7 +216,7 @@ impl SymbolTable {
 
         // TRAITS //
         for op in Operation::iter() {
-            let (trait_name, is_binary) = op.to_trait_data();
+            let Some((trait_name, is_binary)) = op.to_trait_data() else { continue; };
 
             let fn_name = trait_name.chars().enumerate().map(|(i, c)| {
                 if i != 0 && c.is_uppercase() {
@@ -223,7 +230,7 @@ impl SymbolTable {
 
             let self_type = self.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias(None), 
+                TypeSymbolKind::TypeAlias((None, None)), 
                 vec![], 
                 QualifierKind::Public, 
                 None
@@ -231,7 +238,7 @@ impl SymbolTable {
 
             let output_type = self.add_type_symbol(
                 "Output",
-                TypeSymbolKind::TypeAlias(None), 
+                TypeSymbolKind::TypeAlias((None, None)), 
                 vec![], 
                 QualifierKind::Public, 
                 None
@@ -262,6 +269,41 @@ impl SymbolTable {
                 QualifierKind::Public, 
                 None
             ).unwrap_or_else(|_| panic!("[trait] couldn't add default trait {}", trait_name));
+
+            // for primitive in PrimitiveKind::iter() {
+            //     let return_type_id = {
+            //         let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
+            //         self.find_type_symbol(return_type.to_symbol_str()).unwrap().id
+            //     };
+
+            //     let type_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
+
+            //     let impl_id = self.enter_scope(ScopeKind::Impl);
+        
+            //     let self_type = self.add_type_symbol(
+            //         "Self",
+            //         TypeSymbolKind::TypeAlias(Some(type_id)), 
+            //         vec![],
+            //         QualifierKind::Public, 
+            //         None
+            //     ).unwrap_or_else(|_| panic!("[self_type] couldn't add default trait {}", trait_name));
+
+            //     let output_type = self.add_type_symbol(
+            //         "Output",
+            //         TypeSymbolKind::TypeAlias(Some(return_type_id)), 
+            //         vec![], 
+            //         QualifierKind::Public, 
+            //         None
+            //     ).unwrap_or_else(|_| panic!("[output_type] couldn't add default trait {}", trait_name));
+
+            //     self.enter_scope(ScopeKind::Function);
+
+            //     self.exit_scope();
+
+            //     self.exit_scope();
+
+            //     // self.add_type_symbol(name, kind, generic_parameters, qualifier, span)
+            // }
         }
     }
     
@@ -346,6 +388,7 @@ impl SymbolTable {
 
             scope_id = scope.parent;
         }
+
         None
     }
     
@@ -361,6 +404,7 @@ impl SymbolTable {
 
             scope_id = scope.parent;
         }
+
         None
     }
     
@@ -376,6 +420,7 @@ impl SymbolTable {
 
             scope_id = scope.parent;
         }
+
         None
     }
 
@@ -391,6 +436,7 @@ impl SymbolTable {
 
             scope_id = scope.parent;
         }
+        
         None
     }
 
@@ -478,7 +524,7 @@ impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
             ValueSymbolKind::Variable => "Variable".green(),
-            ValueSymbolKind::Function => "Function".blue(),
+            ValueSymbolKind::Function(scope_id) => format!("Function({})", scope_id).blue(),
             ValueSymbolKind::StructField => "StructField".yellow(),
             ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };
@@ -517,9 +563,9 @@ impl SymbolTable {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_type_name(self.symbol.name_id);
                 let type_variant = match &self.symbol.kind {
-                    TypeSymbolKind::Struct(id) => format!("Struct({})", id).blue(),
+                    TypeSymbolKind::Struct((id, scopes)) => format!("Struct({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
-                    TypeSymbolKind::Enum(id) => format!("Enum({})", id).blue(),
+                    TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
@@ -575,7 +621,7 @@ impl SymbolTable {
         child_scope_ids.sort();
 
         for child_id in child_scope_ids {
-            writeln!(f, "{:indent$}{{", "", indent = indent)?;
+            writeln!(f, "{:indent$}{{ (Scope({}))", "", child_id, indent = indent)?;
             self.display_scope(child_id, indent + 4, f)?;
             writeln!(f, "{:indent$}}}", "", indent = indent)?;
         }
@@ -586,7 +632,6 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Start displaying from the root scope (ID 0)
         self.display_scope(0, 0, f)
     }
 }
@@ -597,7 +642,13 @@ pub struct TraitRegistry {
 
 impl TraitRegistry {
     pub fn new() -> Self {
-        TraitRegistry { register: HashMap::new() }
+        let mut registry = TraitRegistry { register: HashMap::new() };
+        registry.populate_registry();
+        registry
+    }
+
+    fn populate_registry(&mut self) {
+
     }
 
     pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId) {
@@ -694,9 +745,9 @@ impl SemanticAnalyzer {
     pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
         /* PASS STRUCTURE
             * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
-            * 1: Collect type information for symbols.
-            * 2: Trait linking.
-            * 3: Obligation resolution.
+            * 1: Collect generic constraints.
+            * 2: Collect impl blocks.
+            * 3: Collect type information for symbols.
          */
 
         macro_rules! pass {
@@ -709,6 +760,7 @@ impl SemanticAnalyzer {
         }
         
         pass!(self, symbol_collector_pass, &mut program);
+        pass!(self, impl_collector_pass, &mut program);
         // pass!(self, type_collector_pass, &mut program);
 
         Ok(program)
