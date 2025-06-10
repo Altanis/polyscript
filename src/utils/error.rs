@@ -1,5 +1,7 @@
 use colored::Colorize;
 
+use crate::utils::kind::Operation;
+
 use super::kind::Span;
 
 #[derive(Debug, Clone)]
@@ -18,7 +20,8 @@ pub enum ErrorKind {
     AlreadyDeclared(String),
     UnknownType,
     InvalidImpl(Option<String>),
-    ExpectedType
+    ExpectedType,
+    UndefinedOperation(Operation, [String; 2])
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
     // BadVariableDeclaration
@@ -43,7 +46,15 @@ impl ErrorKind {
             ErrorKind::UnknownType => "could not determine type of data at compile-time".to_string(),
             ErrorKind::InvalidImpl(type_ref) 
                 => format!("cannot construct impl block for {}", type_ref.as_ref().map_or("an unnamed identifier", |v| v)),
-            ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string()
+            ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
+            ErrorKind::UndefinedOperation(operation, ty) => {
+                match (ty[0].as_str(), ty[1].as_str()) {
+                    ("", "") => format!("operation {} not defined for type", operation),
+                    ("", right) => format!("operation {} not defined for type {}", operation, right),
+                    (left, "") => format!("operation {} not defined for type {}", operation, left),
+                    (left, right) => format!("operation {} not defined for type {} and {}", operation, left, right),
+                }
+            }
         }
     }
 }

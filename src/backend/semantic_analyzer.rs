@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 use colored::*;
 use strum::IntoEnumIterator;
 use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
@@ -77,6 +77,13 @@ pub struct InherentImpl {
     pub scope_id: ScopeId,
     pub specialization: Vec<TypeSymbolId>,
     pub generic_params: Vec<TypeSymbolId>
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitImpl {
+    pub impl_scope_id: ScopeId,
+    pub impl_generic_params: Vec<TypeSymbolId>,
+    pub trait_generic_specialization: Vec<TypeSymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +166,8 @@ pub struct SymbolTable {
     next_scope_id: ScopeId,
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
+
+    real_starting_scope: ScopeId
 }
 
 impl SymbolTable {
@@ -174,6 +183,7 @@ impl SymbolTable {
             next_scope_id: 0,
             next_value_symbol_id: 0,
             next_type_symbol_id: 0,
+            real_starting_scope: 0
         };
 
         let root_scope_id = table.get_next_scope_id();
@@ -198,6 +208,7 @@ impl SymbolTable {
         table.scopes.insert(init_scope_id, init_scope);
 
         table.current_scope_id = init_scope_id;
+        table.real_starting_scope = init_scope_id;
 
         table
     }
@@ -436,7 +447,7 @@ impl SymbolTable {
 
             scope_id = scope.parent;
         }
-        
+
         None
     }
 
@@ -606,12 +617,12 @@ impl SymbolTable {
 
         for symbol_id in scope.values.values() {
             let symbol = &self.value_symbols[symbol_id];
-            writeln!(f, "{:indent$}[val] {}", "", self.display_value_symbol(symbol), indent = indent)?;
+            writeln!(f, "{:indent$}[Value({})] {}", "", symbol_id, self.display_value_symbol(symbol), indent = indent)?;
         }
 
         for symbol_id in scope.types.values() {
             let symbol = &self.type_symbols[symbol_id];
-            writeln!(f, "{:indent$}[type] {}", "", self.display_type_symbol(symbol), indent = indent)?;
+            writeln!(f, "{:indent$}[Type({})] {}", "", symbol_id, self.display_type_symbol(symbol), indent = indent)?;
         }
 
         let mut child_scope_ids: Vec<ScopeId> = self.scopes.values()
@@ -632,12 +643,12 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.display_scope(0, 0, f)
+        self.display_scope(self.real_starting_scope, 0, f)
     }
 }
 
 pub struct TraitRegistry {
-    pub register: HashMap<TypeSymbolId, HashSet<TypeSymbolId>>
+    pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, TraitImpl>>
 }
 
 impl TraitRegistry {
@@ -651,28 +662,23 @@ impl TraitRegistry {
 
     }
 
-    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId) {
-        self.register.entry(trait_id)
+    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId, implementation: TraitImpl) {
+        self.register
+            .entry(trait_id)
             .or_default()
-            .insert(type_id);
+            .insert(type_id, implementation);
     }
 
     pub fn implements(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> bool {
         self.register
             .get(&trait_id)
-            .map_or(false, |types| types.contains(&type_id))
+            .map_or(false, |impls| impls.contains_key(&type_id))
     }
-
-    pub fn types_for_trait(&self, trait_id: TypeSymbolId) -> Option<&HashSet<TypeSymbolId>> {
-        self.register.get(&trait_id)
-    }
-
-    pub fn traits_for_type(&self, type_id: TypeSymbolId) -> Vec<TypeSymbolId> {
-        self.register.iter()
-            .filter_map(|(trait_id, types)| {
-                if types.contains(&type_id) { Some(*trait_id) } else { None }
-            })
-            .collect()
+    
+    pub fn get_implementation(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&TraitImpl> {
+        self.register
+            .get(&trait_id)
+            .and_then(|impls| impls.get(&type_id))
     }
 }
 
@@ -685,13 +691,19 @@ impl TraitRegistry {
 
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                for (trait_id, types) in &self.registry.register {
-                    let trait_name = self.table.get_type_name(self.table.type_symbols[trait_id].name_id);
-                    writeln!(f, "{}({})", trait_name, trait_id)?;
-                    for type_id in types {
-                        let type_name = self.table.get_type_name(self.table.type_symbols[type_id].name_id);
-                        writeln!(f, "  - {}({})", type_name, type_id)?;
+                for (trait_id, impls) in &self.registry.register {
+                    let trait_symbol = &self.table.type_symbols[trait_id];
+                    let trait_name = self.table.get_type_name(trait_symbol.name_id);
+                    writeln!(f, "{}", format!("[Trait({})] {}", trait_id, trait_name).underline())?;
+                    
+                    for (type_id, impl_details) in impls {
+                        let type_symbol = &self.table.type_symbols[type_id];
+                        let type_name = self.table.get_type_name(type_symbol.name_id);
+                        write!(f, "[Type({})] {}", type_id, type_name)?;
+                        writeln!(f, " -> Scope({})", impl_details.impl_scope_id)?;
                     }
+
+                    writeln!(f)?;
                 }
                 Ok(())
             }

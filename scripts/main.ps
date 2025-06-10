@@ -17,3 +17,29 @@ impl[T] Point[T] {
         return Self { x, y };
     }
 }
+
+trait Vector {
+    fn get_x(&this): int;
+    fn get_y(&this): int;
+}
+
+impl Vector for Point[int] {
+    fn get_x(&this): int {
+        return this.x;
+    }
+
+    fn get_y(&this): int {
+        return this.y;
+    }
+}
+
+impl Add for Point[int] {
+    type Output = Self;
+
+    fn add(this, rhs: Self): Self {
+        return Point {
+            x: this.get_x() + rhs.get_x(),
+            y: this.get_y() + rhs.get_y()
+        };
+    }
+}

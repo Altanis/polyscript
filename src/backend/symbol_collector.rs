@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, ScopeId, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
+use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
 use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 
 impl SemanticAnalyzer {
@@ -372,6 +372,25 @@ impl SemanticAnalyzer {
         Ok(type_symbol.id)
     }
 
+    fn resolve_type_ref_from_ast(&self, node: &AstNode) -> Result<(TypeSymbolId, Vec<TypeSymbolId>), BoxedError> {
+        let (name, arg_nodes) = match &node.kind {
+            AstNodeKind::TypeReference { type_name, generic_types, .. } => (type_name, generic_types),
+            _ => return Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span]))
+        };
+
+        let base_type_id = self.symbol_table.find_type_symbol(name)
+            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.clone()), node.span, &[node.span]))?
+            .id;
+
+        let mut arg_ids = vec![];
+        for arg_node in arg_nodes {
+            let arg_id = self.resolve_type_ref_from_ast(arg_node)?.0;
+            arg_ids.push(arg_id);
+        }
+        
+        Ok((base_type_id, arg_ids))
+    }
+
     fn collect_and_register_impl_block(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
         let (
             associated_constants,
@@ -390,119 +409,93 @@ impl SemanticAnalyzer {
             ),
             _ => unreachable!()
         };
+        
+        let impl_scope_id = self.symbol_table.enter_scope(ScopeKind::Impl);
+        let impl_generic_param_ids = self.collect_generic_parameters(impl_generics)?;
 
-        match trait_node {
-            Some(trait_node) => {
-                Ok(())
-            }
-            None => {
-                let impl_scope_id = self.symbol_table.enter_scope(ScopeKind::Impl);
-                let impl_generic_param_ids = self.collect_generic_parameters(impl_generics)?;
-                
-                let (base_type_name, specialization_arg_nodes) = match &mut type_reference.kind {
-                    AstNodeKind::TypeReference { type_name, generic_types, .. } => (type_name, generic_types),
-                    _ => return Err(self.create_error(ErrorKind::InvalidImpl(None), type_reference.span, &[type_reference.span])),
-                };
+        if let Some(trait_node) = trait_node {
+            let (trait_id, trait_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
+            let (implementing_type_id, _) = self.resolve_type_ref_from_ast(type_reference)?;
+            
+            self.symbol_table.add_type_symbol(
+                "Self", 
+                TypeSymbolKind::TypeAlias((None, Some(implementing_type_id))), 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            )?;
+            
+            self.collect_impl_body_symbols(associated_constants, associated_types, associated_functions)?;
+            
+            let trait_impl = TraitImpl {
+                impl_scope_id,
+                impl_generic_params: impl_generic_param_ids,
+                trait_generic_specialization: trait_specialization,
+            };
 
-                let mut specialization_types = vec![];
-                for arg_node in specialization_arg_nodes {
-                    let type_id = self.find_type_by_name(arg_node)?;
-                    specialization_types.push(type_id);
-                }
+            self.trait_registry.register(trait_id, implementing_type_id, trait_impl);
+        } else {
+            let (base_type_id, specialization) = self.resolve_type_ref_from_ast(type_reference)?;
+            
+            let base_type_symbol = self.symbol_table.get_type_symbol(base_type_id).unwrap();
+            let aliased_type_id = base_type_symbol.id;
+            self.symbol_table.add_type_symbol(
+                "Self", 
+                TypeSymbolKind::TypeAlias((None, Some(aliased_type_id))), 
+                vec![], 
+                QualifierKind::Public, 
+                None
+            )?;
+            
+            self.collect_impl_body_symbols(associated_constants, associated_types, associated_functions)?;
+            
+            let impl_block = InherentImpl {
+                scope_id: impl_scope_id,
+                specialization,
+                generic_params: impl_generic_param_ids,
+            };
+            
+            let invalid_impl_error = self.create_error(
+                ErrorKind::InvalidImpl(Some(self.symbol_table.get_type_name(self.symbol_table.get_type_symbol(base_type_id).unwrap().name_id).to_string())),
+                type_reference.span,
+                &[type_reference.span]
+            );
+            let base_type_symbol_mut = self.symbol_table.get_type_symbol_mut(base_type_id).unwrap();
 
-                self.symbol_table.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None)?;
-                
-                for func_node in associated_functions {
-                    if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
-                        if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
-                            let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
-                            self.collect_generic_parameters(generic_parameters)?;
-                            self.collect_function_parameters(parameters)?;
-                            self.collect_node_symbol(body)?;
-                            self.symbol_table.exit_scope();
-
-                            func_node.value_id = Some(self.symbol_table.add_value_symbol(
-                                name, ValueSymbolKind::Function(func_scope_id), false, *qualifier, None, Some(func_node.span)
-                            )?);
-                        }
-                    }
-                }
-                
-                for const_node in associated_constants {
-                    if let AstNodeKind::AssociatedConstant { qualifier, name, .. } = &const_node.kind {
-                        let const_id = self.symbol_table.add_value_symbol(name, ValueSymbolKind::Variable, false, *qualifier, None, Some(const_node.span))?;
-                        const_node.value_id = Some(const_id);
-                    }
-                }
-
-                for type_node in associated_types {
-                    if let AstNodeKind::AssociatedType { name, qualifier, .. } = &type_node.kind {
-                        let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], *qualifier, Some(type_node.span))?;
-                        type_node.type_id = Some(type_id);
-                    }
-                }
-
-                self.symbol_table.exit_scope();
-
-                let impl_block = InherentImpl {
-                    scope_id: impl_scope_id,
-                    specialization: specialization_types,
-                    generic_params: impl_generic_param_ids,
-                };
-
-                let unknown_identifier_error = self.create_error(
-                    ErrorKind::UnknownIdentifier(base_type_name.clone()), 
-                    type_reference.span, 
-                    &[type_reference.span]
-                );
-
-                let base_type_symbol = self.symbol_table.find_type_symbol_mut(base_type_name).ok_or(unknown_identifier_error)?;
-
-                match &mut base_type_symbol.kind {
-                    TypeSymbolKind::Struct((_, impls)) | TypeSymbolKind::Enum((_, impls)) => {
-                        impls.push(impl_block);
-                    }
-                    _ => return Err(self.create_error(ErrorKind::InvalidImpl(Some(base_type_name.clone())), type_reference.span, &[type_reference.span])),
-                }
-
-                Ok(())
+            match &mut base_type_symbol_mut.kind {
+                TypeSymbolKind::Struct((_, impls)) | TypeSymbolKind::Enum((_, impls)) => {
+                    impls.push(impl_block);
+                },
+                _ => return Err(invalid_impl_error),
             }
         }
+        
+        self.symbol_table.exit_scope();
+        Ok(())
     }
 
-    fn collect_impl_symbols(
-        &mut self, 
+    fn collect_impl_body_symbols(
+        &mut self,
         associated_constants: &mut [AstNode],
         associated_types: &mut [AstNode],
         associated_functions: &mut [AstNode],
-        generic_parameters: &mut [AstNode]
-    ) -> Result<ScopeId, BoxedError> {
-        let impl_scope_id = self.symbol_table.enter_scope(ScopeKind::Impl);
-        
-        self.collect_generic_parameters(generic_parameters)?;
-        self.symbol_table.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None)?;
-
+    ) -> Result<(), BoxedError> {
         for func_node in associated_functions {
             if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
                 if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
-                    let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
+                    let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
                     self.collect_generic_parameters(generic_parameters)?;
                     self.collect_function_parameters(parameters)?;
                     self.collect_node_symbol(body)?;
                     self.symbol_table.exit_scope();
 
                     func_node.value_id = Some(self.symbol_table.add_value_symbol(
-                        name, 
-                        ValueSymbolKind::Function(scope_id), 
-                        false, 
-                        *qualifier, 
-                        None, 
-                        Some(func_node.span))?
-                    );
+                        name, ValueSymbolKind::Function(func_scope_id), false, *qualifier, None, Some(func_node.span)
+                    )?);
                 }
             }
         }
-
+        
         for const_node in associated_constants {
             if let AstNodeKind::AssociatedConstant { qualifier, name, .. } = &const_node.kind {
                 let const_id = self.symbol_table.add_value_symbol(name, ValueSymbolKind::Variable, false, *qualifier, None, Some(const_node.span))?;
@@ -516,9 +509,7 @@ impl SemanticAnalyzer {
                 type_node.type_id = Some(type_id);
             }
         }
-
-        self.symbol_table.exit_scope();
-
-        Ok(impl_scope_id)
+        
+        Ok(())
     }
 }
