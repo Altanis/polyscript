@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
+use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, ReferenceKind, Span}}};
 use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 
 impl SemanticAnalyzer {
@@ -34,8 +34,8 @@ impl SemanticAnalyzer {
             ImplDeclaration { .. } => Ok((None, None)),
             EnumDeclaration { name, variants } =>
                 self.collect_enum_symbols(name, variants, node.span),
-            TraitDeclaration { name, signatures, constants, types, .. } =>
-                self.collect_trait_symbols(name, signatures, constants, types, node.span),
+            TraitDeclaration { name, generic_parameters, constants, types, signatures } =>
+                self.collect_trait_symbols(name, generic_parameters, constants, types, signatures, node.span),
             TypeDeclaration { name, generic_parameters, .. } =>
                 self.collect_type_symbols(name, generic_parameters, node.span),
             Block(statements) =>
@@ -99,11 +99,9 @@ impl SemanticAnalyzer {
         self.symbol_collector_check_node(body)?;
         self.symbol_table.exit_scope();
 
-        let return_type = self.primitives[PrimitiveKind::Null as usize];
-        
         let value_id = self.symbol_table.add_value_symbol(
             &name,
-            ValueSymbolKind::Function((scope_id, return_type)),
+            ValueSymbolKind::Function(scope_id),
             false,
             QualifierKind::Public,
             None,
@@ -202,6 +200,62 @@ impl SemanticAnalyzer {
         Ok((None, Some(type_id)))
     }
 
+    fn collect_trait_symbols(
+        &mut self, 
+        name: &mut str, 
+        generic_parameters: &mut [AstNode],
+        constants: &mut [AstNode],
+        types: &mut [AstNode],
+        signatures: &mut [AstNode],
+        span: Span
+    ) -> Result<(Option<TypeSymbolId>, Option<TypeSymbolId>), BoxedError> {
+        let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
+        let generic_parameters = self.collect_generic_parameters(generic_parameters)?;
+        self.symbol_table.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None)?;
+        
+        for const_node in constants {
+            if let AstNodeKind::TraitConstant { name, .. } = &const_node.kind {
+                let const_id = self.symbol_table.add_value_symbol(name, ValueSymbolKind::Variable, false, QualifierKind::Public, None, Some(const_node.span))?;
+                const_node.value_id = Some(const_id);
+            }
+        }
+
+        for type_node in types {
+            if let AstNodeKind::TraitType(name) = &type_node.kind {
+                let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], QualifierKind::Public, Some(type_node.span))?;
+                type_node.type_id = Some(type_id);
+            }
+        }
+
+        for signature in signatures.iter_mut() {
+            if let AstNodeKind::FunctionSignature { name, generic_parameters, instance, .. } = &mut signature.kind {
+                let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
+
+                let param_ids = vec![];
+                let return_type = Type::new(self.primitives[PrimitiveKind::Null as usize], ReferenceKind::Value);
+                
+                let sig_type_id = self.symbol_table.add_type_symbol(
+                    name,
+                    TypeSymbolKind::FunctionSignature {
+                        params: param_ids,
+                        return_type,
+                        instance: *instance
+                    },
+                    generic_param_ids,
+                    QualifierKind::Public,
+                    Some(signature.span)
+                )?;
+
+                signature.type_id = Some(sig_type_id);
+            }
+        }
+
+        self.symbol_table.exit_scope();
+
+        let trait_type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Trait(trait_scope_id), generic_parameters, QualifierKind::Public, Some(span))?;
+        Ok((None, Some(trait_type_id)))
+    }
+
     fn collect_generic_parameters(&mut self, params: &mut [AstNode]) -> Result<Vec<TypeSymbolId>, BoxedError> {
         let mut ids = vec![];
         for param in params {
@@ -248,60 +302,6 @@ impl SemanticAnalyzer {
         Ok((None, None))
     }
 
-    fn collect_trait_symbols(
-        &mut self,
-        name: &str,
-        signatures: &mut [AstNode],
-        constants: &mut [AstNode],
-        types: &mut [AstNode],
-        span: Span
-    ) -> Result<(Option<ValueSymbolId>, Option<TypeSymbolId>), BoxedError> {
-        let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
-        
-        self.symbol_table.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None)?;
-        
-        let null_type_id = self.primitives[PrimitiveKind::Null as usize];
-
-        for signature in signatures.iter_mut() {
-            if let AstNodeKind::FunctionSignature { name, generic_parameters, instance, .. } = &mut signature.kind {
-                let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
-                let param_ids: Vec<TypeSymbolId> = vec![];
-                
-                let sig_type_id = self.symbol_table.add_type_symbol(
-                    name,
-                    TypeSymbolKind::FunctionSignature {
-                        params: param_ids,
-                        return_type: null_type_id,
-                        instance: *instance
-                    },
-                    generic_param_ids,
-                    QualifierKind::Public,
-                    Some(signature.span)
-                )?;
-                signature.type_id = Some(sig_type_id);
-            }
-        }
-
-        for const_node in constants {
-            if let AstNodeKind::TraitConstant { name, .. } = &const_node.kind {
-                let const_id = self.symbol_table.add_value_symbol(name, ValueSymbolKind::Variable, false, QualifierKind::Public, None, Some(const_node.span))?;
-                const_node.value_id = Some(const_id);
-            }
-        }
-
-        for type_node in types {
-            if let AstNodeKind::TraitType(name) = &type_node.kind {
-                let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], QualifierKind::Public, Some(type_node.span))?;
-                type_node.type_id = Some(type_id);
-            }
-        }
-
-        self.symbol_table.exit_scope();
-
-        let trait_type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Trait(trait_scope_id), vec![], QualifierKind::Public, Some(span))?;
-        Ok((None, Some(trait_type_id)))
-    }
-
     fn collect_type_symbols(
         &mut self,
         name: &str,
@@ -345,10 +345,8 @@ impl SemanticAnalyzer {
 
         if let AstNodeKind::Program(statements) = &mut program.kind {
             for statement in statements {
-                if let AstNodeKind::ImplDeclaration { .. } = &mut statement.kind {
-                    if let Err(err) = self.generic_constraints_check_node(statement) {
-                        errors.push(*err);
-                    }
+                if let Err(err) = self.generic_constraints_check_node(statement) {
+                    errors.push(*err);
                 }
             }
         } else {
@@ -466,7 +464,7 @@ impl SemanticAnalyzer {
             let (implementing_type_id, _) = self.resolve_type_ref_from_ast(type_reference)?;
             
             self.symbol_table.add_type_symbol(
-                "Self", 
+                "Self",
                 TypeSymbolKind::TypeAlias((None, Some(implementing_type_id))), 
                 vec![], 
                 QualifierKind::Public, 
@@ -530,7 +528,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         for func_node in associated_functions {
             if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
-                if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, return_type, .. } = &mut signature.kind {
+                if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
                     let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
                     
                     self.collect_generic_parameters(generic_parameters)?;
@@ -542,14 +540,9 @@ impl SemanticAnalyzer {
                     self.symbol_collector_check_node(body)?;
                     self.symbol_table.exit_scope();
 
-                    let return_type = match return_type {
-                        Some(ty) => self.resolve_type_ref_from_ast(ty)?.0,
-                        None => self.primitives[PrimitiveKind::Null as usize]
-                    };
-
                     func_node.value_id = Some(self.symbol_table.add_value_symbol(
                         name, 
-                        ValueSymbolKind::Function((func_scope_id, return_type)), 
+                        ValueSymbolKind::Function(func_scope_id), 
                         false, 
                         *qualifier, 
                         None, 

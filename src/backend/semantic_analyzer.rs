@@ -44,7 +44,7 @@ impl NameInterner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function((ScopeId, TypeSymbolId)),
+    Function(ScopeId),
     StructField,
     EnumVariant
 }
@@ -94,8 +94,8 @@ pub enum TypeSymbolKind {
     Trait(ScopeId),
     TypeAlias((Option<ScopeId>, Option<TypeSymbolId>)),
     FunctionSignature {
-        params: Vec<TypeSymbolId>,
-        return_type: TypeSymbolId,
+        params: Vec<Type>,
+        return_type: Type,
         instance: Option<ReferenceKind>
     },
     UnfulfilledObligation(usize),
@@ -116,6 +116,21 @@ pub enum ScopeKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct Type {
+    pub symbol: TypeSymbolId,
+    pub reference: ReferenceKind
+}
+
+impl Type {
+    pub fn new(symbol: TypeSymbolId, reference: ReferenceKind) -> Type {
+        Type {
+            symbol,
+            reference
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ValueSymbol {
     pub id: ValueSymbolId,
     pub name_id: ValueNameId,
@@ -124,7 +139,7 @@ pub struct ValueSymbol {
     pub span: Option<Span>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
-    pub type_id: Option<TypeSymbolId>
+    pub type_id: Option<Type>
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +174,8 @@ pub struct SymbolTable {
     value_names: NameInterner,
     type_names: NameInterner,
 
+    pub default_trait_impl_scopes: HashMap<(TypeSymbolId, TypeSymbolId), ScopeId>,
+
     pub scopes: HashMap<ScopeId, Scope>,
     
     lines: Rc<Vec<String>>,
@@ -175,9 +192,10 @@ impl SymbolTable {
         let mut table = SymbolTable {
             value_symbols: HashMap::new(),
             type_symbols: HashMap::new(),
-            scopes: HashMap::new(),
             value_names: NameInterner::new(),
             type_names: NameInterner::new(),
+            default_trait_impl_scopes: HashMap::new(),
+            scopes: HashMap::new(),
             lines: lines.clone(),
             current_scope_id: 0,
             next_scope_id: 0,
@@ -237,9 +255,9 @@ impl SymbolTable {
                 }
             }).collect::<String>();
 
-            let scope_id = self.enter_scope(ScopeKind::Trait);
+            let trait_scope_id = self.enter_scope(ScopeKind::Trait);
 
-            let self_type = self.add_type_symbol(
+            let self_type_id = self.add_type_symbol(
                 "Self",
                 TypeSymbolKind::TypeAlias((None, None)), 
                 vec![], 
@@ -247,7 +265,7 @@ impl SymbolTable {
                 None
             ).unwrap_or_else(|_| panic!("[self_type] couldn't add default trait {}", trait_name));
 
-            let output_type = self.add_type_symbol(
+            let output_type_id = self.add_type_symbol(
                 "Output",
                 TypeSymbolKind::TypeAlias((None, None)), 
                 vec![], 
@@ -255,15 +273,15 @@ impl SymbolTable {
                 None
             ).unwrap_or_else(|_| panic!("[output_type] couldn't add default trait {}", trait_name));
 
-            self.add_type_symbol(
+            let sig_type_id = self.add_type_symbol(
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params: if is_binary {
-                        vec![self_type, self_type]
+                        vec![Type::new(self_type_id, ReferenceKind::Value); 2]
                     } else {
-                        vec![self_type]
+                        vec![Type::new(self_type_id, ReferenceKind::Value)]
                     },
-                    return_type: output_type,
+                    return_type: Type::new(output_type_id, ReferenceKind::Value),
                     instance: Some(ReferenceKind::Value)
                 }, 
                 vec![], 
@@ -273,56 +291,75 @@ impl SymbolTable {
 
             self.exit_scope();
 
-            self.add_type_symbol(
+            let trait_id = self.add_type_symbol(
                 &trait_name, 
-                TypeSymbolKind::Trait(scope_id), 
+                TypeSymbolKind::Trait(trait_scope_id), 
                 vec![], 
                 QualifierKind::Public, 
                 None
             ).unwrap_or_else(|_| panic!("[trait] couldn't add default trait {}", trait_name));
 
+            // DEFAULT IMPLS //
             for primitive in PrimitiveKind::iter() {
-                let return_type_id = {
+                let output_id = {
                     let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
                     self.find_type_symbol(return_type.to_symbol_str()).unwrap().id
                 };
 
-                let type_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
+                let self_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
 
-                let impl_id = self.enter_scope(ScopeKind::Impl);
-        
-                let self_type = self.add_type_symbol(
+                let impl_scope_id = self.enter_scope(ScopeKind::Impl);
+                self.default_trait_impl_scopes.insert((trait_id, self_id), impl_scope_id);
+
+                self.add_type_symbol(
                     "Self",
-                    TypeSymbolKind::TypeAlias((None, Some(type_id))), 
-                    vec![],
+                    TypeSymbolKind::TypeAlias((None, Some(self_id))), 
+                    vec![], 
                     QualifierKind::Public, 
                     None
                 ).unwrap_or_else(|_| panic!("[self_type] couldn't add default impl {}", trait_name));
 
-                let output_type = self.add_type_symbol(
+                self.add_type_symbol(
                     "Output",
-                    TypeSymbolKind::TypeAlias((None, Some(return_type_id))), 
+                    TypeSymbolKind::TypeAlias((None, Some(output_id))), 
                     vec![], 
                     QualifierKind::Public, 
                     None
                 ).unwrap_or_else(|_| panic!("[output_type] couldn't add default impl {}", trait_name));
 
-                self.enter_scope(ScopeKind::Function);
+                let func_scope_id = self.enter_scope(ScopeKind::Function);
 
                 self.add_value_symbol(
-                    "this", 
-                    ValueSymbolKind::Variable, 
+                    "this",
+                    ValueSymbolKind::Variable,
+                    false,
+                    QualifierKind::Public,
+                    Some(Type::new(self_id, ReferenceKind::Value)),
+                    None
+                ).unwrap_or_else(|_| panic!("[this_var] couldn't add default impl {}", trait_name));
+
+                if is_binary {
+                    self.add_value_symbol(
+                        "other",
+                        ValueSymbolKind::Variable,
+                        false,
+                        QualifierKind::Public,
+                        Some(Type::new(self_id, ReferenceKind::Value)),
+                        None
+                    ).unwrap_or_else(|_| panic!("[other_var] couldn't add default impl {}", trait_name));
+                }
+
+                self.add_value_symbol(
+                    &fn_name,
+                    ValueSymbolKind::Function(func_scope_id), 
                     false, 
                     QualifierKind::Public, 
-                    Some(self_type), 
+                    Some(Type::new(sig_type_id, ReferenceKind::Value)), 
                     None
-                ).unwrap_or_else(|_| panic!("[this_param] couldn't add default impl {}", trait_name));
+                ).unwrap_or_else(|_| panic!("[fn_value] couldn't add default impl {}", trait_name));
 
                 self.exit_scope();
-
                 self.exit_scope();
-
-                // self.add_type_symbol(name, kind, generic_parameters, qualifier, span)
             }
         }
     }
@@ -333,7 +370,7 @@ impl SymbolTable {
         kind: ValueSymbolKind,
         mutable: bool,
         qualifier: QualifierKind,
-        type_id: Option<TypeSymbolId>,
+        type_id: Option<Type>,
         span: Option<Span>,
     ) -> Result<ValueSymbolId, BoxedError> {
         let name_id = self.value_names.intern(name);
@@ -545,22 +582,37 @@ pub struct TraitRegistry {
 }
 
 impl TraitRegistry {
-    pub fn new(primitives: &[TypeSymbolId]) -> Self {
+    pub fn new(primitives: &[TypeSymbolId], table: &SymbolTable) -> Self {
         let mut registry = TraitRegistry { register: HashMap::new() };
-        registry.populate_registry(primitives);
+        registry.populate_registry(primitives, table);
         registry
     }
 
-    fn populate_registry(&mut self, primitives: &[TypeSymbolId]) {
+    fn populate_registry(&mut self, primitives: &[TypeSymbolId], table: &SymbolTable) {
         for op in Operation::iter() {
-            
+            let Some((trait_name, _)) = op.to_trait_data() else {
+                continue;
+            };
+
+            let Some(trait_id) = table.find_type_symbol(&trait_name).map(|symbol| symbol.id) else {
+                panic!("Trait {} not found in symbol table", trait_name);
+            };
 
             for primitive in PrimitiveKind::iter() {
-                let Some(return_primitive) = op.to_default_trait_return_type(primitive) else {
+                if op.to_default_trait_return_type(primitive).is_none() {
                     continue;
-                };
+                }
 
-                let return_type = primitives[return_primitive as usize];
+                let self_type = primitives[primitive as usize];
+                let impl_scope_id = *table.default_trait_impl_scopes
+                    .get(&(trait_id, self_type))
+                    .unwrap_or_else(|| panic!("couldn't find scope for trait {} and primitive {}", trait_name, primitive));
+
+                self.register(trait_id, self_type, TraitImpl {
+                    impl_scope_id,
+                    impl_generic_params: vec![],
+                    trait_generic_specialization: vec![]
+                });
             }
         }
     }
@@ -602,7 +654,7 @@ impl SemanticAnalyzer {
             .collect();
 
         SemanticAnalyzer {
-            trait_registry: TraitRegistry::new(&primitives),
+            trait_registry: TraitRegistry::new(&primitives, &symbol_table),
             symbol_table,
             primitives,
             errors: vec![],
@@ -650,7 +702,7 @@ impl std::fmt::Display for InherentImpl {
 
 impl std::fmt::Display for TraitImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TraitImpl(impl_scope_id: {}, impl_generic_params: {:?}, trait_generic_specialization: {:?})", 
+        write!(f, "TraitImpl(impl_scope_id: {:?}, impl_generic_params: {:?}, trait_generic_specialization: {:?})", 
             self.impl_scope_id, self.impl_generic_params, self.trait_generic_specialization)
     }
 }
@@ -659,7 +711,7 @@ impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
             ValueSymbolKind::Variable => "Variable".green(),
-            ValueSymbolKind::Function((scope_id, return_type)) => format!("Function({}) -> {}", scope_id, return_type).blue(),
+            ValueSymbolKind::Function(scope_id) => format!("Function({})", scope_id).blue(),
             ValueSymbolKind::StructField => "StructField".yellow(),
             ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };
@@ -703,19 +755,13 @@ impl SymbolTable {
                     TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
-                    TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
-                        let instance_str = match instance {
-                            Some(ReferenceKind::Value) => "self",
-                            Some(ReferenceKind::Reference) => "&self",
-                            Some(ReferenceKind::MutableReference) => "&mut self",
-                            None => ""
-                        };
+                    TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
                         let params_str = params.iter()
-                            .map(|id| self.table.get_type_name(self.table.type_symbols[id].name_id))
+                            .map(|id| self.table.get_type_name(self.table.type_symbols[&id.symbol].name_id))
                             .collect::<Vec<_>>()
                             .join(", ");
-                        let return_type_str = self.table.get_type_name(self.table.type_symbols[return_type].name_id);
-                        format!("fn({}({}), {})", instance_str, params_str, return_type_str).blue()
+                        let return_type_str = self.table.get_type_name(self.table.type_symbols[&return_type.symbol].name_id);
+                        format!("fn({}): {}", params_str, return_type_str).blue()
                     },
                     TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
                     TypeSymbolKind::Custom => "Custom".white(),
@@ -767,7 +813,8 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.display_scope(self.real_starting_scope, 0, f)
+        self.display_scope(0, 0, f)
+        // self.display_scope(self.real_starting_scope, 0, f)
     }
 }
 
@@ -789,7 +836,7 @@ impl TraitRegistry {
                         let type_symbol = &self.table.type_symbols[type_id];
                         let type_name = self.table.get_type_name(type_symbol.name_id);
                         write!(f, "[Type({})] {}", type_id, type_name)?;
-                        writeln!(f, " -> Scope({})", impl_details.impl_scope_id)?;
+                        writeln!(f, " -> Scope({:?})", impl_details.impl_scope_id)?;
                     }
 
                     writeln!(f)?;

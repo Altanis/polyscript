@@ -550,8 +550,37 @@ impl Parser {
             let type_reference = parser.advance().clone();
 
             match type_reference.get_token_kind() {
-                TokenKind::Identifier 
-                    | TokenKind::Keyword(KeywordKind::Int)
+                TokenKind::Identifier => {
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
+                        parser.advance();
+                        let next = parser.consume(TokenKind::Identifier)?;
+
+                        Ok(AstNodeKind::FieldAccess { 
+                            left: Box::new(AstNode {
+                                kind: AstNodeKind::Identifier(type_reference.get_value().to_string()),
+                                span: type_reference.get_span(),
+                                value_id: None,
+                                type_id: None
+                            }), 
+                            right: Box::new(AstNode {
+                                kind: AstNodeKind::Identifier(next.get_value().to_string()),
+                                span: next.get_span(),
+                                value_id: None,
+                                type_id: None
+                            })
+                        })
+                    } else {
+                        let generic_types = parser.parse_generic_types_list()?;
+
+                        Ok(AstNodeKind::TypeReference {
+                            type_name: type_reference.get_value().to_string(),
+                            generic_types,
+                            reference_kind,
+                        })
+                    }
+                },
+
+                TokenKind::Keyword(KeywordKind::Int)
                     | TokenKind::Keyword(KeywordKind::Float)
                     | TokenKind::Keyword(KeywordKind::String)
                     | TokenKind::Keyword(KeywordKind::Bool)
