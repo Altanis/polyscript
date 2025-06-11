@@ -21,6 +21,7 @@ pub enum ErrorKind {
     UnknownType,
     InvalidImpl(Option<String>),
     ExpectedType,
+    InvalidConstraint(String),
     UndefinedOperation(Operation, [String; 2])
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
@@ -47,6 +48,7 @@ impl ErrorKind {
             ErrorKind::InvalidImpl(type_ref) 
                 => format!("cannot construct impl block for {}", type_ref.as_ref().map_or("an unnamed identifier", |v| v)),
             ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
+            ErrorKind::InvalidConstraint(constraint) => format!("expected constraint to be a trait, instead found \"{}\"", constraint),
             ErrorKind::UndefinedOperation(operation, ty) => {
                 match (ty[0].as_str(), ty[1].as_str()) {
                     ("", "") => format!("operation {} not defined for type", operation),

@@ -8,7 +8,7 @@ impl SemanticAnalyzer {
 
         if let AstNodeKind::Program(statements) = &mut program.kind {
             for statement in statements {
-                if let Err(err) = self.collect_node_symbol(statement) {
+                if let Err(err) = self.symbol_collector_check_node(statement) {
                     errors.push(*err);
                 }
             }
@@ -19,7 +19,7 @@ impl SemanticAnalyzer {
         errors
     }
 
-    fn collect_node_symbol(&mut self, node: &mut AstNode) -> Result<(Option<ValueSymbolId>, Option<TypeSymbolId>), BoxedError> {
+    fn symbol_collector_check_node(&mut self, node: &mut AstNode) -> Result<(Option<ValueSymbolId>, Option<TypeSymbolId>), BoxedError> {
         use AstNodeKind::*;
 
         let declared_symbol_opt = match &mut node.kind {
@@ -42,7 +42,7 @@ impl SemanticAnalyzer {
                 self.collect_block_symbols(statements),
             _ => {
                 for child in node.children_mut() {
-                    self.collect_node_symbol(child)?;
+                    self.symbol_collector_check_node(child)?;
                 }
 
                 Ok((None, None))
@@ -96,7 +96,7 @@ impl SemanticAnalyzer {
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
         self.collect_generic_parameters(generic_params)?;
         self.collect_function_parameters(params)?;
-        self.collect_node_symbol(body)?;
+        self.symbol_collector_check_node(body)?;
         self.symbol_table.exit_scope();
         
         let value_id = self.symbol_table.add_value_symbol(
@@ -126,7 +126,7 @@ impl SemanticAnalyzer {
             unreachable!();
         }
 
-        self.collect_node_symbol(body)?;
+        self.symbol_collector_check_node(body)?;
         self.symbol_table.exit_scope();
         
         Ok((None, None))
@@ -206,7 +206,7 @@ impl SemanticAnalyzer {
             if let AstNodeKind::GenericParameter { name, .. } = &param.kind {
                 let id = self.symbol_table.add_type_symbol(
                     name,
-                    TypeSymbolKind::Generic,
+                    TypeSymbolKind::Generic(vec![]),
                     vec![],
                     QualifierKind::Public,
                     Some(param.span)
@@ -240,7 +240,7 @@ impl SemanticAnalyzer {
     fn collect_block_symbols(&mut self, statements: &mut [AstNode]) -> Result<(Option<ValueSymbolId>, Option<TypeSymbolId>), BoxedError> {
         self.symbol_table.enter_scope(ScopeKind::Block);
         for statement in statements {
-            self.collect_node_symbol(statement)?;
+            self.symbol_collector_check_node(statement)?;
         }
         self.symbol_table.exit_scope();
         Ok((None, None))
@@ -331,20 +331,20 @@ impl SemanticAnalyzer {
         node: &mut Option<BoxedAstNode>
     ) -> Result<(), BoxedError> {
         if let Some(n) = node {
-            self.collect_node_symbol(n)?;
+            self.symbol_collector_check_node(n)?;
         }
         Ok(())
     }
 }
 
 impl SemanticAnalyzer {
-    pub fn impl_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+    pub fn generic_constraints_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
         if let AstNodeKind::Program(statements) = &mut program.kind {
             for statement in statements {
                 if let AstNodeKind::ImplDeclaration { .. } = &mut statement.kind {
-                    if let Err(err) = self.collect_and_register_impl_block(statement) {
+                    if let Err(err) = self.generic_constraints_check_node(statement) {
                         errors.push(*err);
                     }
                 }
@@ -356,39 +356,82 @@ impl SemanticAnalyzer {
         errors
     }
 
-    fn find_type_by_name(&self, node: &AstNode) -> Result<TypeSymbolId, BoxedError> {
-        let name = node.get_name().ok_or_else(|| self.create_error(
-            ErrorKind::ExpectedType,
-            node.span,
-            &[node.span],
-        ))?;
-        
-        let type_symbol = self.symbol_table.find_type_symbol(&name).ok_or_else(|| self.create_error(
-            ErrorKind::UnknownIdentifier(name.clone()),
-            node.span,
-            &[node.span],
-        ))?;
+    fn generic_constraints_check_node(&mut self, statement: &mut AstNode) -> Result<(), BoxedError> {
+        match &statement.kind {
+            AstNodeKind::GenericParameter { .. } => self.collect_generic_constraint(statement),
+            _ => {
+                for node in statement.children_mut() {
+                    self.generic_constraints_check_node(node)?;
+                }
 
-        Ok(type_symbol.id)
+                Ok(())
+            }
+        }
     }
 
-    fn resolve_type_ref_from_ast(&self, node: &AstNode) -> Result<(TypeSymbolId, Vec<TypeSymbolId>), BoxedError> {
-        let (name, arg_nodes) = match &node.kind {
-            AstNodeKind::TypeReference { type_name, generic_types, .. } => (type_name, generic_types),
-            _ => return Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span]))
-        };
+    fn collect_generic_constraint(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        if node.type_id.is_none() {
+            return Ok(());
+        }
 
-        let base_type_id = self.symbol_table.find_type_symbol(name)
-            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.clone()), node.span, &[node.span]))?
-            .id;
+        let AstNodeKind::GenericParameter { constraints, .. } = &mut node.kind else { unreachable!(); };
+        let mut trait_ids = vec![];
 
-        let mut arg_ids = vec![];
-        for arg_node in arg_nodes {
-            let arg_id = self.resolve_type_ref_from_ast(arg_node)?.0;
-            arg_ids.push(arg_id);
+        for constraint in constraints.iter() {
+            let type_symbol = self.symbol_table.find_type_symbol(constraint).ok_or_else(|| self.create_error(
+                ErrorKind::UnknownIdentifier(constraint.clone()),
+                node.span,
+                &[node.span],
+            ))?;
+
+            if !matches!(type_symbol.kind, TypeSymbolKind::Trait(_)) {
+                return Err(self.create_error(
+                    ErrorKind::InvalidConstraint(constraint.clone()),
+                    node.span,
+                    &[node.span]
+                ));
+            }
+
+            trait_ids.push(type_symbol.id);
+        }
+
+        let type_symbol = self.symbol_table.get_type_symbol_mut(node.type_id.unwrap()).unwrap();
+        if let TypeSymbolKind::Generic(constraints) = &mut type_symbol.kind {
+            *constraints = trait_ids;
+        }
+
+        Ok(())
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn impl_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.impl_collector_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
         }
         
-        Ok((base_type_id, arg_ids))
+        errors
+    }
+
+    fn impl_collector_check_node(&mut self, statement: &mut AstNode) -> Result<(), BoxedError> {
+        match &statement.kind {
+            AstNodeKind::ImplDeclaration { .. } => self.collect_and_register_impl_block(statement),
+            _ => {
+                for node in statement.children_mut() {
+                    self.impl_collector_check_node(node)?;
+                }
+
+                Ok(())
+            }
+        }
     }
 
     fn collect_and_register_impl_block(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
@@ -407,11 +450,14 @@ impl SemanticAnalyzer {
                 associated_constants, associated_types, associated_functions,
                 generic_parameters, type_reference, trait_node
             ),
-            _ => unreachable!()
+            _ => return Ok(())
         };
         
         let impl_scope_id = self.symbol_table.enter_scope(ScopeKind::Impl);
         let impl_generic_param_ids = self.collect_generic_parameters(impl_generics)?;
+        for generic in impl_generics.iter_mut() {
+            self.collect_generic_constraint(generic)?;
+        }
 
         if let Some(trait_node) = trait_node {
             let (trait_id, trait_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
@@ -484,9 +530,14 @@ impl SemanticAnalyzer {
             if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
                 if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
                     let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
+                    
                     self.collect_generic_parameters(generic_parameters)?;
+                    for generic in generic_parameters.iter_mut() {
+                        self.collect_generic_constraint(generic)?;
+                    }
+
                     self.collect_function_parameters(parameters)?;
-                    self.collect_node_symbol(body)?;
+                    self.symbol_collector_check_node(body)?;
                     self.symbol_table.exit_scope();
 
                     func_node.value_id = Some(self.symbol_table.add_value_symbol(
@@ -511,5 +562,40 @@ impl SemanticAnalyzer {
         }
         
         Ok(())
+    }
+
+    fn find_type_by_name(&self, node: &AstNode) -> Result<TypeSymbolId, BoxedError> {
+        let name = node.get_name().ok_or_else(|| self.create_error(
+            ErrorKind::ExpectedType,
+            node.span,
+            &[node.span],
+        ))?;
+        
+        let type_symbol = self.symbol_table.find_type_symbol(&name).ok_or_else(|| self.create_error(
+            ErrorKind::UnknownIdentifier(name.clone()),
+            node.span,
+            &[node.span],
+        ))?;
+
+        Ok(type_symbol.id)
+    }
+
+    fn resolve_type_ref_from_ast(&self, node: &AstNode) -> Result<(TypeSymbolId, Vec<TypeSymbolId>), BoxedError> {
+        let (name, arg_nodes) = match &node.kind {
+            AstNodeKind::TypeReference { type_name, generic_types, .. } => (type_name, generic_types),
+            _ => return Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span]))
+        };
+
+        let base_type_id = self.symbol_table.find_type_symbol(name)
+            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.clone()), node.span, &[node.span]))?
+            .id;
+
+        let mut arg_ids = vec![];
+        for arg_node in arg_nodes {
+            let arg_id = self.resolve_type_ref_from_ast(arg_node)?.0;
+            arg_ids.push(arg_id);
+        }
+        
+        Ok((base_type_id, arg_ids))
     }
 }

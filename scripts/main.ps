@@ -16,6 +16,10 @@ impl[T] Point[T] {
     public fn new(x: T, y: T): Self {
         return Self { x, y };
     }
+
+    public fn operation(&this, other: Self): Self {
+        return this + other;
+    }
 }
 
 trait Vector {

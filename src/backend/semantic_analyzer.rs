@@ -99,7 +99,7 @@ pub enum TypeSymbolKind {
         instance: Option<ReferenceKind>
     },
     UnfulfilledObligation(usize),
-    Generic,
+    Generic(Vec<TypeSymbolId>),
     Custom
 }
 
@@ -531,6 +531,111 @@ impl SymbolTable {
     }
 }
 
+pub struct TraitRegistry {
+    pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, TraitImpl>>
+}
+
+impl TraitRegistry {
+    pub fn new() -> Self {
+        let mut registry = TraitRegistry { register: HashMap::new() };
+        registry.populate_registry();
+        registry
+    }
+
+    fn populate_registry(&mut self) {
+
+    }
+
+    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId, implementation: TraitImpl) {
+        self.register
+            .entry(trait_id)
+            .or_default()
+            .insert(type_id, implementation);
+    }
+
+    pub fn implements(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> bool {
+        self.register
+            .get(&trait_id)
+            .map_or(false, |impls| impls.contains_key(&type_id))
+    }
+    
+    pub fn get_implementation(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&TraitImpl> {
+        self.register
+            .get(&trait_id)
+            .and_then(|impls| impls.get(&type_id))
+    }
+}
+
+pub struct SemanticAnalyzer {
+    pub symbol_table: SymbolTable,
+    pub builtins: Vec<TypeSymbolId>,
+    pub trait_registry: TraitRegistry,
+    errors: Vec<Error>,
+    lines: Rc<Vec<String>>
+}
+
+impl SemanticAnalyzer {
+    pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
+        let symbol_table = SymbolTable::new(lines.clone());
+        
+        let builtins = PrimitiveKind::iter()
+            .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
+            .collect();
+
+        SemanticAnalyzer {
+            symbol_table,
+            builtins,
+            trait_registry: TraitRegistry::new(),
+            errors: vec![],
+            lines
+        }
+    }
+
+    pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
+        let lines = Span::get_all_lines(self.lines.clone(), spans);
+        Error::from_multiple_errors(kind, primary_span, lines)
+    }
+
+    pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
+        /* PASS STRUCTURE
+            * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
+            * 1: Collect generic constraints.
+            * 2: Collect impl blocks.
+            * 3: Collect type information for symbols.
+         */
+
+        macro_rules! pass {
+            ($self:ident, $method:ident, $program:expr) => {{
+                let errors = $self.$method(&mut $program);
+                if !errors.is_empty() {
+                    return Err(errors);
+                }
+            }};
+        }
+        
+        pass!(self, symbol_collector_pass, &mut program);
+        pass!(self, generic_constraints_pass, &mut program);
+        pass!(self, impl_collector_pass, &mut program);
+        // pass!(self, type_collector_pass, &mut program);
+
+        Ok(program)
+    }
+}
+
+impl std::fmt::Display for InherentImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "InherentImpl(scope_id: {}, specialization: {:?}, generic_params: {:?})", 
+            self.scope_id, self.specialization, self.generic_params)
+    }
+}
+
+impl std::fmt::Display for TraitImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TraitImpl(impl_scope_id: {}, impl_generic_params: {:?}, trait_generic_specialization: {:?})", 
+            self.impl_scope_id, self.impl_generic_params, self.trait_generic_specialization)
+    }
+}
+
 impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
@@ -595,7 +700,7 @@ impl SymbolTable {
                     },
                     TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
                     TypeSymbolKind::Custom => "Custom".white(),
-                    TypeSymbolKind::Generic => "Generic".white()
+                    TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white()
                 };
 
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
@@ -647,41 +752,6 @@ impl std::fmt::Display for SymbolTable {
     }
 }
 
-pub struct TraitRegistry {
-    pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, TraitImpl>>
-}
-
-impl TraitRegistry {
-    pub fn new() -> Self {
-        let mut registry = TraitRegistry { register: HashMap::new() };
-        registry.populate_registry();
-        registry
-    }
-
-    fn populate_registry(&mut self) {
-
-    }
-
-    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId, implementation: TraitImpl) {
-        self.register
-            .entry(trait_id)
-            .or_default()
-            .insert(type_id, implementation);
-    }
-
-    pub fn implements(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> bool {
-        self.register
-            .get(&trait_id)
-            .map_or(false, |impls| impls.contains_key(&type_id))
-    }
-    
-    pub fn get_implementation(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&TraitImpl> {
-        self.register
-            .get(&trait_id)
-            .and_then(|impls| impls.get(&type_id))
-    }
-}
-
 impl TraitRegistry {
     pub fn display<'a>(&'a self, symbol_table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
         struct Displayer<'a> {
@@ -710,72 +780,6 @@ impl TraitRegistry {
         }
 
         Displayer { registry: self, table: symbol_table }
-    }
-}
-
-pub enum Obligations {
-    TraitObligation {
-        trait_kind: TypeSymbolId,
-        type_kind: TypeSymbolId,
-        result_type: Option<TypeSymbolId>,
-        span: Span
-    }
-}
-
-pub struct SemanticAnalyzer {
-    pub symbol_table: SymbolTable,
-    pub builtins: Vec<TypeSymbolId>,
-    pub trait_registry: TraitRegistry,
-    pub obligations: Vec<Obligations>,
-    errors: Vec<Error>,
-    lines: Rc<Vec<String>>
-}
-
-impl SemanticAnalyzer {
-    pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
-        let symbol_table = SymbolTable::new(lines.clone());
-        
-        let builtins = PrimitiveKind::iter()
-            .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
-            .collect();
-
-        SemanticAnalyzer {
-            symbol_table,
-            builtins,
-            trait_registry: TraitRegistry::new(),
-            obligations: vec![],
-            errors: vec![],
-            lines
-        }
-    }
-
-    pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
-        let lines = Span::get_all_lines(self.lines.clone(), spans);
-        Error::from_multiple_errors(kind, primary_span, lines)
-    }
-
-    pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
-        /* PASS STRUCTURE
-            * 0: Collect all symbols and place into symbol table. Tag AST nodes with symbol references.
-            * 1: Collect generic constraints.
-            * 2: Collect impl blocks.
-            * 3: Collect type information for symbols.
-         */
-
-        macro_rules! pass {
-            ($self:ident, $method:ident, $program:expr) => {{
-                let errors = $self.$method(&mut $program);
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
-            }};
-        }
-        
-        pass!(self, symbol_collector_pass, &mut program);
-        pass!(self, impl_collector_pass, &mut program);
-        // pass!(self, type_collector_pass, &mut program);
-
-        Ok(program)
     }
 }
 

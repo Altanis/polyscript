@@ -18,6 +18,9 @@
 - [x] fix all error formats
 - [x] add mutable parameters
 
+constraints on generics
+default impl for ops
+
 NOTE: stdlib should contain:
 - io functions (print, err, etc)
 - math functions
