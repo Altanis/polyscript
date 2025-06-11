@@ -44,7 +44,7 @@ impl NameInterner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function(ScopeId),
+    Function((ScopeId, TypeSymbolId)),
     StructField,
     EnumVariant
 }
@@ -281,40 +281,49 @@ impl SymbolTable {
                 None
             ).unwrap_or_else(|_| panic!("[trait] couldn't add default trait {}", trait_name));
 
-            // for primitive in PrimitiveKind::iter() {
-            //     let return_type_id = {
-            //         let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
-            //         self.find_type_symbol(return_type.to_symbol_str()).unwrap().id
-            //     };
+            for primitive in PrimitiveKind::iter() {
+                let return_type_id = {
+                    let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
+                    self.find_type_symbol(return_type.to_symbol_str()).unwrap().id
+                };
 
-            //     let type_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
+                let type_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
 
-            //     let impl_id = self.enter_scope(ScopeKind::Impl);
+                let impl_id = self.enter_scope(ScopeKind::Impl);
         
-            //     let self_type = self.add_type_symbol(
-            //         "Self",
-            //         TypeSymbolKind::TypeAlias(Some(type_id)), 
-            //         vec![],
-            //         QualifierKind::Public, 
-            //         None
-            //     ).unwrap_or_else(|_| panic!("[self_type] couldn't add default trait {}", trait_name));
+                let self_type = self.add_type_symbol(
+                    "Self",
+                    TypeSymbolKind::TypeAlias((None, Some(type_id))), 
+                    vec![],
+                    QualifierKind::Public, 
+                    None
+                ).unwrap_or_else(|_| panic!("[self_type] couldn't add default impl {}", trait_name));
 
-            //     let output_type = self.add_type_symbol(
-            //         "Output",
-            //         TypeSymbolKind::TypeAlias(Some(return_type_id)), 
-            //         vec![], 
-            //         QualifierKind::Public, 
-            //         None
-            //     ).unwrap_or_else(|_| panic!("[output_type] couldn't add default trait {}", trait_name));
+                let output_type = self.add_type_symbol(
+                    "Output",
+                    TypeSymbolKind::TypeAlias((None, Some(return_type_id))), 
+                    vec![], 
+                    QualifierKind::Public, 
+                    None
+                ).unwrap_or_else(|_| panic!("[output_type] couldn't add default impl {}", trait_name));
 
-            //     self.enter_scope(ScopeKind::Function);
+                self.enter_scope(ScopeKind::Function);
 
-            //     self.exit_scope();
+                self.add_value_symbol(
+                    "this", 
+                    ValueSymbolKind::Variable, 
+                    false, 
+                    QualifierKind::Public, 
+                    Some(self_type), 
+                    None
+                ).unwrap_or_else(|_| panic!("[this_param] couldn't add default impl {}", trait_name));
 
-            //     self.exit_scope();
+                self.exit_scope();
 
-            //     // self.add_type_symbol(name, kind, generic_parameters, qualifier, span)
-            // }
+                self.exit_scope();
+
+                // self.add_type_symbol(name, kind, generic_parameters, qualifier, span)
+            }
         }
     }
     
@@ -536,14 +545,24 @@ pub struct TraitRegistry {
 }
 
 impl TraitRegistry {
-    pub fn new() -> Self {
+    pub fn new(primitives: &[TypeSymbolId]) -> Self {
         let mut registry = TraitRegistry { register: HashMap::new() };
-        registry.populate_registry();
+        registry.populate_registry(primitives);
         registry
     }
 
-    fn populate_registry(&mut self) {
+    fn populate_registry(&mut self, primitives: &[TypeSymbolId]) {
+        for op in Operation::iter() {
+            
 
+            for primitive in PrimitiveKind::iter() {
+                let Some(return_primitive) = op.to_default_trait_return_type(primitive) else {
+                    continue;
+                };
+
+                let return_type = primitives[return_primitive as usize];
+            }
+        }
     }
 
     pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId, implementation: TraitImpl) {
@@ -568,7 +587,7 @@ impl TraitRegistry {
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    pub builtins: Vec<TypeSymbolId>,
+    pub primitives: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>
@@ -578,14 +597,14 @@ impl SemanticAnalyzer {
     pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
         let symbol_table = SymbolTable::new(lines.clone());
         
-        let builtins = PrimitiveKind::iter()
+        let primitives: Vec<TypeSymbolId> = PrimitiveKind::iter()
             .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
             .collect();
 
         SemanticAnalyzer {
+            trait_registry: TraitRegistry::new(&primitives),
             symbol_table,
-            builtins,
-            trait_registry: TraitRegistry::new(),
+            primitives,
             errors: vec![],
             lines
         }
@@ -640,7 +659,7 @@ impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
             ValueSymbolKind::Variable => "Variable".green(),
-            ValueSymbolKind::Function(scope_id) => format!("Function({})", scope_id).blue(),
+            ValueSymbolKind::Function((scope_id, return_type)) => format!("Function({}) -> {}", scope_id, return_type).blue(),
             ValueSymbolKind::StructField => "StructField".yellow(),
             ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };

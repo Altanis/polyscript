@@ -2,8 +2,8 @@ use crate::{backend::semantic_analyzer::{PrimitiveKind, TypeSymbolId}, frontend:
 use super::semantic_analyzer::SemanticAnalyzer;
 
 impl SemanticAnalyzer {
-    fn get_builtin_type(&self, builtin: PrimitiveKind) -> TypeSymbolId {
-        self.builtins[builtin as usize]
+    fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
+        self.primitives[primitive as usize]
     }
 
     fn get_type_from_identifier(&self, name: &str, span: Span) -> Result<TypeSymbolId, BoxedError> {
@@ -31,11 +31,11 @@ impl SemanticAnalyzer {
         }
 
         let id = match &mut node.kind {
-            IntegerLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Int)),
-            FloatLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Float)),
-            BooleanLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Bool)),
-            StringLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::String)),
-            CharLiteral(_) => Ok(self.get_builtin_type(PrimitiveKind::Char)),
+            IntegerLiteral(_) => Ok(self.get_primitive_type(PrimitiveKind::Int)),
+            FloatLiteral(_) => Ok(self.get_primitive_type(PrimitiveKind::Float)),
+            BooleanLiteral(_) => Ok(self.get_primitive_type(PrimitiveKind::Bool)),
+            StringLiteral(_) => Ok(self.get_primitive_type(PrimitiveKind::String)),
+            CharLiteral(_) => Ok(self.get_primitive_type(PrimitiveKind::Char)),
             Identifier(name) => self.get_type_from_identifier(name, node.span),
             // UnaryOperation { operator, operand, .. } 
                 // => self.get_type_from_unary_operation(*operator, operand),
@@ -65,6 +65,7 @@ impl SemanticAnalyzer {
     }
 
     fn collect_node_type(&mut self, node: &mut AstNode) -> Result<Option<TypeSymbolId>, BoxedError> {
+        // note: all functions have return types of `null`. make sure to update.
         use AstNodeKind::*;
         
         let declared_type_opt: Result<Option<TypeSymbolId>, BoxedError> = match &mut node.kind {

@@ -53,3 +53,53 @@ impl Point[Integer] {
     public fn t3(&this) {}
     public fn t4(&mut this) {}
 }
+
+struct Point[T] {
+    public x: T;
+    public y: T;
+}
+
+impl Point[int] {
+    public fn new(): Self {
+        return Self {
+            x: 0,
+            y: 0
+        };
+    }
+}
+
+impl[T] Point[T] {
+    public fn new(x: T, y: T): Self {
+        return Self { x, y };
+    }
+
+    public fn operation(&this, other: Self): Self {
+        return this + other;
+    }
+}
+
+trait Vector {
+    fn get_x(&this): int;
+    fn get_y(&this): int;
+}
+
+impl Vector for Point[int] {
+    fn get_x(&this): int {
+        return this.x;
+    }
+
+    fn get_y(&this): int {
+        return this.y;
+    }
+}
+
+impl Add for Point[int] {
+    type Output = Self;
+
+    fn add(this, rhs: Self): Self {
+        return Point {
+            x: this.get_x() + rhs.get_x(),
+            y: this.get_y() + rhs.get_y()
+        };
+    }
+}

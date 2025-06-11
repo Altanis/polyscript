@@ -98,10 +98,12 @@ impl SemanticAnalyzer {
         self.collect_function_parameters(params)?;
         self.symbol_collector_check_node(body)?;
         self.symbol_table.exit_scope();
+
+        let return_type = self.primitives[PrimitiveKind::Null as usize];
         
         let value_id = self.symbol_table.add_value_symbol(
             &name,
-            ValueSymbolKind::Function(scope_id),
+            ValueSymbolKind::Function((scope_id, return_type)),
             false,
             QualifierKind::Public,
             None,
@@ -258,7 +260,7 @@ impl SemanticAnalyzer {
         
         self.symbol_table.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None)?;
         
-        let null_type_id = self.builtins[PrimitiveKind::Null as usize];
+        let null_type_id = self.primitives[PrimitiveKind::Null as usize];
 
         for signature in signatures.iter_mut() {
             if let AstNodeKind::FunctionSignature { name, generic_parameters, instance, .. } = &mut signature.kind {
@@ -528,7 +530,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         for func_node in associated_functions {
             if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
-                if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
+                if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, return_type, .. } = &mut signature.kind {
                     let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
                     
                     self.collect_generic_parameters(generic_parameters)?;
@@ -540,8 +542,18 @@ impl SemanticAnalyzer {
                     self.symbol_collector_check_node(body)?;
                     self.symbol_table.exit_scope();
 
+                    let return_type = match return_type {
+                        Some(ty) => self.resolve_type_ref_from_ast(ty)?.0,
+                        None => self.primitives[PrimitiveKind::Null as usize]
+                    };
+
                     func_node.value_id = Some(self.symbol_table.add_value_symbol(
-                        name, ValueSymbolKind::Function(func_scope_id), false, *qualifier, None, Some(func_node.span)
+                        name, 
+                        ValueSymbolKind::Function((func_scope_id, return_type)), 
+                        false, 
+                        *qualifier, 
+                        None, 
+                        Some(func_node.span)
                     )?);
                 }
             }
