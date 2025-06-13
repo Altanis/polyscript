@@ -18,10 +18,6 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn get_type_from_unconventional_unary_operator(&self, operator: Operation, operand: &mut BoxedAstNode) -> Result<Type, BoxedError> {
-        Ok(Type { symbol: 0, generic_args: vec![], reference: ReferenceKind::Reference })
-    }
-
     // fn get_type_from_unary_operation(&mut self, operator: Operation, operand: &mut BoxedAstNode, span: Span) -> Result<Type, BoxedError> {
     //     let type_id = self.associate_node_with_type(operand)?;
     //     // let type_name = self.symbol_table.get_type_name(type_id.symbol).to_string();
@@ -47,15 +43,23 @@ impl SemanticAnalyzer {
     // }
 
     fn get_type_from_unary_operation(&mut self, operator: Operation, operand: &mut BoxedAstNode, span: Span) -> Result<Type, BoxedError> {
-        /**
-         *             Operation::FieldAccess => None,
-            Operation::Dereference => None,
-            Operation::ImmutableAddressOf => None,
-            Operation::MutableAddressOf => None,
-         */
+        let operand_type = self.associate_node_with_type(operand)?;
+        
         match operator {
+            Operation::Dereference => {
+                match operand_type {
+                    Type::Base { .. } => Err(self.create_error(
+                        ErrorKind::InvalidDereference,
+                        span,
+                        &[span]
+                    )),
+                    Type::Reference(ty) => Ok(*ty.clone()),
+                    Type::MutableReference(ty) => Ok(*ty.clone())
+                }
+            },
+            Operation::ImmutableAddressOf => Ok(Type::Reference(Box::new(operand_type.clone()))),
+            Operation::MutableAddressOf => Ok(Type::MutableReference(Box::new(operand_type.clone()))),
             _ => {
-                let operand_type = self.associate_node_with_type(operand)?;
 
                 let (trait_name, _) = operator.to_trait_data().unwrap();
                 let trait_id = self.symbol_table.find_type_symbol(&trait_name)
@@ -84,7 +88,51 @@ impl SemanticAnalyzer {
                     Some(span),
                 )?;
 
-                Ok(Type::new(type_symbol_id, vec![], ReferenceKind::Value))
+                Ok(Type::new_base(type_symbol_id))
+            }
+        }
+    }
+
+    fn get_type_from_binary_operation(
+        &mut self, 
+        operator: Operation, 
+        left: &mut BoxedAstNode, 
+        right: &mut BoxedAstNode, 
+        span: Span
+    ) -> Result<Type, BoxedError> {
+        let left_type = self.associate_node_with_type(left)?;
+        let right_type = self.associate_node_with_type(right)?;
+        
+        match operator {
+            _ => {
+                let (trait_name, _) = operator.to_trait_data().unwrap();
+                let trait_id = self.symbol_table.find_type_symbol(&trait_name)
+                    .map(|s| s.id)
+                    .unwrap();
+
+                let obligation_id = self.obligations.len();
+                let obligation = Obligation {
+                    id: obligation_id,
+                    kind: TraitObligation {
+                        trait_id,
+                        self_type: left_type,
+                    },
+                    cause: ObligationCause::BinaryOperation(operator),
+                    cause_span: span,
+                    resolved_type: None,
+                };
+                self.obligations.push(obligation);
+
+                let obligation_type_name = format!("__unfulfilled_obligation_{}", obligation_id);
+                let type_symbol_id = self.symbol_table.add_type_symbol(
+                    &obligation_type_name,
+                    TypeSymbolKind::UnfulfilledObligation(obligation_id),
+                    vec![],
+                    QualifierKind::Private,
+                    Some(span),
+                )?;
+
+                Ok(Type::new_base(type_symbol_id))
             }
         }
     }
@@ -97,14 +145,16 @@ impl SemanticAnalyzer {
         }
 
         let id = match &mut node.kind {
-            IntegerLiteral(_) => Ok(Type::new(self.get_primitive_type(PrimitiveKind::Int), vec![], ReferenceKind::Value)),
-            FloatLiteral(_) => Ok(Type::new(self.get_primitive_type(PrimitiveKind::Float), vec![], ReferenceKind::Value)),
-            BooleanLiteral(_) => Ok(Type::new(self.get_primitive_type(PrimitiveKind::Bool), vec![], ReferenceKind::Value)),
-            StringLiteral(_) => Ok(Type::new(self.get_primitive_type(PrimitiveKind::String), vec![], ReferenceKind::Value)),
-            CharLiteral(_) => Ok(Type::new(self.get_primitive_type(PrimitiveKind::Char), vec![], ReferenceKind::Value)),
+            IntegerLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Int))),
+            FloatLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Float))),
+            BooleanLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Bool))),
+            StringLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::String))),
+            CharLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Char))),
             Identifier(name) => self.get_type_from_identifier(name, node.span),
             UnaryOperation { operator, operand, .. } 
                 => self.get_type_from_unary_operation(*operator, operand, node.span),
+            BinaryOperation { operator, left, right }
+                => self.get_type_from_binary_operation(*operator, left, right, node.span),
             _ => Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
         }?;
 

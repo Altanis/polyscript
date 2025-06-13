@@ -25,6 +25,7 @@ pub enum ErrorKind {
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
     ConflictingInherentImpl(String),
+    InvalidDereference,
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
     // BadVariableDeclaration
@@ -54,6 +55,7 @@ impl ErrorKind {
             ErrorKind::UnimplementedTrait(tr, ty) => format!("trait {} not implemented for type {}", tr, ty),
             ErrorKind::ConflictingTraitImpl(tr, ty) => format!("conflicting trait implementations for {} on type {}", tr, ty),
             ErrorKind::ConflictingInherentImpl(ty) => format!("conflicting implementations for type {}", ty),
+            ErrorKind::InvalidDereference => "attempted to dereference something that wasn't a pointer".to_string()
         }
     }
 }

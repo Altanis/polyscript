@@ -165,7 +165,7 @@ impl SemanticAnalyzer {
             Some(span)
         )?;
 
-        Ok((None, Some(Type::new(type_id, vec![], ReferenceKind::Value))))
+        Ok((None, Some(Type::new_base(type_id))))
     }
 
     fn collect_enum_symbols(
@@ -197,7 +197,7 @@ impl SemanticAnalyzer {
             Some(span)
         )?;
 
-        Ok((None, Some(Type::new(type_id, vec![], ReferenceKind::Value))))
+        Ok((None, Some(Type::new_base(type_id))))
     }
 
     fn collect_trait_symbols(
@@ -223,7 +223,7 @@ impl SemanticAnalyzer {
         for type_node in types {
             if let AstNodeKind::TraitType(name) = &type_node.kind {
                 let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], QualifierKind::Public, Some(type_node.span))?;
-                type_node.type_id = Some(Type::new(type_id, vec![], ReferenceKind::Value));
+                type_node.type_id = Some(Type::new_base(type_id));
             }
         }
 
@@ -232,7 +232,7 @@ impl SemanticAnalyzer {
                 let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
 
                 let param_ids = vec![];
-                let return_type = Type::new(self.primitives[PrimitiveKind::Null as usize], vec![], ReferenceKind::Value);
+                let return_type = Type::new_base(self.primitives[PrimitiveKind::Null as usize]);
                 
                 let sig_type_id = self.symbol_table.add_type_symbol(
                     name,
@@ -246,14 +246,14 @@ impl SemanticAnalyzer {
                     Some(signature.span)
                 )?;
 
-                signature.type_id = Some(Type::new(sig_type_id, vec![], ReferenceKind::Value));
+                signature.type_id = Some(Type::new_base(sig_type_id));
             }
         }
 
         self.symbol_table.exit_scope();
 
         let trait_type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Trait(trait_scope_id), generic_parameters, QualifierKind::Public, Some(span))?;
-        Ok((None, Some(Type::new(trait_type_id, vec![], ReferenceKind::Value))))
+        Ok((None, Some(Type::new_base(trait_type_id))))
     }
 
     fn collect_generic_parameters(&mut self, params: &mut [AstNode]) -> Result<Vec<TypeSymbolId>, BoxedError> {
@@ -267,7 +267,7 @@ impl SemanticAnalyzer {
                     QualifierKind::Public,
                     Some(param.span)
                 )?;
-                param.type_id = Some(Type::new(id, vec![], ReferenceKind::Value));
+                param.type_id = Some(Type::new_base(id));
                 ids.push(id);
             }
         }
@@ -325,7 +325,7 @@ impl SemanticAnalyzer {
             QualifierKind::Public,
             Some(span)
         )?;
-        Ok((None, Some(Type::new(type_id, vec![], ReferenceKind::Value))))
+        Ok((None, Some(Type::new_base(type_id))))
     }
 
     fn collect_optional_node(
@@ -395,7 +395,7 @@ impl SemanticAnalyzer {
             trait_ids.push(type_symbol.id);
         }
 
-        let type_symbol = self.symbol_table.get_type_symbol_mut(node.type_id.as_ref().unwrap().symbol).unwrap();
+        let type_symbol = self.symbol_table.get_type_symbol_mut(node.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
         if let TypeSymbolKind::Generic(constraints) = &mut type_symbol.kind {
             *constraints = trait_ids;
         }
@@ -563,7 +563,7 @@ impl SemanticAnalyzer {
         for type_node in associated_types {
             if let AstNodeKind::AssociatedType { name, qualifier, .. } = &type_node.kind {
                 let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], *qualifier, Some(type_node.span))?;
-                type_node.type_id = Some(Type::new(type_id, vec![], ReferenceKind::Value));
+                type_node.type_id = Some(Type::new_base(type_id));
             }
         }
         

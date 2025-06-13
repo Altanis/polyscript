@@ -116,25 +116,34 @@ pub enum ScopeKind {
     Type
 }
 
-#[derive(Debug, Clone)]
-pub struct Type {
-    pub symbol: TypeSymbolId,
-    pub generic_args: Vec<TypeSymbolId>,
-    pub reference: ReferenceKind
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Type {
+    Base {
+        symbol: TypeSymbolId,
+        args: Vec<Type>,
+    },
+    Reference(Box<Type>),
+    MutableReference(Box<Type>),
 }
 
 impl Type {
-    pub fn new(symbol: TypeSymbolId, generic_args: Vec<TypeSymbolId>, reference: ReferenceKind) -> Type {
-        Type {
-            symbol,
-            generic_args,
-            reference
-        }
+    pub fn new_base(symbol: TypeSymbolId) -> Self {
+        Type::Base { symbol, args: vec![] }
     }
-    
-    pub fn is_equivalent(&self, other: &Type, symbol_table: &SymbolTable) -> bool {
-        self.reference == other.reference
-            && symbol_table.get_type_symbol(self.symbol).unwrap().can_assign(symbol_table.get_type_symbol(other.symbol).unwrap())
+
+    pub fn is_base(&self) -> bool {
+        matches!(self, Type::Base { .. })
+    }
+
+    pub fn is_equivalent(&self, other: &Type) -> bool {
+        self == other // todo fix
+    }
+
+    pub fn get_base_symbol(&self) -> TypeSymbolId {
+        match self {
+            Type::Base { symbol, .. } => *symbol,
+            Type::Reference(inner) | Type::MutableReference(inner) => inner.get_base_symbol(),
+        }
     }
 }
 
@@ -285,11 +294,11 @@ impl SymbolTable {
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params: if is_binary {
-                        vec![Type::new(self_type_id, vec![], ReferenceKind::Value); 2]
+                        vec![Type::new_base(self_type_id); 2]
                     } else {
-                        vec![Type::new(self_type_id, vec![], ReferenceKind::Value)]
+                        vec![Type::new_base(self_type_id)]
                     },
-                    return_type: Type::new(output_type_id, vec![], ReferenceKind::Value),
+                    return_type: Type::new_base(output_type_id),
                     instance: Some(ReferenceKind::Value)
                 }, 
                 vec![], 
@@ -342,7 +351,7 @@ impl SymbolTable {
                     ValueSymbolKind::Variable,
                     false,
                     QualifierKind::Public,
-                    Some(Type::new(self_id, vec![], ReferenceKind::Value)),
+                    Some(Type::new_base(self_id)),
                     None
                 ).unwrap_or_else(|_| panic!("[this_var] couldn't add default impl {}", trait_name));
 
@@ -352,7 +361,7 @@ impl SymbolTable {
                         ValueSymbolKind::Variable,
                         false,
                         QualifierKind::Public,
-                        Some(Type::new(self_id, vec![], ReferenceKind::Value)),
+                        Some(Type::new_base(self_id)),
                         None
                     ).unwrap_or_else(|_| panic!("[other_var] couldn't add default impl {}", trait_name));
                 }
@@ -362,7 +371,7 @@ impl SymbolTable {
                     ValueSymbolKind::Function(func_scope_id), 
                     false, 
                     QualifierKind::Public, 
-                    Some(Type::new(sig_type_id, vec![], ReferenceKind::Value)), 
+                    Some(Type::new_base(sig_type_id)), 
                     None
                 ).unwrap_or_else(|_| panic!("[fn_value] couldn't add default impl {}", trait_name));
 
@@ -664,11 +673,11 @@ impl TraitRegistry {
         span: Span
     ) -> Result<&'a TraitImpl, BoxedError> {
         let trait_name = semantic_analyzer.symbol_table.get_type_name(trait_id).to_string();
-        let type_name = semantic_analyzer.symbol_table.get_type_name(concrete_type.symbol).to_string();
+        let type_name = semantic_analyzer.symbol_table.get_type_name(concrete_type.get_base_symbol()).to_string();
 
         let mut applicable_impls = vec![];
 
-        let entries = semantic_analyzer.trait_registry.get_implementations(trait_id, concrete_type.symbol)
+        let entries = semantic_analyzer.trait_registry.get_implementations(trait_id, concrete_type.get_base_symbol())
             .ok_or_else(|| semantic_analyzer.create_error(
                 ErrorKind::UnimplementedTrait(trait_name.clone(), type_name.clone()),
                 span, 
@@ -705,7 +714,8 @@ pub struct TraitObligation {
 
 #[derive(Debug)]
 pub enum ObligationCause {
-    UnaryOperation(Operation)
+    UnaryOperation(Operation),
+    BinaryOperation(Operation)
 }
 
 #[derive(Debug)]
@@ -839,10 +849,10 @@ impl SymbolTable {
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
                         let params_str = params.iter()
-                            .map(|id| self.table.get_type_name(self.table.type_symbols[&id.symbol].name_id))
+                            .map(|id| self.table.get_type_name(self.table.type_symbols[&id.get_base_symbol()].name_id))
                             .collect::<Vec<_>>()
                             .join(", ");
-                        let return_type_str = self.table.get_type_name(self.table.type_symbols[&return_type.symbol].name_id);
+                        let return_type_str = self.table.get_type_name(self.table.type_symbols[&return_type.get_base_symbol()].name_id);
                         format!("fn({}): {}", params_str, return_type_str).blue()
                     },
                     TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
@@ -960,8 +970,22 @@ impl std::fmt::Display for SemanticAnalyzer {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let symbol = self.symbol;
-        let reference = self.reference;
-        write!(f, "Type(symbol: {}, reference: {:?})", symbol, reference)
+        match self {
+            Type::Base { symbol, args } => {
+                let base_name = format!("TypeSymbol({})", symbol);
+                if args.is_empty() {
+                    write!(f, "{}", base_name)
+                } else {
+                    let arg_str = args
+                        .iter()
+                        .map(|arg| format!("{}", arg))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(f, "{}<{}>", base_name, arg_str)
+                }
+            }
+            Type::Reference(inner) => write!(f, "&{}", inner),
+            Type::MutableReference(inner) => write!(f, "&mut {}", inner),
+        }
     }
 }
