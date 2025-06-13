@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, ReferenceKind, Span}}};
+use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
 use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 
 impl SemanticAnalyzer {

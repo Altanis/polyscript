@@ -72,6 +72,7 @@ impl SemanticAnalyzer {
                     kind: TraitObligation {
                         trait_id,
                         self_type: operand_type,
+                        trait_args: vec![]
                     },
                     cause: ObligationCause::UnaryOperation(operator),
                     cause_span: span,
@@ -116,6 +117,7 @@ impl SemanticAnalyzer {
                     kind: TraitObligation {
                         trait_id,
                         self_type: left_type,
+                        trait_args: vec![right_type]
                     },
                     cause: ObligationCause::BinaryOperation(operator),
                     cause_span: span,
@@ -129,7 +131,7 @@ impl SemanticAnalyzer {
                     TypeSymbolKind::UnfulfilledObligation(obligation_id),
                     vec![],
                     QualifierKind::Private,
-                    Some(span),
+                    Some(span)
                 )?;
 
                 Ok(Type::new_base(type_symbol_id))
