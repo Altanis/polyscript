@@ -22,7 +22,9 @@ pub enum ErrorKind {
     InvalidImpl(Option<String>),
     ExpectedType,
     InvalidConstraint(String),
-    UndefinedOperation(Operation, [String; 2])
+    UnimplementedTrait(String, String),
+    ConflictingTraitImpl(String, String),
+    ConflictingInherentImpl(String),
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
     // BadVariableDeclaration
@@ -49,14 +51,9 @@ impl ErrorKind {
                 => format!("cannot construct impl block for {}", type_ref.as_ref().map_or("an unnamed identifier", |v| v)),
             ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
             ErrorKind::InvalidConstraint(constraint) => format!("expected constraint to be a trait, instead found \"{}\"", constraint),
-            ErrorKind::UndefinedOperation(operation, ty) => {
-                match (ty[0].as_str(), ty[1].as_str()) {
-                    ("", "") => format!("operation {} not defined for type", operation),
-                    ("", right) => format!("operation {} not defined for type {}", operation, right),
-                    (left, "") => format!("operation {} not defined for type {}", operation, left),
-                    (left, right) => format!("operation {} not defined for type {} and {}", operation, left, right),
-                }
-            }
+            ErrorKind::UnimplementedTrait(tr, ty) => format!("trait {} not implemented for type {}", tr, ty),
+            ErrorKind::ConflictingTraitImpl(tr, ty) => format!("conflicting trait implementations for {} on type {}", tr, ty),
+            ErrorKind::ConflictingInherentImpl(ty) => format!("conflicting implementations for type {}", ty),
         }
     }
 }

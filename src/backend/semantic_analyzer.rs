@@ -84,6 +84,7 @@ pub struct TraitImpl {
     pub impl_scope_id: ScopeId,
     pub impl_generic_params: Vec<TypeSymbolId>,
     pub trait_generic_specialization: Vec<TypeSymbolId>,
+    pub type_specialization: Vec<TypeSymbolId>
 }
 
 #[derive(Debug, Clone)]
@@ -118,15 +119,22 @@ pub enum ScopeKind {
 #[derive(Debug, Clone)]
 pub struct Type {
     pub symbol: TypeSymbolId,
+    pub generic_args: Vec<TypeSymbolId>,
     pub reference: ReferenceKind
 }
 
 impl Type {
-    pub fn new(symbol: TypeSymbolId, reference: ReferenceKind) -> Type {
+    pub fn new(symbol: TypeSymbolId, generic_args: Vec<TypeSymbolId>, reference: ReferenceKind) -> Type {
         Type {
             symbol,
+            generic_args,
             reference
         }
+    }
+    
+    pub fn is_equivalent(&self, other: &Type, symbol_table: &SymbolTable) -> bool {
+        self.reference == other.reference
+            && symbol_table.get_type_symbol(self.symbol).unwrap().can_assign(symbol_table.get_type_symbol(other.symbol).unwrap())
     }
 }
 
@@ -161,8 +169,8 @@ impl TypeSymbol {
 
 #[derive(Debug)]
 pub struct Scope {
-    values: HashMap<ValueNameId, ValueSymbolId>,
-    types: HashMap<TypeNameId, TypeSymbolId>,
+    pub values: HashMap<ValueNameId, ValueSymbolId>,
+    pub types: HashMap<TypeNameId, TypeSymbolId>,
     parent: Option<ScopeId>,
     id: ScopeId,
     kind: ScopeKind
@@ -277,11 +285,11 @@ impl SymbolTable {
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params: if is_binary {
-                        vec![Type::new(self_type_id, ReferenceKind::Value); 2]
+                        vec![Type::new(self_type_id, vec![], ReferenceKind::Value); 2]
                     } else {
-                        vec![Type::new(self_type_id, ReferenceKind::Value)]
+                        vec![Type::new(self_type_id, vec![], ReferenceKind::Value)]
                     },
-                    return_type: Type::new(output_type_id, ReferenceKind::Value),
+                    return_type: Type::new(output_type_id, vec![], ReferenceKind::Value),
                     instance: Some(ReferenceKind::Value)
                 }, 
                 vec![], 
@@ -334,7 +342,7 @@ impl SymbolTable {
                     ValueSymbolKind::Variable,
                     false,
                     QualifierKind::Public,
-                    Some(Type::new(self_id, ReferenceKind::Value)),
+                    Some(Type::new(self_id, vec![], ReferenceKind::Value)),
                     None
                 ).unwrap_or_else(|_| panic!("[this_var] couldn't add default impl {}", trait_name));
 
@@ -344,7 +352,7 @@ impl SymbolTable {
                         ValueSymbolKind::Variable,
                         false,
                         QualifierKind::Public,
-                        Some(Type::new(self_id, ReferenceKind::Value)),
+                        Some(Type::new(self_id, vec![], ReferenceKind::Value)),
                         None
                     ).unwrap_or_else(|_| panic!("[other_var] couldn't add default impl {}", trait_name));
                 }
@@ -354,7 +362,7 @@ impl SymbolTable {
                     ValueSymbolKind::Function(func_scope_id), 
                     false, 
                     QualifierKind::Public, 
-                    Some(Type::new(sig_type_id, ReferenceKind::Value)), 
+                    Some(Type::new(sig_type_id, vec![], ReferenceKind::Value)), 
                     None
                 ).unwrap_or_else(|_| panic!("[fn_value] couldn't add default impl {}", trait_name));
 
@@ -560,6 +568,14 @@ impl SymbolTable {
         self.scopes.get(&self.current_scope_id).expect("Scope should exist")
     }
 
+    pub fn get_scope_mut(&mut self, scope_id: ScopeId) -> Option<&mut Scope> {
+        self.scopes.get_mut(&scope_id)
+    }
+
+    pub fn get_scope(&self, scope_id: ScopeId) -> Option<&Scope> {
+        self.scopes.get(&scope_id)
+    }
+
     fn create_redeclaration_error(&self, name: String, span1: Option<Span>, span2: Option<Span>) -> BoxedError {
         match (span1, span2) {
             (Some(s1), Some(s2)) => Error::from_multiple_errors(
@@ -578,7 +594,7 @@ impl SymbolTable {
 }
 
 pub struct TraitRegistry {
-    pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, TraitImpl>>
+    pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, Vec<TraitImpl>>>,
 }
 
 impl TraitRegistry {
@@ -611,7 +627,8 @@ impl TraitRegistry {
                 self.register(trait_id, self_type, TraitImpl {
                     impl_scope_id,
                     impl_generic_params: vec![],
-                    trait_generic_specialization: vec![]
+                    trait_generic_specialization: vec![],
+                    type_specialization: vec![]
                 });
             }
         }
@@ -621,26 +638,90 @@ impl TraitRegistry {
         self.register
             .entry(trait_id)
             .or_default()
-            .insert(type_id, implementation);
+            .entry(type_id)
+            .or_default()
+            .push(implementation);
     }
 
     pub fn implements(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> bool {
         self.register
             .get(&trait_id)
-            .map_or(false, |impls| impls.contains_key(&type_id))
+            .and_then(|impls| impls.get(&type_id))
+            .map_or(false, |vec| !vec.is_empty())
     }
-    
-    pub fn get_implementation(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&TraitImpl> {
+
+    pub fn get_implementations(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&Vec<TraitImpl>> {
         self.register
             .get(&trait_id)
             .and_then(|impls| impls.get(&type_id))
     }
+
+    pub fn find_applicable_impl<'a>(
+        &'a self,
+        trait_id: TypeSymbolId,
+        concrete_type: &Type,
+        semantic_analyzer: &'a SemanticAnalyzer, 
+        span: Span
+    ) -> Result<&'a TraitImpl, BoxedError> {
+        let trait_name = semantic_analyzer.symbol_table.get_type_name(trait_id).to_string();
+        let type_name = semantic_analyzer.symbol_table.get_type_name(concrete_type.symbol).to_string();
+
+        let mut applicable_impls = vec![];
+
+        let entries = semantic_analyzer.trait_registry.get_implementations(trait_id, concrete_type.symbol)
+            .ok_or_else(|| semantic_analyzer.create_error(
+                ErrorKind::UnimplementedTrait(trait_name.clone(), type_name.clone()),
+                span, 
+                &[span]
+            ))?;
+        
+        for entry in entries.iter() {
+            // if entry.fits(concrete_type) {
+                applicable_impls.push(entry);
+            // }
+        }
+
+        match applicable_impls.len() {
+            0 => Err(semantic_analyzer.create_error(
+                ErrorKind::UnimplementedTrait(trait_name.clone(), type_name.clone()),
+                span, 
+                &[span]
+            )),
+            1 => Ok(applicable_impls[0]),
+            _ => Err(semantic_analyzer.create_error(
+                ErrorKind::ConflictingTraitImpl(trait_name, type_name),
+                span,
+                &[span]
+            ))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TraitObligation {
+    pub trait_id: TypeSymbolId,
+    pub self_type: Type,
+}
+
+#[derive(Debug)]
+pub enum ObligationCause {
+    UnaryOperation(Operation)
+}
+
+#[derive(Debug)]
+pub struct Obligation {
+    pub id: usize,
+    pub kind: TraitObligation,
+    pub cause: ObligationCause,
+    pub cause_span: Span,
+    pub resolved_type: Option<Type>
 }
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     pub primitives: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
+    pub obligations: Vec<Obligation>,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>
 }
@@ -657,6 +738,7 @@ impl SemanticAnalyzer {
             trait_registry: TraitRegistry::new(&primitives, &symbol_table),
             symbol_table,
             primitives,
+            obligations: vec![],
             errors: vec![],
             lines
         }
@@ -702,8 +784,8 @@ impl std::fmt::Display for InherentImpl {
 
 impl std::fmt::Display for TraitImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TraitImpl(impl_scope_id: {:?}, impl_generic_params: {:?}, trait_generic_specialization: {:?})", 
-            self.impl_scope_id, self.impl_generic_params, self.trait_generic_specialization)
+        write!(f, "TraitImpl(impl_scope_id: {:?}, impl_generic_params: {:?}, trait_generic_specialization: {:?}, type_specialization: {:?})", 
+            self.impl_scope_id, self.impl_generic_params, self.trait_generic_specialization, self.type_specialization)
     }
 }
 
@@ -813,8 +895,8 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.display_scope(0, 0, f)
-        // self.display_scope(self.real_starting_scope, 0, f)
+        // self.display_scope(0, 0, f)
+        self.display_scope(self.real_starting_scope, 0, f)
     }
 }
 
@@ -827,20 +909,37 @@ impl TraitRegistry {
 
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                for (trait_id, impls) in &self.registry.register {
+                'outer: for (trait_id, impls) in &self.registry.register {
                     let trait_symbol = &self.table.type_symbols[trait_id];
                     let trait_name = self.table.get_type_name(trait_symbol.name_id);
+
+                    for op in Operation::iter() {
+                        if let Some((name, _)) = op.to_trait_data() && name == trait_name {
+                            continue 'outer;
+                        }
+                    }
+
                     writeln!(f, "{}", format!("[Trait({})] {}", trait_id, trait_name).underline())?;
                     
                     for (type_id, impl_details) in impls {
                         let type_symbol = &self.table.type_symbols[type_id];
                         let type_name = self.table.get_type_name(type_symbol.name_id);
-                        write!(f, "[Type({})] {}", type_id, type_name)?;
-                        writeln!(f, " -> Scope({:?})", impl_details.impl_scope_id)?;
+                        write!(f, "[Type({})] {} -> [", type_id, type_name)?;
+
+                        for (i, impl_detail) in impl_details.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+
+                            write!(f, "{}", impl_detail)?;
+                        }
+
+                        write!(f, "]")?;
                     }
 
                     writeln!(f)?;
                 }
+
                 Ok(())
             }
         }
@@ -856,5 +955,13 @@ impl std::fmt::Display for SemanticAnalyzer {
         writeln!(f, "\nTrait Registry:")?;
         writeln!(f, "{}", self.trait_registry.display(&self.symbol_table))?;
         Ok(())
+    }
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let symbol = self.symbol;
+        let reference = self.reference;
+        write!(f, "Type(symbol: {}, reference: {:?})", symbol, reference)
     }
 }
