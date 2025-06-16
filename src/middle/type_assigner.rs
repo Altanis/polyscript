@@ -1,4 +1,4 @@
-use crate::{backend::semantic_analyzer::{Obligation, ObligationCause, PrimitiveKind, TraitObligation, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, QualifierKind, ReferenceKind, Span}}};
+use crate::{middle::semantic_analyzer::{Obligation, ObligationCause, PrimitiveKind, TraitObligation, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, QualifierKind, ReferenceKind, Span}}};
 use super::semantic_analyzer::SemanticAnalyzer;
 
 impl SemanticAnalyzer {
@@ -17,30 +17,6 @@ impl SemanticAnalyzer {
             None => Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span]))
         }
     }
-
-    // fn get_type_from_unary_operation(&mut self, operator: Operation, operand: &mut BoxedAstNode, span: Span) -> Result<Type, BoxedError> {
-    //     let type_id = self.associate_node_with_type(operand)?;
-    //     // let type_name = self.symbol_table.get_type_name(type_id.symbol).to_string();
-
-    //     let Some((trait_name, _)) = operator.to_trait_data() else {
-    //         return self.get_type_from_unconventional_unary_operator(operator, operand);
-    //     };
-
-    //     let Some(trait_id) = self.symbol_table.find_type_symbol(&trait_name).map(|symbol| symbol.id) else {
-    //         unreachable!();
-    //     };
-
-    //     let applicable_impl = self.trait_registry.find_applicable_impl(
-    //         trait_id, 
-    //         &type_id,
-    //         self, 
-    //         span
-    //     )?;
-
-    //     let impl_scope = self.symbol_table.get_scope(applicable_impl.impl_scope_id).unwrap();
-
-    //     Ok(Type { symbol: 0, generic_args: vec![], reference: ReferenceKind::Reference })
-    // }
 
     fn get_type_from_unary_operation(&mut self, operator: Operation, operand: &mut BoxedAstNode, span: Span) -> Result<Type, BoxedError> {
         let operand_type = self.associate_node_with_type(operand)?;
@@ -94,6 +70,65 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn resolve_instance_member_access(
+        &mut self,
+        lhs_type: &Type,
+        rhs_node: &mut AstNode,
+    ) -> Result<Type, BoxedError> {
+        let base_type_symbol_id = lhs_type.get_base_symbol();
+        let base_type_symbol = self.symbol_table.get_type_symbol(base_type_symbol_id).unwrap();
+
+        let field_name = match &rhs_node.kind {
+            AstNodeKind::Identifier(ident) => ident.clone(),
+            _ => return Err(self.create_error(ErrorKind::IncorrectFieldAccessRhs, rhs_node.span, &[rhs_node.span]))
+        };
+
+        match &base_type_symbol.kind {
+            TypeSymbolKind::Struct((scope_id, impls)) => {
+                let scope_id = *scope_id;
+                if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(&field_name, scope_id) {
+                    let field_type = field_symbol.type_id.clone().ok_or_else(|| {
+                        self.create_error(
+                            ErrorKind::UnresolvedType(field_name.to_string()),
+                            rhs_node.span,
+                            &[rhs_node.span]
+                        )
+                    })?;
+
+                    rhs_node.value_id = Some(field_symbol.id);
+                    rhs_node.type_id = Some(field_type.clone());
+
+                    Ok(field_type)
+                } else if !impls.is_empty() {
+                    for inherent_impl in impls.iter() {
+                        let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
+                        for (_, &v) in scope.values.iter() {
+                            
+                        }
+                    }
+
+                    unreachable!()
+                } else {
+                    Err(self.create_error(
+                        ErrorKind::FieldNotFound(
+                            field_name.to_string(),
+                            self.symbol_table.display_type(lhs_type)
+                        ),
+                        rhs_node.span,
+                        &[rhs_node.span]
+                    ))
+                }
+            },
+            _ => {
+                Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.get_type_name(lhs_type.get_base_symbol()).to_string()),
+                    rhs_node.span,
+                    &[rhs_node.span]
+                ))
+            }
+        }
+    }
+
     fn get_type_from_binary_operation(
         &mut self, 
         operator: Operation, 
@@ -101,10 +136,18 @@ impl SemanticAnalyzer {
         right: &mut BoxedAstNode, 
         span: Span
     ) -> Result<Type, BoxedError> {
-        let left_type = self.associate_node_with_type(left)?;
-        let right_type = self.associate_node_with_type(right)?;
-        
         match operator {
+            Operation::FieldAccess => {
+                if let AstNodeKind::Identifier(type_name) = &left.kind {
+                    if let Some(type_symbol) = self.symbol_table.find_type_symbol(type_name) {
+                        let type_id = type_symbol.id;
+                        return self.resolve_static_member_access(type_id, right);
+                    }
+                }
+                
+                let lhs_type = self.associate_node_with_type(left)?;
+                self.resolve_instance_member_access(&lhs_type, right)
+            },
             _ => {
                 let (trait_name, _) = operator.to_trait_data().unwrap();
                 let trait_id = self.symbol_table.find_type_symbol(&trait_name)
@@ -188,8 +231,8 @@ impl SemanticAnalyzer {
         use AstNodeKind::*;
         
         let declared_type_opt: Result<Option<Type>, BoxedError> = match &mut node.kind {
-            VariableDeclaration { name, mutable, type_annotation, initializer } => 
-                self.collect_variable_type(name, *mutable, type_annotation, initializer),
+            // VariableDeclaration { name, mutable, type_annotation, initializer } => 
+                // self.collect_variable_type(name, *mutable, type_annotation, initializer),
             _ => {
                 for child in node.children_mut() {
                     self.collect_node_type(child)?;
@@ -205,13 +248,13 @@ impl SemanticAnalyzer {
         declared_type_opt
     }
 
-    fn collect_variable_type(
-        &mut self,
-        name: &str, 
-        mutable: bool, 
-        type_annotation: &mut Option<BoxedAstNode>,
-        initializer: &mut Option<BoxedAstNode>
-    ) -> Result<Option<Type>, BoxedError> {
-        Ok(None)
-    }
+    // fn collect_variable_type(
+    //     &mut self,
+    //     name: &str, 
+    //     mutable: bool, 
+    //     type_annotation: &mut Option<BoxedAstNode>,
+    //     initializer: &mut Option<BoxedAstNode>
+    // ) -> Result<Option<Type>, BoxedError> {
+    //     Ok(None)
+    // }
 }

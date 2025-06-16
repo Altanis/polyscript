@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
+use crate::{middle::semantic_analyzer::{SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {

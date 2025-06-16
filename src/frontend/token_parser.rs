@@ -124,75 +124,58 @@ impl Parser {
         let mut lhs = self.parse_prefix()?;
 
         loop {
-            let token = self.peek().clone();
-            let operator = match token.get_token_kind() {
+            let operator = match self.peek().get_token_kind() {
                 TokenKind::Operator(op) => op,
+                TokenKind::OpenParenthesis => Operation::FunctionCall,
                 _ => break,
             };
 
             let (left_bp, right_bp) = operator.binding_power();
+
             if left_bp < min_bp {
                 break;
             }
-    
+            
             self.advance();
-            let rhs = self.parse_binding_power(right_bp)?;
 
-            lhs = AstNode {
-                span: lhs.span.set_end_from_span(rhs.span),
-                kind: match token.get_token_kind() {
-                    TokenKind::Operator(op) => {
-                        if op.is_conditional() {
-                            AstNodeKind::ConditionalOperation {
-                                operator,
-                                left: Box::new(lhs),
-                                right: Box::new(rhs),
-                            }
-                        } else if op == Operation::FieldAccess {
-                            AstNodeKind::FieldAccess {
-                                left: Box::new(lhs),
-                                right: Box::new(rhs),
-                            }
-                        } else {
-                            AstNodeKind::BinaryOperation {
-                                operator,
-                                left: Box::new(lhs),
-                                right: Box::new(rhs),
-                            }
+            if operator == Operation::FunctionCall {
+                let mut arguments = vec![];
+                if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
+                    loop {
+                        arguments.push(self.parse_expression()?);
+                        if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
+                            break;
                         }
-                    },
-                    _ => unreachable!()
-                },
-                type_id: None,
-                value_id: None
-            };
-        }
-
-        while self.peek().get_token_kind() == TokenKind::OpenParenthesis {
-            self.advance();
-        
-            let mut arguments = vec![];
-            if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
-                loop {
-                    arguments.push(self.parse_expression()?);
-                    if self.peek().get_token_kind() == TokenKind::CloseParenthesis {
-                        break;
+                        self.consume(TokenKind::Comma)?;
                     }
-                    self.consume(TokenKind::Comma)?;
                 }
+                self.consume(TokenKind::CloseParenthesis)?;
+            
+                lhs = AstNode {
+                    span: lhs.span.set_end_from_span(self.previous().get_span()),
+                    kind: AstNodeKind::FunctionCall {
+                        function: Box::new(lhs),
+                        arguments,
+                    },
+                    type_id: None,
+                    value_id: None
+                };
+            } else {
+                let rhs = self.parse_binding_power(right_bp)?;
+
+                lhs = AstNode {
+                    span: lhs.span.set_end_from_span(rhs.span),
+                    kind: if operator.is_conditional() {
+                        AstNodeKind::ConditionalOperation { operator, left: Box::new(lhs), right: Box::new(rhs) }
+                    } else if operator == Operation::FieldAccess {
+                        AstNodeKind::FieldAccess { left: Box::new(lhs), right: Box::new(rhs) }
+                    } else {
+                        AstNodeKind::BinaryOperation { operator, left: Box::new(lhs), right: Box::new(rhs) }
+                    },
+                    type_id: None,
+                    value_id: None
+                };
             }
-        
-            self.consume(TokenKind::CloseParenthesis)?;
-        
-            lhs = AstNode {
-                span: lhs.span.set_end_from_span(self.previous().get_span()),
-                kind: AstNodeKind::FunctionCall {
-                    function: Box::new(lhs),
-                    arguments,
-                },
-                type_id: None,
-                value_id: None
-            };
         }
 
         Ok(lhs)

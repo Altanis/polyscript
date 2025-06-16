@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{backend::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
+use crate::{middle::semantic_analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{QualifierKind, Span}}};
 use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 
 impl SemanticAnalyzer {
@@ -222,7 +222,13 @@ impl SemanticAnalyzer {
 
         for type_node in types {
             if let AstNodeKind::TraitType(name) = &type_node.kind {
-                let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], QualifierKind::Public, Some(type_node.span))?;
+                let type_id = self.symbol_table.add_type_symbol(
+                    name, 
+                    TypeSymbolKind::TypeAlias((None, None)), 
+                    vec![], 
+                    QualifierKind::Public, 
+                    Some(type_node.span)
+                )?;
                 type_node.type_id = Some(Type::new_base(type_id));
             }
         }
@@ -465,7 +471,7 @@ impl SemanticAnalyzer {
 
             self.symbol_table.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias((None, Some(implementing_type_id))), 
+                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(implementing_type_id)))), 
                 vec![], 
                 QualifierKind::Public, 
                 None
@@ -488,7 +494,7 @@ impl SemanticAnalyzer {
             let aliased_type_id = base_type_symbol.id;
             self.symbol_table.add_type_symbol(
                 "Self", 
-                TypeSymbolKind::TypeAlias((None, Some(aliased_type_id))), 
+                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(aliased_type_id)))), 
                 vec![], 
                 QualifierKind::Public, 
                 None
@@ -562,7 +568,13 @@ impl SemanticAnalyzer {
 
         for type_node in associated_types {
             if let AstNodeKind::AssociatedType { name, qualifier, .. } = &type_node.kind {
-                let type_id = self.symbol_table.add_type_symbol(name, TypeSymbolKind::Custom, vec![], *qualifier, Some(type_node.span))?;
+                let type_id = self.symbol_table.add_type_symbol(
+                    name, 
+                    TypeSymbolKind::TypeAlias((None, None)), 
+                    vec![], 
+                    *qualifier, 
+                    Some(type_node.span)
+                )?;
                 type_node.type_id = Some(Type::new_base(type_id));
             }
         }

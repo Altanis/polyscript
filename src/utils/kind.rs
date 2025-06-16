@@ -1,7 +1,7 @@
 use colored::*;
 use std::rc::Rc;
 
-use crate::backend::semantic_analyzer::PrimitiveKind;
+use crate::middle::semantic_analyzer::PrimitiveKind;
 
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
@@ -105,6 +105,7 @@ pub enum Operation {
 
     // CALL
     FieldAccess,
+    FunctionCall,
 
     // POINTER OPS //
     Dereference,
@@ -219,6 +220,7 @@ impl Operation {
             Operation::Not 
             | Operation::BitwiseNegate => (13, 14),
 
+            | Operation::FunctionCall => (14, 0),
             Operation::FieldAccess => (14, 15),
 
             Operation::Dereference
@@ -264,6 +266,7 @@ impl Operation {
             Operation::Leq => Some(("LessThanOrEqual".to_string(), true)),
             Operation::Equivalence => Some(("Equivalence".to_string(), true)),
             Operation::FieldAccess => None,
+            Operation::FunctionCall => None,
             Operation::Dereference => None,
             Operation::ImmutableAddressOf => None,
             Operation::MutableAddressOf => None,
@@ -292,6 +295,7 @@ impl Operation {
                 Equivalence | NotEqual => Some(Bool),
 
                 FieldAccess => None,
+                FunctionCall => None,
                 Dereference => None,
                 ImmutableAddressOf => None,
                 MutableAddressOf => None,
@@ -314,6 +318,7 @@ impl Operation {
                 Equivalence | NotEqual => Some(Bool),
 
                 FieldAccess => None,
+                FunctionCall => None,
                 Dereference => None,
                 ImmutableAddressOf => None,
                 MutableAddressOf => None,
@@ -336,6 +341,7 @@ impl Operation {
                 RightBitShiftEq | LeftBitShiftEq => None,
 
                 FieldAccess => None,
+                FunctionCall => None,
                 Dereference => None,
                 ImmutableAddressOf => None,
                 MutableAddressOf => None,
@@ -356,6 +362,7 @@ impl Operation {
                 And | Or => None,
 
                 FieldAccess => None,
+                FunctionCall => None,
                 Dereference => None,
                 ImmutableAddressOf => None,
                 MutableAddressOf => None,
@@ -375,6 +382,7 @@ impl Operation {
                 And | Or => None,
 
                 FieldAccess => None,
+                FunctionCall => None,
                 Dereference => None,
                 ImmutableAddressOf => None,
                 MutableAddressOf => None,
@@ -427,6 +435,7 @@ impl std::fmt::Display for Operation {
             Operation::Equivalence => format!("{}{}", ASSIGNMENT_TOKEN, ASSIGNMENT_TOKEN),
 
             Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
+            Operation::FunctionCall => "()".to_string(),
             Operation::MutableAddressOf => "&mut".to_string()
         };
 

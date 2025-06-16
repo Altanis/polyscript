@@ -9,12 +9,12 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
-use backend::semantic_analyzer::SemanticAnalyzer;
+use middle::semantic_analyzer::SemanticAnalyzer;
 use frontend::ast::AstNode;
 use frontend::token_parser::Parser;
 use utils::kind::Token;
 
-mod backend;
+mod middle;
 mod frontend;
 mod utils;
 
@@ -78,6 +78,7 @@ fn test_main_script() {
 
     if PARSE_TOKENS {
         let program = parse_tokens(lined_source.clone(), tokens);
+        dbg!(&program);
         println!("{}", program);
 
         if SEMANTIC_ANALYSIS {

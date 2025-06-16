@@ -24,8 +24,13 @@ pub enum ErrorKind {
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
+    InvalidTraitImpl(String),
     ConflictingInherentImpl(String),
     InvalidDereference,
+    ExpectedScopedItem,
+    FieldNotFound(String, String),
+    InvalidFieldAccess(String),
+    IncorrectFieldAccessRhs,
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
     // BadVariableDeclaration
@@ -54,8 +59,13 @@ impl ErrorKind {
             ErrorKind::InvalidConstraint(constraint) => format!("expected constraint to be a trait, instead found \"{}\"", constraint),
             ErrorKind::UnimplementedTrait(tr, ty) => format!("trait {} not implemented for type {}", tr, ty),
             ErrorKind::ConflictingTraitImpl(tr, ty) => format!("conflicting trait implementations for {} on type {}", tr, ty),
+            ErrorKind::InvalidTraitImpl(ty) => format!("not all types in trait implemented, missing: {}", ty),
             ErrorKind::ConflictingInherentImpl(ty) => format!("conflicting implementations for type {}", ty),
-            ErrorKind::InvalidDereference => "attempted to dereference something that wasn't a pointer".to_string()
+            ErrorKind::InvalidDereference => "attempted to dereference something that wasn't a pointer".to_string(),
+            ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
+            ErrorKind::FieldNotFound(field, type_name) => format!("field \"{}\" not found in type {}", field, type_name),
+            ErrorKind::InvalidFieldAccess(type_name) => format!("cannot access field on type {}", type_name),
+            ErrorKind::IncorrectFieldAccessRhs => "rhs of field access is invalid".to_string(),
         }
     }
 }

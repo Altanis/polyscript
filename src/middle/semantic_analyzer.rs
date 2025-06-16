@@ -94,15 +94,14 @@ pub enum TypeSymbolKind {
     Enum((ScopeId, Vec<InherentImpl>)),
     Struct((ScopeId, Vec<InherentImpl>)),
     Trait(ScopeId),
-    TypeAlias((Option<ScopeId>, Option<TypeSymbolId>)),
+    TypeAlias((Option<ScopeId>, Option<Type>)),
     FunctionSignature {
         params: Vec<Type>,
         return_type: Type,
         instance: Option<ReferenceKind>
     },
     UnfulfilledObligation(usize),
-    Generic(Vec<TypeSymbolId>),
-    Custom
+    Generic(Vec<TypeSymbolId>)
 }
 
 #[derive(Debug, Clone)]
@@ -325,10 +324,10 @@ impl SymbolTable {
                     type_specialization: vec![],
                 });
                 
-                self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, Some(self_id))), vec![], QualifierKind::Public, None).unwrap();
-                self.add_type_symbol("Output", TypeSymbolKind::TypeAlias((None, Some(output_id))), vec![], QualifierKind::Public, None).unwrap();
+                self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))), vec![], QualifierKind::Public, None).unwrap();
+                self.add_type_symbol("Output", TypeSymbolKind::TypeAlias((None, Some(Type::new_base(output_id)))), vec![], QualifierKind::Public, None).unwrap();
                 if !is_unary {
-                    self.add_type_symbol(trait_generics[0], TypeSymbolKind::TypeAlias((None, Some(self_id))), vec![], QualifierKind::Public, None).unwrap();
+                    self.add_type_symbol(trait_generics[0], TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))), vec![], QualifierKind::Public, None).unwrap();
                 }
 
                 let func_scope_id = self.enter_scope(ScopeKind::Function);
@@ -465,6 +464,33 @@ impl SymbolTable {
             scope_id = scope.parent;
         }
         None
+    }
+
+    pub fn find_value_symbol_in_scope(&self, name: &str, scope_id: ScopeId) -> Option<&ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
+
+        self.value_symbols.get(symbol_id)
+    }
+
+    pub fn find_type_symbol_in_scope(&self, name: &str, scope_id: ScopeId) -> Option<&TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
+
+        self.type_symbols.get(symbol_id)
+    }
+
+
+    pub fn find_value_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
+        self.value_symbols.get_mut(&symbol_id)
+    }
+
+    pub fn find_type_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
+        self.type_symbols.get_mut(&symbol_id)
     }
 
     pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> { self.value_symbols.get(&id) }
@@ -730,7 +756,6 @@ impl SymbolTable {
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     },
                     TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
-                    TypeSymbolKind::Custom => "Custom".white(),
                     TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white()
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
