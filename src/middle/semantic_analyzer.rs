@@ -575,7 +575,7 @@ impl TraitRegistry {
 
 pub enum Constraint {
     Equality(TypeSymbolId, Type),
-    Trait(TypeSymbolId, TypeSymbolId)
+    Trait(TypeSymbolId, Type)
 }
 
 #[derive(Default)]

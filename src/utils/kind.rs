@@ -285,88 +285,71 @@ impl Operation {
 
                 Plus | Minus | Mul | Div | Mod |
                 Exp | BitwiseAnd | BitwiseOr | BitwiseXor |
-                RightBitShift | LeftBitShift |
-                PlusEq | MinusEq | MulEq | DivEq |
-                ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq |
-                BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Int),
+                RightBitShift | LeftBitShift => Some(Int),
 
                 And | Or |
                 GreaterThan | Geq | LessThan | Leq |
                 Equivalence | NotEqual => Some(Bool),
 
-                Assign => None,
-                FieldAccess => None,
-                FunctionCall => None,
-                Dereference => None,
-                ImmutableAddressOf => None,
-                MutableAddressOf => None,
+                Assign
+                | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
+                | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
+                | RightBitShiftEq | LeftBitShiftEq
+                | FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Float => match self {
                 Not => Some(Bool),
                 BitwiseNegate => None,
 
-                Plus | Minus | Mul | Div | Mod | Exp |
-                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq => Some(Float),
+                Plus | Minus | Mul | Div | Mod | Exp => Some(Float),
 
                 BitwiseAnd | BitwiseOr | BitwiseXor |
-                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
-                RightBitShift | LeftBitShift |
-                RightBitShiftEq | LeftBitShiftEq => None,
+                RightBitShift | LeftBitShift => None,
 
                 And | Or |
                 GreaterThan | Geq | LessThan | Leq |
                 Equivalence | NotEqual => Some(Bool),
 
-                FieldAccess => None,
-                FunctionCall => None,
-                Dereference => None,
-                ImmutableAddressOf => None,
-                MutableAddressOf => None,
+                Assign
+                | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
+                | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
+                | RightBitShiftEq | LeftBitShiftEq
+                | FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Bool => match self {
                 Not => Some(Bool),
-                BitwiseNegate => None,
+                And | Or | Equivalence | NotEqual | Assign => Some(Bool),
 
-                And | Or |
-                Equivalence | NotEqual |
-                Assign => Some(Bool),
-
+                BitwiseNegate |
                 Plus | Minus | Mul | Div | Mod | Exp |
                 PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
                 BitwiseAnd | BitwiseOr | BitwiseXor |
                 BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
                 GreaterThan | Geq | LessThan | Leq |
                 RightBitShift | LeftBitShift |
-                RightBitShiftEq | LeftBitShiftEq => None,
-
-                FieldAccess => None,
-                FunctionCall => None,
-                Dereference => None,
-                ImmutableAddressOf => None,
-                MutableAddressOf => None,
+                RightBitShiftEq | LeftBitShiftEq |
+                FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             String => match self {
-                Plus | PlusEq => Some(String),
+                Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Not | BitwiseNegate |
+                PlusEq | Not | BitwiseNegate |
                 Minus | Mul | Div | Mod | Exp |
                 MinusEq | MulEq | DivEq | ModEq | ExpEq |
                 BitwiseAnd | BitwiseOr | BitwiseXor |
                 BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
                 RightBitShift | LeftBitShift |
                 RightBitShiftEq | LeftBitShiftEq |
-                And | Or => None,
-
-                Assign => None,
-                FieldAccess => None,
-                FunctionCall => None,
-                Dereference => None,
-                ImmutableAddressOf => None,
-                MutableAddressOf => None,
+                And | Or |
+                Assign | FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Char => match self {
@@ -379,14 +362,9 @@ impl Operation {
                 RightBitShift | LeftBitShift |
                 RightBitShiftEq | LeftBitShiftEq |
                 Not | BitwiseNegate |
-                And | Or => None,
-
-                Assign => None,
-                FieldAccess => None,
-                FunctionCall => None,
-                Dereference => None,
-                ImmutableAddressOf => None,
-                MutableAddressOf => None,
+                And | Or |
+                Assign | FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Null => None,

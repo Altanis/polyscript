@@ -31,9 +31,9 @@ pub enum ErrorKind {
     FieldNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
+    BadVariableDeclaration
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
-    // BadVariableDeclaration
 }
 
 impl ErrorKind {
@@ -66,6 +66,7 @@ impl ErrorKind {
             ErrorKind::FieldNotFound(field, type_name) => format!("field \"{}\" not found in type {}", field, type_name),
             ErrorKind::InvalidFieldAccess(type_name) => format!("cannot access field on type {}", type_name),
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
+            ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string()
         }
     }
 }
