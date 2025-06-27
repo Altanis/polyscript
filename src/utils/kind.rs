@@ -245,7 +245,6 @@ impl Operation {
             Operation::BitwiseXor => Some(("BitwiseXor".to_string(), true)),
             Operation::RightBitShift => Some(("RightBitShift".to_string(), true)),
             Operation::LeftBitShift => Some(("LeftBitShift".to_string(), true)),
-            Operation::Assign => None,
             Operation::PlusEq => Some(("AddAssign".to_string(), true)),
             Operation::MinusEq => Some(("SubtractAssign".to_string(), true)),
             Operation::MulEq => Some(("MultiplyAssign".to_string(), true)),
@@ -270,6 +269,7 @@ impl Operation {
             Operation::Dereference => None,
             Operation::ImmutableAddressOf => None,
             Operation::MutableAddressOf => None,
+            Operation::Assign => None
         }
     }
 
@@ -286,7 +286,7 @@ impl Operation {
                 Plus | Minus | Mul | Div | Mod |
                 Exp | BitwiseAnd | BitwiseOr | BitwiseXor |
                 RightBitShift | LeftBitShift |
-                Assign | PlusEq | MinusEq | MulEq | DivEq |
+                PlusEq | MinusEq | MulEq | DivEq |
                 ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq |
                 BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Int),
 
@@ -294,6 +294,7 @@ impl Operation {
                 GreaterThan | Geq | LessThan | Leq |
                 Equivalence | NotEqual => Some(Bool),
 
+                Assign => None,
                 FieldAccess => None,
                 FunctionCall => None,
                 Dereference => None,
@@ -350,7 +351,6 @@ impl Operation {
             String => match self {
                 Plus | PlusEq => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
-                Assign => Some(String),
 
                 Not | BitwiseNegate |
                 Minus | Mul | Div | Mod | Exp |
@@ -361,6 +361,7 @@ impl Operation {
                 RightBitShiftEq | LeftBitShiftEq |
                 And | Or => None,
 
+                Assign => None,
                 FieldAccess => None,
                 FunctionCall => None,
                 Dereference => None,
@@ -370,7 +371,6 @@ impl Operation {
 
             Char => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
-                Assign => Some(Char),
 
                 Plus | Minus | Mul | Div | Mod | Exp |
                 PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
@@ -381,6 +381,7 @@ impl Operation {
                 Not | BitwiseNegate |
                 And | Or => None,
 
+                Assign => None,
                 FieldAccess => None,
                 FunctionCall => None,
                 Dereference => None,

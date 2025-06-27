@@ -65,7 +65,7 @@ impl ErrorKind {
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
             ErrorKind::FieldNotFound(field, type_name) => format!("field \"{}\" not found in type {}", field, type_name),
             ErrorKind::InvalidFieldAccess(type_name) => format!("cannot access field on type {}", type_name),
-            ErrorKind::IncorrectFieldAccessRhs => "rhs of field access is invalid".to_string(),
+            ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
         }
     }
 }

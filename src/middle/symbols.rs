@@ -238,7 +238,7 @@ impl SemanticAnalyzer {
                 let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
 
                 let param_ids = vec![];
-                let return_type = Type::new_base(self.primitives[PrimitiveKind::Null as usize]);
+                let return_type = Type::new_base(self.builtin_types[PrimitiveKind::Null as usize]);
                 
                 let sig_type_id = self.symbol_table.add_type_symbol(
                     name,

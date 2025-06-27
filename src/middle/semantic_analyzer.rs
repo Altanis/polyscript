@@ -8,6 +8,7 @@ pub type ValueNameId = usize;
 pub type TypeNameId = usize;
 pub type ValueSymbolId = usize;
 pub type TypeSymbolId = usize;
+pub type UnificationVariableId = usize;
 
 #[derive(Default, Debug)]
 pub struct NameInterner {
@@ -100,8 +101,8 @@ pub enum TypeSymbolKind {
         return_type: Type,
         instance: Option<ReferenceKind>
     },
-    UnfulfilledObligation(usize),
-    Generic(Vec<TypeSymbolId>)
+    Generic(Vec<TypeSymbolId>),
+    UnificationVariable(UnificationVariableId)
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +309,8 @@ impl SymbolTable {
                 QualifierKind::Public, None
             ).unwrap();
 
+            trait_registry.default_traits.insert(trait_name.clone(), trait_id);
+
             // DEFAULT IMPLS //
             for primitive in PrimitiveKind::iter() {
                 let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
@@ -484,13 +487,13 @@ impl SymbolTable {
     pub fn find_value_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
-        self.value_symbols.get_mut(&symbol_id)
+        self.value_symbols.get_mut(symbol_id)
     }
 
     pub fn find_type_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
-        self.type_symbols.get_mut(&symbol_id)
+        self.type_symbols.get_mut(symbol_id)
     }
 
     pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> { self.value_symbols.get(&id) }
@@ -548,6 +551,7 @@ impl SymbolTable {
 #[derive(Default)]
 pub struct TraitRegistry {
     pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, Vec<TraitImpl>>>,
+    pub default_traits: HashMap<String, TypeSymbolId>
 }
 
 impl TraitRegistry {
@@ -564,88 +568,55 @@ impl TraitRegistry {
             .push(implementation);
     }
 
-    pub fn get_implementations(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId) -> Option<&Vec<TraitImpl>> {
-        self.register
-            .get(&trait_id)
-            .and_then(|impls| impls.get(&type_id))
-    }
-
-    pub fn find_applicable_impl<'a>(
-        &'a self,
-        trait_id: TypeSymbolId,
-        self_type: &Type,
-        trait_args: &[Type],
-        semantic_analyzer: &'a SemanticAnalyzer, 
-        span: Span
-    ) -> Result<&'a TraitImpl, BoxedError> {
-        let trait_name = semantic_analyzer.symbol_table.get_type_name(trait_id).to_string();
-        let self_base_symbol = self_type.get_base_symbol();
-        let type_name = semantic_analyzer.symbol_table.get_type_name(self_base_symbol).to_string();
-
-        let entries = self.get_implementations(trait_id, self_base_symbol)
-            .ok_or_else(|| semantic_analyzer.create_error(
-                ErrorKind::UnimplementedTrait(trait_name.clone(), type_name.clone()),
-                span, 
-                &[span]
-            ))?;
-        
-        let mut applicable_impls = vec![];
-        for entry in entries.iter() {
-            // TODO: unification
-            let self_type_args: Vec<TypeSymbolId> = if let Type::Base { args, .. } = self_type {
-                args.iter().map(|t| t.get_base_symbol()).collect()
-            } else { vec![] };
-
-            let trait_type_args: Vec<TypeSymbolId> = trait_args.iter().map(|t| t.get_base_symbol()).collect();
-            
-            if entry.type_specialization == self_type_args && entry.trait_generic_specialization == trait_type_args {
-                applicable_impls.push(entry);
-            }
-        }
-
-        match applicable_impls.len() {
-            0 => Err(semantic_analyzer.create_error(
-                ErrorKind::UnimplementedTrait(trait_name.clone(), type_name.clone()),
-                span, 
-                &[span]
-            )),
-            1 => Ok(applicable_impls[0]),
-            _ => Err(semantic_analyzer.create_error(
-                ErrorKind::ConflictingTraitImpl(trait_name, type_name),
-                span,
-                &[span]
-            ))
-        }
+    pub fn get_default_trait(&self, name: &String) -> TypeSymbolId {
+        *self.default_traits.get(name).unwrap()
     }
 }
 
-#[derive(Debug)]
-pub struct TraitObligation {
-    pub trait_id: TypeSymbolId,
-    pub self_type: Type,
-    pub trait_args: Vec<Type>,
+pub enum Constraint {
+    Equality(TypeSymbolId, Type),
+    Trait(TypeSymbolId, TypeSymbolId)
 }
 
-#[derive(Debug)]
-pub enum ObligationCause {
-    UnaryOperation(Operation),
-    BinaryOperation(Operation)
+#[derive(Default)]
+pub struct UnificationContext {
+    next_id: UnificationVariableId,
+    substitutions: HashMap<UnificationVariableId, TypeSymbolId>,
+    constraints: Vec<Constraint>
 }
 
-#[derive(Debug)]
-pub struct Obligation {
-    pub id: usize,
-    pub kind: TraitObligation,
-    pub cause: ObligationCause,
-    pub cause_span: Span,
-    pub resolved_type: Option<Type>
+impl UnificationContext {
+    fn get_next_uv_id(&mut self) -> UnificationVariableId {
+        let old = self.next_id;
+        self.next_id += 1;
+        old
+    }
+
+    pub fn generate_uv_type(&mut self, symbol_table: &mut SymbolTable, span: Span) -> Type {
+        let symbol = symbol_table.add_type_symbol(
+            &format!("#uv_{}", self.get_next_uv_id()), 
+            TypeSymbolKind::UnificationVariable(self.get_next_uv_id()), 
+            vec![], 
+            QualifierKind::Private, 
+            Some(span)
+        ).unwrap();
+
+        Type::Base {
+            symbol,
+            args: vec![]
+        }
+    }
+
+    pub fn register_constraint(&mut self, constraint: Constraint) {
+        self.constraints.push(constraint);
+    }
 }
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    pub primitives: Vec<TypeSymbolId>,
+    pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
-    pub obligations: Vec<Obligation>,
+    pub unification_context: UnificationContext,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>
 }
@@ -657,15 +628,15 @@ impl SemanticAnalyzer {
 
         symbol_table.populate_with_defaults(&mut trait_registry);
         
-        let primitives: Vec<TypeSymbolId> = PrimitiveKind::iter()
+        let builtin_types: Vec<TypeSymbolId> = PrimitiveKind::iter()
             .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
             .collect();
 
         SemanticAnalyzer {
             trait_registry,
             symbol_table,
-            primitives,
-            obligations: vec![],
+            builtin_types,
+            unification_context: UnificationContext::default(),
             errors: vec![],
             lines
         }
@@ -685,6 +656,16 @@ impl SemanticAnalyzer {
                 }
             }};
         }
+
+        /* PASSES
+         * 0: Collects all declared symbols (variables, functions, structs, traits, etc.) into value and type bins.
+         * 1: Associates generic parameters with their trait constraints.
+         * 2: Appends inherent impl scopes to structs/enums and registers trait implementations.
+         * 3: Attributes symbols with unification variables (unresolved type symbols).
+         * 4: Collects constraints on unification symbols.
+         * 5: Resolves unification variables via a unification algorithm.
+         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop).
+         */
         
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
@@ -755,8 +736,8 @@ impl SymbolTable {
                             .join(", ");
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     },
-                    TypeSymbolKind::UnfulfilledObligation(id) => format!("UnfulfilledObligation({})", id).red(),
-                    TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white()
+                    TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
+                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {

@@ -1,9 +1,8 @@
-use crate::{middle::semantic_analyzer::{Obligation, ObligationCause, PrimitiveKind, TraitObligation, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, utils::{error::*, kind::{Operation, QualifierKind, ReferenceKind, Span}}};
-use super::semantic_analyzer::SemanticAnalyzer;
+use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbol, TypeSymbolId, TypeSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}}};
 
 impl SemanticAnalyzer {
     fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
-        self.primitives[primitive as usize]
+        self.builtin_types[primitive as usize]
     }
 
     fn get_type_from_identifier(&self, name: &str, span: Span) -> Result<Type, BoxedError> {
@@ -18,193 +17,105 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn get_type_from_unary_operation(&mut self, operator: Operation, operand: &mut BoxedAstNode, span: Span) -> Result<Type, BoxedError> {
-        let operand_type = self.associate_node_with_type(operand)?;
+    // fn find_impl_member_type(&mut self, name: String) -> Result<Type, BoxedError> {
+
+    // }
+
+    // fn resolve_static_member_access(&mut self, type_symbol: &TypeSymbol, right: &mut BoxedAstNode) -> Result<Type, BoxedError> {
+    //     match type_symbol.kind {
+    //         TypeSymbolKind::Enum((scope, impls)) => {
+
+    //         }
+    //     }
+    // }
+
+    // fn resolve_instance_member_access(&mut self, lhs_type: &Type, right: &mut BoxedAstNode) -> Result<Type, BoxedError> {
         
-        match operator {
-            Operation::Dereference => {
-                match operand_type {
-                    Type::Base { .. } => Err(self.create_error(
-                        ErrorKind::InvalidDereference,
-                        span,
-                        &[span]
-                    )),
-                    Type::Reference(ty) => Ok(*ty.clone()),
-                    Type::MutableReference(ty) => Ok(*ty.clone())
-                }
-            },
-            Operation::ImmutableAddressOf => Ok(Type::Reference(Box::new(operand_type.clone()))),
-            Operation::MutableAddressOf => Ok(Type::MutableReference(Box::new(operand_type.clone()))),
-            _ => {
+    // }
 
-                let (trait_name, _) = operator.to_trait_data().unwrap();
-                let trait_id = self.symbol_table.find_type_symbol(&trait_name)
-                    .map(|s| s.id)
-                    .unwrap();
+    /// SYNTHESIS: Infers the type of the expression, or assigns a unification variable if unknown.
+    fn bidirectional_synthesis(&mut self, expr: &mut AstNode) -> Result<Type, BoxedError> {
 
-                let obligation_id = self.obligations.len();
-                let obligation = Obligation {
-                    id: obligation_id,
-                    kind: TraitObligation {
-                        trait_id,
-                        self_type: operand_type,
-                        trait_args: vec![]
-                    },
-                    cause: ObligationCause::UnaryOperation(operator),
-                    cause_span: span,
-                    resolved_type: None,
-                };
-                self.obligations.push(obligation);
+        //             Operation::FieldAccess => None,
+            // Operation::FunctionCall => None,
+            // Operation::Assign => None
 
-                let obligation_type_name = format!("__unfulfilled_obligation_{}", obligation_id);
-                let type_symbol_id = self.symbol_table.add_type_symbol(
-                    &obligation_type_name,
-                    TypeSymbolKind::UnfulfilledObligation(obligation_id),
-                    vec![],
-                    QualifierKind::Private,
-                    Some(span),
-                )?;
-
-                Ok(Type::new_base(type_symbol_id))
-            }
-        }
-    }
-
-    fn resolve_instance_member_access(
-        &mut self,
-        lhs_type: &Type,
-        rhs_node: &mut AstNode,
-    ) -> Result<Type, BoxedError> {
-        let base_type_symbol_id = lhs_type.get_base_symbol();
-        let base_type_symbol = self.symbol_table.get_type_symbol(base_type_symbol_id).unwrap();
-
-        let field_name = match &rhs_node.kind {
-            AstNodeKind::Identifier(ident) => ident.clone(),
-            _ => return Err(self.create_error(ErrorKind::IncorrectFieldAccessRhs, rhs_node.span, &[rhs_node.span]))
-        };
-
-        match &base_type_symbol.kind {
-            TypeSymbolKind::Struct((scope_id, impls)) => {
-                let scope_id = *scope_id;
-                if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(&field_name, scope_id) {
-                    let field_type = field_symbol.type_id.clone().ok_or_else(|| {
-                        self.create_error(
-                            ErrorKind::UnresolvedType(field_name.to_string()),
-                            rhs_node.span,
-                            &[rhs_node.span]
-                        )
-                    })?;
-
-                    rhs_node.value_id = Some(field_symbol.id);
-                    rhs_node.type_id = Some(field_type.clone());
-
-                    Ok(field_type)
-                } else if !impls.is_empty() {
-                    for inherent_impl in impls.iter() {
-                        let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
-                        for (_, &v) in scope.values.iter() {
-                            
-                        }
-                    }
-
-                    unreachable!()
-                } else {
-                    Err(self.create_error(
-                        ErrorKind::FieldNotFound(
-                            field_name.to_string(),
-                            self.symbol_table.display_type(lhs_type)
-                        ),
-                        rhs_node.span,
-                        &[rhs_node.span]
-                    ))
-                }
-            },
-            _ => {
-                Err(self.create_error(
-                    ErrorKind::InvalidFieldAccess(self.symbol_table.get_type_name(lhs_type.get_base_symbol()).to_string()),
-                    rhs_node.span,
-                    &[rhs_node.span]
-                ))
-            }
-        }
-    }
-
-    fn get_type_from_binary_operation(
-        &mut self, 
-        operator: Operation, 
-        left: &mut BoxedAstNode, 
-        right: &mut BoxedAstNode, 
-        span: Span
-    ) -> Result<Type, BoxedError> {
-        match operator {
-            Operation::FieldAccess => {
-                if let AstNodeKind::Identifier(type_name) = &left.kind {
-                    if let Some(type_symbol) = self.symbol_table.find_type_symbol(type_name) {
-                        let type_id = type_symbol.id;
-                        return self.resolve_static_member_access(type_id, right);
-                    }
-                }
-                
-                let lhs_type = self.associate_node_with_type(left)?;
-                self.resolve_instance_member_access(&lhs_type, right)
-            },
-            _ => {
-                let (trait_name, _) = operator.to_trait_data().unwrap();
-                let trait_id = self.symbol_table.find_type_symbol(&trait_name)
-                    .map(|s| s.id)
-                    .unwrap();
-
-                let obligation_id = self.obligations.len();
-                let obligation = Obligation {
-                    id: obligation_id,
-                    kind: TraitObligation {
-                        trait_id,
-                        self_type: left_type,
-                        trait_args: vec![right_type]
-                    },
-                    cause: ObligationCause::BinaryOperation(operator),
-                    cause_span: span,
-                    resolved_type: None,
-                };
-                self.obligations.push(obligation);
-
-                let obligation_type_name = format!("__unfulfilled_obligation_{}", obligation_id);
-                let type_symbol_id = self.symbol_table.add_type_symbol(
-                    &obligation_type_name,
-                    TypeSymbolKind::UnfulfilledObligation(obligation_id),
-                    vec![],
-                    QualifierKind::Private,
-                    Some(span)
-                )?;
-
-                Ok(Type::new_base(type_symbol_id))
-            }
-        }
-    }
-
-    fn associate_node_with_type(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
         use AstNodeKind::*;
 
-        if let Some(id) = &node.type_id {
-            return Ok(id.clone());
+        let unification_variable = self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span);
+        let uv_id = unification_variable.get_base_symbol();
+
+        match &mut expr.kind {
+            IntegerLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Int))
+            )),
+            FloatLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Float))
+            )),
+            BooleanLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Bool))
+            )),
+            StringLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::String))
+            )),
+            CharLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Char))
+            )),
+
+            Identifier(string) => self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, Type::new_base(self.get_type_from_identifier(string, expr.span)?.get_base_symbol())
+            )),
+            
+            UnaryOperation { operator, operand } => {
+                let uv_type = self.bidirectional_synthesis(operand)?;
+
+                match operator.to_trait_data() {
+                    Some((trait_name, _)) => {
+                        self.unification_context.register_constraint(Constraint::Trait(
+                            uv_type.get_base_symbol(), self.trait_registry.get_default_trait(&trait_name)
+                        ));
+                    },
+                    None => match operator {
+                        Operation::Dereference => ,
+                        Operation::ImmutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                            uv_id, Type::Reference(Box::new(uv_type))
+                        )),
+                        Operation::MutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                            uv_id, Type::MutableReference(Box::new(uv_type))
+                        )),
+                        _ => {}
+                    }
+                }
+            },
+
+            // BinaryOperation { left, right, operator } => {
+            //     match operator.to_trait_data() {
+            //         Some(_) => Ok(self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span)),
+            //         None => match operator {
+            //             Operation::FieldAccess => {
+            //                 let AstNodeKind::Identifier(name) = &mut right.kind else {
+            //                     return Err(self.create_error(ErrorKind::IncorrectFieldAccessRhs, right.span, &[right.span]));
+            //                 };
+
+            //                 if let AstNodeKind::Identifier(type_name) = &left.kind {
+            //                     if let Some(type_symbol) = self.symbol_table.find_type_symbol(type_name) {
+            //                         return self.resolve_static_member_access(type_symbol, right);
+            //                     }
+            //                 }
+                            
+            //                 let lhs_type = self.bidirectional_synthesis(left)?;
+            //                 self.resolve_instance_member_access(&lhs_type, right)
+            //             },
+            //             // Operation::FunctionCall => {}
+            //             _ => unreachable!()
+            //         }
+            //     }
+            // },
+            _ => return Err(self.create_error(ErrorKind::UnknownType, expr.span, &[expr.span]))
         }
 
-        let id = match &mut node.kind {
-            IntegerLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Int))),
-            FloatLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Float))),
-            BooleanLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Bool))),
-            StringLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::String))),
-            CharLiteral(_) => Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Char))),
-            Identifier(name) => self.get_type_from_identifier(name, node.span),
-            UnaryOperation { operator, operand, .. } 
-                => self.get_type_from_unary_operation(*operator, operand, node.span),
-            BinaryOperation { operator, left, right }
-                => self.get_type_from_binary_operation(*operator, left, right, node.span),
-            _ => Err(self.create_error(ErrorKind::UnknownType, node.span, &[node.span])),
-        }?;
-
-        node.type_id = Some(id.clone());
-        Ok(id)
+        expr.type_id = Some(unification_variable.clone());
+        Ok(unification_variable)
     }
 }
 
@@ -214,47 +125,34 @@ impl SemanticAnalyzer {
 
         if let AstNodeKind::Program(statements) = &mut program.kind {
             for statement in statements {
-                if let Err(err) = self.collect_node_type(statement) {
+                if let Err(err) = self.bidirectional_check(statement) {
                     errors.push(*err);
                 }
             }
         } else {
             unreachable!();
         }
-
+        
         errors
     }
 
-    fn collect_node_type(&mut self, node: &mut AstNode) -> Result<Option<Type>, BoxedError> {
-        // note: all functions have return types of `null`. make sure to update.
-        // update all params in FunctionSignature 
+    fn bidirectional_check(&mut self, statement: &mut AstNode) -> Result<Option<Type>, BoxedError> {
         use AstNodeKind::*;
         
-        let declared_type_opt: Result<Option<Type>, BoxedError> = match &mut node.kind {
-            // VariableDeclaration { name, mutable, type_annotation, initializer } => 
-                // self.collect_variable_type(name, *mutable, type_annotation, initializer),
+        let type_annotation = match statement.kind {
             _ => {
-                for child in node.children_mut() {
-                    self.collect_node_type(child)?;
+                for child in statement.children_mut() {
+                    self.bidirectional_check(child);
                 }
+
                 Ok(None)
             }
         };
 
-        if let Ok(Some(type_id)) = declared_type_opt.clone() {
-            node.type_id = Some(type_id);
+        if let Ok(Some(type_id)) = type_annotation.clone() {
+            statement.type_id = Some(type_id);
         }
 
-        declared_type_opt
+        type_annotation
     }
-
-    // fn collect_variable_type(
-    //     &mut self,
-    //     name: &str, 
-    //     mutable: bool, 
-    //     type_annotation: &mut Option<BoxedAstNode>,
-    //     initializer: &mut Option<BoxedAstNode>
-    // ) -> Result<Option<Type>, BoxedError> {
-    //     Ok(None)
-    // }
 }
