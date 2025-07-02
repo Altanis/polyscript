@@ -31,7 +31,10 @@ pub enum ErrorKind {
     FieldNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
-    BadVariableDeclaration
+    BadVariableDeclaration,
+    InvalidNamespace(String, &'static str),
+    InvalidStructField(String, String),
+    MissingFieldName(String, String)
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
 }
@@ -66,7 +69,10 @@ impl ErrorKind {
             ErrorKind::FieldNotFound(field, type_name) => format!("field \"{}\" not found in type {}", field, type_name),
             ErrorKind::InvalidFieldAccess(type_name) => format!("cannot access field on type {}", type_name),
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
-            ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string()
+            ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string(),
+            ErrorKind::InvalidNamespace(name, expected_type) => format!("expected namespace {} to be a {}", name, expected_type),
+            ErrorKind::InvalidStructField(field, strct) => format!("could not find field {} in struct {}", field, strct),
+            ErrorKind::MissingFieldName(field, strct) => format!("missing field {} in struct {}", field, strct),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbol, TypeSymbolId, TypeSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}}};
+use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbol, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}}};
 
 impl SemanticAnalyzer {
     fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
@@ -32,9 +32,26 @@ impl SemanticAnalyzer {
     // fn resolve_instance_member_access(&mut self, lhs_type: &Type, right: &mut BoxedAstNode) -> Result<Type, BoxedError> {
         
     // }
+}
 
-    /// SYNTHESIS: Infers the type of the expression, or assigns a unification variable if unknown.
-    fn bidirectional_synthesis(&mut self, expr: &mut AstNode) -> Result<Type, BoxedError> {
+impl SemanticAnalyzer {
+    pub fn uv_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.collect_uvs(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+        
+        errors
+    }
+
+    fn collect_uvs(&mut self, expr: &mut AstNode) -> Result<Type, BoxedError> {
         use AstNodeKind::*;
 
         let unification_variable = self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span);
@@ -60,7 +77,7 @@ impl SemanticAnalyzer {
                 uv_id, Type::new_base(self.get_type_from_identifier(string, expr.span)?.get_base_symbol())
             )),
             UnaryOperation { operator, operand } => {
-                let uv_type = self.bidirectional_synthesis(operand)?;
+                let uv_type = self.collect_uvs(operand)?;
                 match operator.to_trait_data() {
                     Some((trait_name, _)) => {
                         self.unification_context.register_constraint(Constraint::Trait(
@@ -82,8 +99,8 @@ impl SemanticAnalyzer {
                 }
             },
             BinaryOperation { left, right, operator } => {
-                let left_type = self.bidirectional_synthesis(left)?;
-                let right_type = self.bidirectional_synthesis(right)?;
+                let left_type = self.collect_uvs(left)?;
+                let right_type = self.collect_uvs(right)?;
 
                 match operator.to_trait_data() {
                     Some((trait_name, _)) => {
@@ -104,18 +121,14 @@ impl SemanticAnalyzer {
                                 uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
                             ));
                         },
-                        Operation::FieldAccess => {
-                            // Field access: left.right
-                            // TODO: Implement field access resolution
-                        },
-                        // Operation::FunctionCall is never used in a BinaryOperation
+                        // `FunctionCall` and `FieldAcces` never appear in a BinaryOperation node
                         _ => unreachable!()
                     }
                 }
             },
             ConditionalOperation { left, right, .. } => {
-                let left_type = self.bidirectional_synthesis(left)?;
-                let right_type = self.bidirectional_synthesis(right)?;
+                let left_type = self.collect_uvs(left)?;
+                let right_type = self.collect_uvs(right)?;
 
                 let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
 
@@ -125,13 +138,13 @@ impl SemanticAnalyzer {
             },
             VariableDeclaration { name: _, mutable: _, type_annotation, initializer } => {
                 let init_type = if let Some(init) = initializer {
-                    Some(self.bidirectional_synthesis(init)?)
+                    Some(self.collect_uvs(init)?)
                 } else {
                     None
                 };
 
                 if let Some(annot) = type_annotation {
-                    let annot_type = self.bidirectional_synthesis(annot)?;
+                    let annot_type = self.collect_uvs(annot)?;
                     if let Some(init_type) = init_type {
                         self.unification_context.register_constraint(Constraint::Equality(
                             annot_type.get_base_symbol(), init_type
@@ -152,7 +165,7 @@ impl SemanticAnalyzer {
             Block(statements) => {
                 let mut last_type = None;
                 for stmt in statements.iter_mut() {
-                    last_type = Some(self.bidirectional_synthesis(stmt)?);
+                    last_type = Some(self.collect_uvs(stmt)?);
                 }
 
                 if let Some(last_type) = last_type {
@@ -162,22 +175,22 @@ impl SemanticAnalyzer {
                 }
             },
             IfStatement { condition, then_branch, else_if_branches, else_branch } => {
-                let cond_type = self.bidirectional_synthesis(condition)?;
+                let cond_type = self.collect_uvs(condition)?;
                 let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
                 self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type.clone()));
                 
-                let then_type = self.bidirectional_synthesis(then_branch)?;
+                let then_type = self.collect_uvs(then_branch)?;
                 let mut branch_types = vec![then_type.clone()];
 
                 for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
-                    let elif_cond_type = self.bidirectional_synthesis(elif_cond)?;
+                    let elif_cond_type = self.collect_uvs(elif_cond)?;
                     self.unification_context.register_constraint(Constraint::Equality(elif_cond_type.get_base_symbol(), bool_type.clone()));
-                    let elif_type = self.bidirectional_synthesis(elif_branch)?;
+                    let elif_type = self.collect_uvs(elif_branch)?;
                     branch_types.push(elif_type);
                 }
 
                 if let Some(else_node) = else_branch {
-                    let else_type = self.bidirectional_synthesis(else_node)?;
+                    let else_type = self.collect_uvs(else_node)?;
                     branch_types.push(else_type);
                 }
 
@@ -188,31 +201,31 @@ impl SemanticAnalyzer {
                 }
             },
             WhileLoop { condition, body } => {
-                let cond_type = self.bidirectional_synthesis(condition)?;
+                let cond_type = self.collect_uvs(condition)?;
                 let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
                 self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
 
-                self.bidirectional_synthesis(body)?;
+                self.collect_uvs(body)?;
                 self.unification_context.register_constraint(Constraint::Equality(
                     uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
                 ));
             },
             ForLoop { initializer, condition, increment, body } => {
                 if let Some(init) = initializer {
-                    self.bidirectional_synthesis(init)?;
+                    self.collect_uvs(init)?;
                 }
 
                 if let Some(cond) = condition {
-                    let cond_type = self.bidirectional_synthesis(cond)?;
+                    let cond_type = self.collect_uvs(cond)?;
                     let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
                     self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
                 }
 
                 if let Some(inc) = increment {
-                    self.bidirectional_synthesis(inc)?;
+                    self.collect_uvs(inc)?;
                 }
 
-                self.bidirectional_synthesis(body)?;
+                self.collect_uvs(body)?;
 
                 self.unification_context.register_constraint(Constraint::Equality(
                     uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
@@ -220,79 +233,35 @@ impl SemanticAnalyzer {
             },
             Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
-                    self.bidirectional_synthesis(expr)?;
+                    self.collect_uvs(expr)?;
                 }
 
                 self.unification_context.register_constraint(Constraint::Equality(
                     uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
                 ));
             },
+            
+            // function stuff
+
+            StructLiteral { name, .. } => {
+                let Some(symbol) = self.symbol_table.find_type_symbol(name) else {
+                    return Err(self.create_error(ErrorKind::UnknownIdentifier(name.clone()), expr.span, &[expr.span]));
+                };
+
+                self.unification_context.register_constraint(Constraint::Equality(
+                    uv_id, Type::new_base(symbol.id)
+                ));
+            },
+
+            
             _ => {
-                // For all other nodes, just recurse into children
                 for child in expr.children_mut() {
-                    self.bidirectional_synthesis(child)?;
+                    self.collect_uvs(child)?;
                 }
             }
         }
 
         expr.type_id = Some(unification_variable.clone());
         Ok(unification_variable)
-    }
-}
-
-impl SemanticAnalyzer {
-    pub fn uv_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
-        let mut errors = vec![];
-
-        if let AstNodeKind::Program(statements) = &mut program.kind {
-            for statement in statements {
-                if let Err(err) = self.bidirectional_check(statement) {
-                    errors.push(*err);
-                }
-            }
-        } else {
-            unreachable!();
-        }
-        
-        errors
-    }
-
-    fn bidirectional_check(&mut self, statement: &mut AstNode) -> Result<Option<Type>, BoxedError> {
-        use AstNodeKind::*;
-        match &mut statement.kind {
-            // Statements that are expressions
-            VariableDeclaration { .. }
-            | UnaryOperation { .. }
-            | BinaryOperation { .. }
-            | ConditionalOperation { .. }
-            | FunctionCall { .. }
-            | Block(_)
-            | IfStatement { .. }
-            | WhileLoop { .. }
-            | ForLoop { .. }
-            | Return(_)
-            | FunctionDeclaration { .. }
-            | FunctionParameter { .. }
-            | FunctionSignature { .. }
-            | StructLiteral { .. }
-            | FieldAccess { .. }
-            | IntegerLiteral(_)
-            | FloatLiteral(_)
-            | BooleanLiteral(_)
-            | StringLiteral(_)
-            | CharLiteral(_)
-            | Identifier(_) => {
-                let ty = self.bidirectional_synthesis(statement)?;
-                statement.type_id = Some(ty.clone());
-                Ok(Some(ty))
-            }
-            // For all other nodes, just recurse into children
-            _ => {
-                for child in statement.children_mut() {
-                    self.bidirectional_check(child)?;
-                }
-                Ok(None)
-            }
-        }
     }
 }
