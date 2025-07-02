@@ -1,4 +1,4 @@
-use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbol, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}}};
+use crate::{frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, Span}}};
 
 impl SemanticAnalyzer {
     fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
@@ -17,21 +17,208 @@ impl SemanticAnalyzer {
         }
     }
 
-    // fn find_impl_member_type(&mut self, name: String) -> Result<Type, BoxedError> {
+    fn collect_uv_unary_operation(&mut self, uv: &Type, uv_id: usize, operator: &mut Operation, operand: &mut BoxedAstNode) -> Result<(), BoxedError> {
+        let uv_type = self.collect_uvs(operand)?;
+        match operator.to_trait_data() {
+            Some((trait_name, _)) => {
+                self.unification_context.register_constraint(Constraint::Trait(
+                    uv_type.get_base_symbol(), Type::new_base(self.trait_registry.get_default_trait(&trait_name))
+                ));
+            },
+            None => match operator {
+                Operation::Dereference => self.unification_context.register_constraint(Constraint::Equality(
+                    uv_type.get_base_symbol(), uv.clone()
+                )),
+                Operation::ImmutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                    uv_id, Type::Reference(Box::new(uv_type))
+                )),
+                Operation::MutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                    uv_id, Type::MutableReference(Box::new(uv_type))
+                )),
+                _ => unreachable!()
+            }
+        }
 
-    // }
+        Ok(())
+    }
 
-    // fn resolve_static_member_access(&mut self, type_symbol: &TypeSymbol, right: &mut BoxedAstNode) -> Result<Type, BoxedError> {
-    //     match type_symbol.kind {
-    //         TypeSymbolKind::Enum((scope, impls)) => {
+    fn collect_uv_binary_operation(&mut self, _: &Type, uv_id: usize, left: &mut BoxedAstNode, right: &mut BoxedAstNode, operator: &mut Operation) -> Result<(), BoxedError> {
+        let left_type = self.collect_uvs(left)?;
+        let right_type = self.collect_uvs(right)?;
 
-    //         }
-    //     }
-    // }
+        match operator.to_trait_data() {
+            Some((trait_name, _)) => {
+                self.unification_context.register_constraint(Constraint::Trait(
+                    left_type.get_base_symbol(), Type::Base {
+                        symbol: self.trait_registry.get_default_trait(&trait_name),
+                        args: vec![right_type.clone()]
+                    }
+                ));
+            },
+            None => match operator {
+                Operation::Assign => {
+                    self.unification_context.register_constraint(Constraint::Equality(
+                        left_type.get_base_symbol(), right_type.clone()
+                    ));
 
-    // fn resolve_instance_member_access(&mut self, lhs_type: &Type, right: &mut BoxedAstNode) -> Result<Type, BoxedError> {
+                    self.unification_context.register_constraint(Constraint::Equality(
+                        uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+                    ));
+                },
+                _ => unreachable!()
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_uv_conditional_operation(&mut self, _: &Type, uv_id: usize, left: &mut BoxedAstNode, right: &mut BoxedAstNode) -> Result<(), BoxedError> {
+        let left_type = self.collect_uvs(left)?;
+        let right_type = self.collect_uvs(right)?;
+        let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+
+        self.unification_context.register_constraint(Constraint::Equality(left_type.get_base_symbol(), bool_type.clone()));
+        self.unification_context.register_constraint(Constraint::Equality(right_type.get_base_symbol(), bool_type.clone()));
+        self.unification_context.register_constraint(Constraint::Equality(uv_id, bool_type));
+
+        Ok(())
+    }
+
+    fn collect_uv_variable_declaration(&mut self, _: &Type, uv_id: usize, type_annotation: &mut Option<BoxedAstNode>, initializer: &mut Option<BoxedAstNode>, span: Span) -> Result<(), BoxedError> {
+        let init_type = if let Some(init) = initializer {
+            Some(self.collect_uvs(init)?)
+        } else {
+            None
+        };
+
+        if let Some(annot) = type_annotation {
+            let annot_type = self.collect_uvs(annot)?;
+
+            if let Some(init_type) = init_type {
+                self.unification_context.register_constraint(Constraint::Equality(
+                    annot_type.get_base_symbol(), init_type
+                ));
+            }
+
+            self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, annot_type
+            ));
+        } else if let Some(init_type) = init_type {
+            self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, init_type
+            ));
+        } else {
+            return Err(self.create_error(ErrorKind::BadVariableDeclaration, span, &[span]));
+        }
+
+        Ok(())
+    }
+
+    fn collect_uv_block(&mut self, _: &Type, uv_id: usize, statements: &mut [AstNode]) -> Result<(), BoxedError> {
+        let mut last_type = None;
         
-    // }
+        for stmt in statements.iter_mut() {
+            last_type = Some(self.collect_uvs(stmt)?);
+        }
+
+        if let Some(last_type) = last_type {
+            self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, last_type
+            ));
+        }
+        Ok(())
+    }
+
+    fn collect_uv_if_statement(&mut self, _: &Type, uv_id: usize, condition: &mut BoxedAstNode, then_branch: &mut BoxedAstNode, else_if_branches: &mut [(BoxedAstNode, BoxedAstNode)], else_branch: &mut Option<BoxedAstNode>) -> Result<(), BoxedError> {
+        let cond_type = self.collect_uvs(condition)?;
+        let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+        self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type.clone()));
+
+        let then_type = self.collect_uvs(then_branch)?;
+        let mut branch_types = vec![then_type.clone()];
+        
+        for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
+            let elif_cond_type = self.collect_uvs(elif_cond)?;
+            self.unification_context.register_constraint(Constraint::Equality(elif_cond_type.get_base_symbol(), bool_type.clone()));
+            let elif_type = self.collect_uvs(elif_branch)?;
+            branch_types.push(elif_type);
+        }
+        
+        if let Some(else_node) = else_branch {
+            let else_type = self.collect_uvs(else_node)?;
+            branch_types.push(else_type);
+        }
+        
+        for branch_type in &branch_types {
+            self.unification_context.register_constraint(Constraint::Equality(
+                uv_id, branch_type.clone()
+            ));
+        }
+        
+        Ok(())
+    }
+
+    fn collect_uv_while_loop(&mut self, _: &Type, uv_id: usize, condition: &mut BoxedAstNode, body: &mut BoxedAstNode) -> Result<(), BoxedError> {
+        let cond_type = self.collect_uvs(condition)?;
+        let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+        self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
+
+        self.collect_uvs(body)?;
+
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+        ));
+
+        Ok(())
+    }
+
+    fn collect_uv_for_loop(&mut self, _: &Type, uv_id: usize, initializer: &mut Option<BoxedAstNode>, condition: &mut Option<BoxedAstNode>, increment: &mut Option<BoxedAstNode>, body: &mut BoxedAstNode) -> Result<(), BoxedError> {
+        if let Some(init) = initializer {
+            self.collect_uvs(init)?;
+        }
+
+        if let Some(cond) = condition {
+            let cond_type = self.collect_uvs(cond)?;
+            let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+            self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
+        }
+
+        if let Some(inc) = increment {
+            self.collect_uvs(inc)?;
+        }
+
+        self.collect_uvs(body)?;
+
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+        ));
+
+        Ok(())
+    }
+
+    fn collect_uv_return(&mut self, _: &Type, uv_id: usize, opt_expr: &mut Option<BoxedAstNode>) -> Result<(), BoxedError> {
+        if let Some(expr) = opt_expr {
+            self.collect_uvs(expr)?;
+        }
+
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+        ));
+
+        Ok(())
+    }
+
+    fn collect_uv_struct_literal(&mut self, _: &Type, uv_id: usize, name: &str, span: Span) -> Result<(), BoxedError> {
+        let Some(symbol) = self.symbol_table.find_type_symbol(name) else {
+            return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
+        };
+
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, Type::new_base(symbol.id)
+        ));
+
+        Ok(())
+    }
 }
 
 impl SemanticAnalyzer {
@@ -54,8 +241,8 @@ impl SemanticAnalyzer {
     fn collect_uvs(&mut self, expr: &mut AstNode) -> Result<Type, BoxedError> {
         use AstNodeKind::*;
 
-        let unification_variable = self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span);
-        let uv_id = unification_variable.get_base_symbol();
+        let uv = self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span);
+        let uv_id = uv.get_base_symbol();
 
         match &mut expr.kind {
             IntegerLiteral(_) => self.unification_context.register_constraint(Constraint::Equality(
@@ -76,184 +263,26 @@ impl SemanticAnalyzer {
             Identifier(string) => self.unification_context.register_constraint(Constraint::Equality(
                 uv_id, Type::new_base(self.get_type_from_identifier(string, expr.span)?.get_base_symbol())
             )),
-            UnaryOperation { operator, operand } => {
-                let uv_type = self.collect_uvs(operand)?;
-                match operator.to_trait_data() {
-                    Some((trait_name, _)) => {
-                        self.unification_context.register_constraint(Constraint::Trait(
-                            uv_type.get_base_symbol(), Type::new_base(self.trait_registry.get_default_trait(&trait_name))
-                        ));
-                    },
-                    None => match operator {
-                        Operation::Dereference => self.unification_context.register_constraint(Constraint::Equality(
-                            uv_type.get_base_symbol(), unification_variable.clone()
-                        )),
-                        Operation::ImmutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
-                            uv_id, Type::Reference(Box::new(uv_type))
-                        )),
-                        Operation::MutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
-                            uv_id, Type::MutableReference(Box::new(uv_type))
-                        )),
-                        _ => unreachable!()
-                    }
-                }
-            },
-            BinaryOperation { left, right, operator } => {
-                let left_type = self.collect_uvs(left)?;
-                let right_type = self.collect_uvs(right)?;
-
-                match operator.to_trait_data() {
-                    Some((trait_name, _)) => {
-                        self.unification_context.register_constraint(Constraint::Trait(
-                            left_type.get_base_symbol(), Type::Base {
-                                symbol: self.trait_registry.get_default_trait(&trait_name),
-                                args: vec![right_type.clone()]
-                            }
-                        ));
-                    },
-                    None => match operator {
-                        Operation::Assign => {
-                            self.unification_context.register_constraint(Constraint::Equality(
-                                left_type.get_base_symbol(), right_type.clone()
-                            ));
-
-                            self.unification_context.register_constraint(Constraint::Equality(
-                                uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
-                            ));
-                        },
-                        // `FunctionCall` and `FieldAcces` never appear in a BinaryOperation node
-                        _ => unreachable!()
-                    }
-                }
-            },
-            ConditionalOperation { left, right, .. } => {
-                let left_type = self.collect_uvs(left)?;
-                let right_type = self.collect_uvs(right)?;
-
-                let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-
-                self.unification_context.register_constraint(Constraint::Equality(left_type.get_base_symbol(), bool_type.clone()));
-                self.unification_context.register_constraint(Constraint::Equality(right_type.get_base_symbol(), bool_type.clone()));
-                self.unification_context.register_constraint(Constraint::Equality(uv_id, bool_type));
-            },
-            VariableDeclaration { name: _, mutable: _, type_annotation, initializer } => {
-                let init_type = if let Some(init) = initializer {
-                    Some(self.collect_uvs(init)?)
-                } else {
-                    None
-                };
-
-                if let Some(annot) = type_annotation {
-                    let annot_type = self.collect_uvs(annot)?;
-                    if let Some(init_type) = init_type {
-                        self.unification_context.register_constraint(Constraint::Equality(
-                            annot_type.get_base_symbol(), init_type
-                        ));
-                    }
-
-                    self.unification_context.register_constraint(Constraint::Equality(
-                        uv_id, annot_type
-                    ));
-                } else if let Some(init_type) = init_type {
-                    self.unification_context.register_constraint(Constraint::Equality(
-                        uv_id, init_type
-                    ));
-                } else {
-                    return Err(self.create_error(ErrorKind::BadVariableDeclaration, expr.span, &[expr.span]));
-                }
-            },
-            Block(statements) => {
-                let mut last_type = None;
-                for stmt in statements.iter_mut() {
-                    last_type = Some(self.collect_uvs(stmt)?);
-                }
-
-                if let Some(last_type) = last_type {
-                    self.unification_context.register_constraint(Constraint::Equality(
-                        uv_id, last_type
-                    ));
-                }
-            },
-            IfStatement { condition, then_branch, else_if_branches, else_branch } => {
-                let cond_type = self.collect_uvs(condition)?;
-                let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-                self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type.clone()));
-                
-                let then_type = self.collect_uvs(then_branch)?;
-                let mut branch_types = vec![then_type.clone()];
-
-                for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
-                    let elif_cond_type = self.collect_uvs(elif_cond)?;
-                    self.unification_context.register_constraint(Constraint::Equality(elif_cond_type.get_base_symbol(), bool_type.clone()));
-                    let elif_type = self.collect_uvs(elif_branch)?;
-                    branch_types.push(elif_type);
-                }
-
-                if let Some(else_node) = else_branch {
-                    let else_type = self.collect_uvs(else_node)?;
-                    branch_types.push(else_type);
-                }
-
-                for branch_type in &branch_types {
-                    self.unification_context.register_constraint(Constraint::Equality(
-                        uv_id, branch_type.clone()
-                    ));
-                }
-            },
-            WhileLoop { condition, body } => {
-                let cond_type = self.collect_uvs(condition)?;
-                let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-                self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
-
-                self.collect_uvs(body)?;
-                self.unification_context.register_constraint(Constraint::Equality(
-                    uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
-                ));
-            },
-            ForLoop { initializer, condition, increment, body } => {
-                if let Some(init) = initializer {
-                    self.collect_uvs(init)?;
-                }
-
-                if let Some(cond) = condition {
-                    let cond_type = self.collect_uvs(cond)?;
-                    let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-                    self.unification_context.register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type));
-                }
-
-                if let Some(inc) = increment {
-                    self.collect_uvs(inc)?;
-                }
-
-                self.collect_uvs(body)?;
-
-                self.unification_context.register_constraint(Constraint::Equality(
-                    uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
-                ));
-            },
-            Return(opt_expr) => {
-                if let Some(expr) = opt_expr {
-                    self.collect_uvs(expr)?;
-                }
-
-                self.unification_context.register_constraint(Constraint::Equality(
-                    uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
-                ));
-            },
-            
-            // function stuff
-
-            StructLiteral { name, .. } => {
-                let Some(symbol) = self.symbol_table.find_type_symbol(name) else {
-                    return Err(self.create_error(ErrorKind::UnknownIdentifier(name.clone()), expr.span, &[expr.span]));
-                };
-
-                self.unification_context.register_constraint(Constraint::Equality(
-                    uv_id, Type::new_base(symbol.id)
-                ));
-            },
-
-            
+            UnaryOperation { operator, operand } => 
+                self.collect_uv_unary_operation(&uv, uv_id, operator, operand)?,
+            BinaryOperation { left, right, operator } =>
+                self.collect_uv_binary_operation(&uv, uv_id, left, right, operator)?,
+            ConditionalOperation { left, right, .. } =>
+                self.collect_uv_conditional_operation(&uv, uv_id, left, right)?,
+            VariableDeclaration { name: _, mutable: _, type_annotation, initializer } =>
+                self.collect_uv_variable_declaration(&uv, uv_id, type_annotation, initializer, expr.span)?,
+            Block(statements) =>
+                self.collect_uv_block(&uv, uv_id, statements)?,
+            IfStatement { condition, then_branch, else_if_branches, else_branch } =>
+                self.collect_uv_if_statement(&uv, uv_id, condition, then_branch, else_if_branches, else_branch)?,
+            WhileLoop { condition, body } =>
+                self.collect_uv_while_loop(&uv, uv_id, condition, body)?,
+            ForLoop { initializer, condition, increment, body } =>
+                self.collect_uv_for_loop(&uv, uv_id, initializer, condition, increment, body)?,
+            Return(opt_expr) =>
+                self.collect_uv_return(&uv, uv_id, opt_expr)?,
+            StructLiteral { name, .. } =>
+                self.collect_uv_struct_literal(&uv, uv_id, name, expr.span)?,
             _ => {
                 for child in expr.children_mut() {
                     self.collect_uvs(child)?;
@@ -261,7 +290,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        expr.type_id = Some(unification_variable.clone());
-        Ok(unification_variable)
+        expr.type_id = Some(uv.clone());
+        Ok(uv)
     }
 }
