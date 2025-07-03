@@ -422,8 +422,10 @@ impl SymbolTable {
             if let Some(symbol_id) = scope.values.get(&name_id) {
                 return self.value_symbols.get(symbol_id);
             }
+
             scope_id = scope.parent;
         }
+
         None
     }
     
@@ -436,8 +438,10 @@ impl SymbolTable {
             if let Some(symbol_id) = scope.values.get(&name_id) {
                 return self.value_symbols.get_mut(symbol_id);
             }
+
             scope_id = scope.parent;
         }
+
         None
     }
     
@@ -450,8 +454,10 @@ impl SymbolTable {
             if let Some(symbol_id) = scope.types.get(&name_id) {
                 return self.type_symbols.get(symbol_id);
             }
+
             scope_id = scope.parent;
         }
+
         None
     }
 
@@ -464,8 +470,74 @@ impl SymbolTable {
             if let Some(symbol_id) = scope.types.get(&name_id) {
                 return self.type_symbols.get_mut(symbol_id);
             }
+
             scope_id = scope.parent;
         }
+
+        None
+    }
+
+    pub fn find_value_symbol_from_scope(&self, scope_id: ScopeId, name: &str) -> Option<&ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let mut scope_id = Some(scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.values.get(&name_id) {
+                return self.value_symbols.get(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+
+        None
+    }
+
+    pub fn find_value_symbol_from_scope_mut(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut ValueSymbol> {
+        let name_id = self.value_names.get_id(name)?;
+        let mut scope_id = Some(scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.values.get(&name_id) {
+                return self.value_symbols.get_mut(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+
+        None
+    }
+
+    pub fn find_type_symbol_from_scope(&self, scope_id: ScopeId, name: &str) -> Option<&TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let mut scope_id = Some(scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.types.get(&name_id) {
+                return self.type_symbols.get(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+
+        None
+    }
+
+    pub fn find_type_symbol_from_scope_mut(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut TypeSymbol> {
+        let name_id = self.type_names.get_id(name)?;
+        let mut scope_id = Some(scope_id);
+
+        while let Some(id) = scope_id {
+            let scope = &self.scopes[&id];
+            if let Some(symbol_id) = scope.types.get(&name_id) {
+                return self.type_symbols.get_mut(symbol_id);
+            }
+
+            scope_id = scope.parent;
+        }
+
         None
     }
 
@@ -482,7 +554,6 @@ impl SymbolTable {
 
         self.type_symbols.get(symbol_id)
     }
-
 
     pub fn find_value_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
@@ -502,6 +573,10 @@ impl SymbolTable {
     pub fn get_type_symbol_mut(&mut self, id: TypeSymbolId) -> Option<&mut TypeSymbol> { self.type_symbols.get_mut(&id) }
     pub fn get_value_name(&self, id: ValueNameId) -> &str { self.value_names.lookup(id) }
     pub fn get_type_name(&self, id: TypeNameId) -> &str { self.type_names.lookup(id) }
+
+    pub fn get_current_scope_id(&self) -> ScopeId {
+        self.current_scope_id
+    }
 
     pub fn get_next_scope_id(&mut self) -> ScopeId {
         let new_id = self.next_scope_id;
@@ -575,6 +650,7 @@ impl TraitRegistry {
 
 pub enum Constraint {
     Equality(TypeSymbolId, Type),
+    DereferenceEquality(TypeSymbolId, Type),
     Trait(TypeSymbolId, Type)
 }
 

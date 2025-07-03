@@ -1,6 +1,6 @@
 use colored::*;
 use indexmap::IndexMap;
-use crate::{middle::semantic_analyzer::{SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
+use crate::{middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
 
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
@@ -188,7 +188,8 @@ pub struct AstNode {
     pub kind: AstNodeKind,
     pub span: Span,
     pub value_id: Option<ValueSymbolId>,
-    pub type_id: Option<Type>
+    pub type_id: Option<Type>,
+    pub scope_id: Option<ScopeId>
 }
 
 pub type BoxedAstNode = Box<AstNode>;

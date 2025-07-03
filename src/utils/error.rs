@@ -52,7 +52,7 @@ impl ErrorKind {
             ErrorKind::UnknownIdentifier(name) => format!("could not find \"{}\" in scope", name),
             ErrorKind::UnresolvedType(name) => format!("type for symbol \"{}\" has not been determined by this line", name),
             ErrorKind::AlreadyDeclared(variable) => format!("attempted to declare {}, but it already exists in scope", variable),
-            ErrorKind::UnknownType => "could not determine type of data at compile-time".to_string(),
+            ErrorKind::UnknownType => "could not determine type of data by this line".to_string(),
             ErrorKind::InvalidImpl(type_ref) 
                 => format!("cannot construct impl block for {}", type_ref.as_ref().map_or("an unnamed identifier", |v| v)),
             ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
