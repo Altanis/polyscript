@@ -136,7 +136,7 @@ pub enum AstNodeKind {
     },
 
     SelfValue,
-    SelfType(Option<Operation>),
+    SelfType(ReferenceKind),
 
     FieldAccess {
         left: BoxedAstNode,
@@ -476,9 +476,9 @@ impl AstNode {
             AstNodeKind::SelfValue => write!(f, "{}this", indent_str)?,
             AstNodeKind::SelfType(operation) => {
                 let operation_str = match operation {
-                    Some(Operation::ImmutableAddressOf) => "&",
-                    Some(Operation::MutableAddressOf) => "&mut ",
-                    _ => ""
+                    ReferenceKind::Reference => "&",
+                    ReferenceKind::MutableReference => "&mut ",
+                    ReferenceKind::Value => ""
                 };
 
                 write!(f, "{}{operation_str}Self", indent_str)?

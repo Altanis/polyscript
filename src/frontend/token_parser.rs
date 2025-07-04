@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 
-use crate::utils::{error::*, kind::*};
+use crate::{boxed, utils::{error::*, kind::*}};
 
 use super::ast::{AstNode, AstNodeKind};
 
@@ -154,7 +154,7 @@ impl Parser {
                 lhs = AstNode {
                     span: lhs.span.set_end_from_span(self.previous().get_span()),
                     kind: AstNodeKind::FunctionCall {
-                        function: Box::new(lhs),
+                        function: boxed!(lhs),
                         arguments,
                     },
                     type_id: None,
@@ -167,11 +167,11 @@ impl Parser {
                 lhs = AstNode {
                     span: lhs.span.set_end_from_span(rhs.span),
                     kind: if operator.is_conditional() {
-                        AstNodeKind::ConditionalOperation { operator, left: Box::new(lhs), right: Box::new(rhs) }
+                        AstNodeKind::ConditionalOperation { operator, left: boxed!(lhs), right: boxed!(rhs) }
                     } else if operator == Operation::FieldAccess {
-                        AstNodeKind::FieldAccess { left: Box::new(lhs), right: Box::new(rhs) }
+                        AstNodeKind::FieldAccess { left: boxed!(lhs), right: boxed!(rhs) }
                     } else {
-                        AstNodeKind::BinaryOperation { operator, left: Box::new(lhs), right: Box::new(rhs) }
+                        AstNodeKind::BinaryOperation { operator, left: boxed!(lhs), right: boxed!(rhs) }
                     },
                     type_id: None,
                     value_id: None,
@@ -214,7 +214,7 @@ impl Parser {
                     operator = Operation::MutableAddressOf;
                 }
 
-                let operand = Box::new(self.parse_binding_power(Operation::Not.binding_power().0)?);
+                let operand = boxed!(self.parse_binding_power(Operation::Not.binding_power().0)?);
 
                 Ok(AstNode {
                     span: span.set_end_from_span(operand.span),
@@ -358,7 +358,7 @@ impl Parser {
                         span,
                         type_id: None,
                         value_id: None,
-                    scope_id: None
+                        scope_id: None
                     })
                 }
             },
@@ -504,12 +504,12 @@ impl Parser {
 
             let mut type_annotation = None;
             if parser.match_token(TokenKind::Colon) {
-                type_annotation = Some(Box::new(parser.parse_type()?));
+                type_annotation = Some(boxed!(parser.parse_type()?));
             }
 
             let mut initializer = None;
             if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(Box::new(parser.parse_expression()?));
+                initializer = Some(boxed!(parser.parse_expression()?));
             }
 
             if !mutable && initializer.is_none() {
@@ -551,14 +551,14 @@ impl Parser {
                         let next = parser.consume(TokenKind::Identifier)?;
 
                         Ok(AstNodeKind::FieldAccess { 
-                            left: Box::new(AstNode {
+                            left: boxed!(AstNode {
                                 kind: AstNodeKind::Identifier(type_reference.get_value().to_string()),
                                 span: type_reference.get_span(),
                                 value_id: None,
                     scope_id: None,
                                 type_id: None
                             }), 
-                            right: Box::new(AstNode {
+                            right: boxed!(AstNode {
                                 kind: AstNodeKind::Identifier(next.get_value().to_string()),
                                 span: next.get_span(),
                                 value_id: None,
@@ -608,7 +608,7 @@ impl Parser {
 
                     if parser.peek().get_token_kind() == TokenKind::Colon {
                         parser.advance();
-                        return_type = Some(Box::new(parser.parse_type()?));
+                        return_type = Some(boxed!(parser.parse_type()?));
                     }
 
                     Ok(AstNodeKind::FunctionPointer {
@@ -633,8 +633,8 @@ impl Parser {
 
     fn parse_function_declaration(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            let signature = Box::new(parser.parse_function_signature(false, false, true)?);
-            let body = Box::new(parser.parse_block()?);
+            let signature = boxed!(parser.parse_function_signature(false, false, true)?);
+            let body = boxed!(parser.parse_block()?);
 
             Ok(AstNodeKind::FunctionDeclaration {
                 signature,
@@ -645,8 +645,8 @@ impl Parser {
 
     fn parse_function_expression(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            let signature = Box::new(parser.parse_function_signature(true, false, false)?);
-            let body = Box::new(parser.parse_block()?);
+            let signature = boxed!(parser.parse_function_signature(true, false, false)?);
+            let body = boxed!(parser.parse_block()?);
 
             Ok(AstNodeKind::FunctionExpression {
                 signature,
@@ -678,7 +678,7 @@ impl Parser {
                         parser.consume(TokenKind::Keyword(KeywordKind::This))?;
                         self_kind = Some(kind);
 
-                        let type_annotation = Box::new(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(Some(operator))))?);
+                        let type_annotation = boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(kind)))?);
                         return Ok(AstNodeKind::FunctionParameter {
                             name: "this".to_string(), type_annotation, initializer: None, mutable: false
                         });
@@ -687,7 +687,7 @@ impl Parser {
                     parser.advance();
                     self_kind = Some(ReferenceKind::Value);
 
-                    let type_annotation = Box::new(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(None)))?);
+                    let type_annotation = boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(ReferenceKind::Value)))?);
                     return Ok(AstNodeKind::FunctionParameter {
                         name: "this".to_string(), type_annotation, initializer: None, mutable: false
                     });
@@ -697,11 +697,11 @@ impl Parser {
             let mutable = parser.match_token(TokenKind::Keyword(KeywordKind::Mut));
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
-            let type_annotation = Box::new(parser.parse_type()?);
+            let type_annotation = boxed!(parser.parse_type()?);
             let mut initializer = None;
 
             if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(Box::new(parser.parse_expression()?));
+                initializer = Some(boxed!(parser.parse_expression()?));
             }
 
             Ok(AstNodeKind::FunctionParameter { name, type_annotation, initializer, mutable })
@@ -833,8 +833,8 @@ impl Parser {
     fn parse_selection_statements(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.advance();
-            let condition = Box::new(parser.parse_expression()?);
-            let then_branch = Box::new(parser.parse_block()?);
+            let condition = boxed!(parser.parse_expression()?);
+            let then_branch = boxed!(parser.parse_block()?);
             let mut else_if_branches = vec![];
 
             let mut else_branch = None;
@@ -844,12 +844,12 @@ impl Parser {
 
                 if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::If) {
                     parser.advance();
-                    let condition = Box::new(parser.parse_expression()?);
-                    let then_branch = Box::new(parser.parse_block()?);
+                    let condition = boxed!(parser.parse_expression()?);
+                    let then_branch = boxed!(parser.parse_block()?);
 
                     else_if_branches.push((condition, then_branch));
                 } else {
-                    else_branch = Some(Box::new(parser.parse_block()?));
+                    else_branch = Some(boxed!(parser.parse_block()?));
                 }
             }
 
@@ -866,8 +866,8 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
 
-            let condition = Box::new(parser.parse_expression()?);
-            let body = Box::new(parser.parse_block()?);
+            let condition = boxed!(parser.parse_expression()?);
+            let body = boxed!(parser.parse_block()?);
 
             Ok(AstNodeKind::WhileLoop {
                 body,
@@ -890,7 +890,7 @@ impl Parser {
                     TokenKind::Keyword(KeywordKind::Const) => parser.parse_variable_declaration(false),
                     _ => parser.parse_expression_statement(),
                 }?;
-                Some(Box::new(init))
+                Some(boxed!(init))
             };
         
             let condition = if parser.peek().get_token_kind() == TokenKind::Semicolon {
@@ -899,17 +899,17 @@ impl Parser {
             } else {
                 let cond = parser.parse_expression()?;
                 parser.consume(TokenKind::Semicolon)?;
-                Some(Box::new(cond))
+                Some(boxed!(cond))
             };
         
             let increment = if parser.peek().get_token_kind() == TokenKind::CloseParenthesis {
                 None
             } else {
-                Some(Box::new(parser.parse_expression()?))
+                Some(boxed!(parser.parse_expression()?))
             };
         
             parser.consume(TokenKind::CloseParenthesis)?;
-            let body = Box::new(parser.parse_block()?);
+            let body = boxed!(parser.parse_block()?);
         
             Ok(AstNodeKind::ForLoop {
                 initializer,
@@ -925,7 +925,7 @@ impl Parser {
             parser.advance();
 
             let expression = if parser.peek().get_token_kind() != TokenKind::Semicolon {
-                Some(Box::new(parser.parse_expression_statement()?))
+                Some(boxed!(parser.parse_expression_statement()?))
             } else {
                 parser.advance();
                 None
@@ -992,7 +992,7 @@ impl Parser {
 
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
-            let type_annotation = Box::new(parser.parse_type()?);
+            let type_annotation = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::StructField {
@@ -1014,9 +1014,9 @@ impl Parser {
                     parser.advance();
                     let second = parser.parse_type()?;
 
-                    (Box::new(second), Some(Box::new(first)))
+                    (boxed!(second), Some(boxed!(first)))
                 } else {
-                    (Box::new(first), None)
+                    (boxed!(first), None)
                 }
             };
 
@@ -1097,10 +1097,10 @@ impl Parser {
             let mut return_type = None;
             if parser.peek().get_token_kind() == TokenKind::Colon {
                 parser.consume(TokenKind::Colon)?;
-                return_type = Some(Box::new(parser.parse_type()?));
+                return_type = Some(boxed!(parser.parse_type()?));
             }
 
-            let signature = Box::new(AstNode {
+            let signature = boxed!(AstNode {
                 kind: AstNodeKind::FunctionSignature {
                     name,
                     generic_parameters,
@@ -1114,7 +1114,7 @@ impl Parser {
                 scope_id: None
             });
 
-            let body = Box::new(parser.parse_block()?);
+            let body = boxed!(parser.parse_block()?);
 
             Ok(AstNodeKind::AssociatedFunction {
                 qualifier,
@@ -1129,7 +1129,7 @@ impl Parser {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Operator(Operation::Assign))?;
-            let value = Box::new(parser.parse_type()?);
+            let value = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::AssociatedType {
@@ -1220,7 +1220,7 @@ impl Parser {
             parser.consume(TokenKind::Keyword(KeywordKind::Const))?;
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
-            let type_annotation = Box::new(parser.parse_type()?);
+            let type_annotation = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::TraitConstant { name, type_annotation })
@@ -1262,7 +1262,7 @@ impl Parser {
             let mut return_type = None;
             if parser.peek().get_token_kind() == TokenKind::Colon {
                 parser.consume(TokenKind::Colon)?;
-                return_type = Some(Box::new(parser.parse_type()?));
+                return_type = Some(boxed!(parser.parse_type()?));
             }
 
             Ok(AstNodeKind::FunctionSignature {
@@ -1281,7 +1281,7 @@ impl Parser {
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             let generic_parameters = parser.parse_generic_parameter_list()?;
             parser.consume(TokenKind::Operator(Operation::Assign))?;
-            let value = Box::new(parser.parse_type()?);
+            let value = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::TypeDeclaration {

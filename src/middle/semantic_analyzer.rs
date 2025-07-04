@@ -105,7 +105,7 @@ pub enum TypeSymbolKind {
     UnificationVariable(UnificationVariableId)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScopeKind {
     Root,
     Function,
@@ -182,9 +182,9 @@ impl TypeSymbol {
 pub struct Scope {
     pub values: HashMap<ValueNameId, ValueSymbolId>,
     pub types: HashMap<TypeNameId, TypeSymbolId>,
-    parent: Option<ScopeId>,
-    id: ScopeId,
-    kind: ScopeKind
+    pub kind: ScopeKind,
+    pub parent: Option<ScopeId>,
+    pub id: ScopeId
 }
 
 pub struct SymbolTable {

@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::utils::kind::Operation;
+use crate::{boxed, utils::kind::Operation};
 
 use super::kind::Span;
 
@@ -31,7 +31,9 @@ pub enum ErrorKind {
     FieldNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
-    BadVariableDeclaration
+    BadVariableDeclaration,
+    SelfOutsideImpl,
+    InvalidThis(&'static str)
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
 }
@@ -66,7 +68,9 @@ impl ErrorKind {
             ErrorKind::FieldNotFound(field, type_name) => format!("field \"{}\" not found in type {}", field, type_name),
             ErrorKind::InvalidFieldAccess(type_name) => format!("cannot access field on type {}", type_name),
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
-            ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string()
+            ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string(),
+            ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
+            ErrorKind::InvalidThis(place) => format!("found \"this\" {}", place)
         }
     }
 }
@@ -82,7 +86,7 @@ pub type BoxedError = Box<Error>;
 
 impl Error {
     pub fn new(kind: ErrorKind) -> BoxedError {
-        Box::new(Error {
+        boxed!(Error {
             kind,
             span: Span::default(),
             source_lines: vec![]
@@ -90,7 +94,7 @@ impl Error {
     }
 
     pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> BoxedError {
-        Box::new(Error {
+        boxed!(Error {
             kind,
             span,
             source_lines: vec![source_line]
@@ -98,7 +102,7 @@ impl Error {
     }
 
     pub fn from_multiple_errors(kind: ErrorKind, span: Span, source_lines: Vec<(String, usize)>) -> BoxedError {
-        Box::new(Error {
+        boxed!(Error {
             kind,
             span,
             source_lines
