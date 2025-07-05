@@ -1,4 +1,4 @@
-use crate::{boxed, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, ReferenceKind, Span}}};
+use crate::{boxed, frontend::ast::{AstNode, AstNodeKind, BoxedAstNode}, middle::semantic_analyzer::{Constraint, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, ReferenceKind, Span}}};
 
 impl SemanticAnalyzer {
     fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
@@ -208,6 +208,111 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    fn collect_uv_function(
+        &mut self,
+        uv_id: TypeSymbolId,
+        parameters: &mut [AstNode],
+        return_type_node: &mut Option<BoxedAstNode>,
+        body: &mut Option<BoxedAstNode>,
+        instance: Option<ReferenceKind>,
+        span: Span
+    ) -> Result<(), BoxedError> {
+        let param_types: Vec<Type> = parameters.iter_mut()
+            .map(|p| self.collect_uvs(p))
+            .collect::<Result<_, _>>()?;
+
+        let return_type = if let Some(rt_node) = return_type_node {
+            self.collect_uvs(rt_node)?
+        } else {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+        };
+
+        if let Some(body_node) = body {
+            let body_type = self.collect_uvs(body_node)?;
+            self.unification_context.register_constraint(Constraint::Equality(
+                body_type.get_base_symbol(), return_type.clone()
+            ));
+        }
+
+        let fn_sig_type_id = self.symbol_table.add_type_symbol(
+            &format!("#fn_sig_{}", uv_id),
+            TypeSymbolKind::FunctionSignature {
+                params: param_types,
+                return_type: return_type.clone(),
+                instance,
+            },
+            vec![], // Signatures cannot have generics, they must be defined elsewhere.
+            QualifierKind::Private,
+            Some(span)
+        )?;
+
+        let fn_sig_type = Type::new_base(fn_sig_type_id);
+        
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, fn_sig_type.clone()
+        ));
+        
+        Ok(())
+    }
+
+    fn collect_uv_function_parameter(
+        &mut self,
+        uv_id: TypeSymbolId,
+        type_annotation: &mut BoxedAstNode,
+        initializer: &mut Option<BoxedAstNode>
+    ) -> Result<(), BoxedError> {
+        let annotation_type = self.collect_uvs(type_annotation)?;
+        
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, annotation_type.clone()
+        ));
+        
+        if let Some(init_node) = initializer {
+            let init_type = self.collect_uvs(init_node)?;
+            self.unification_context.register_constraint(Constraint::Equality(
+                init_type.get_base_symbol(), annotation_type.clone()
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn collect_uv_function_pointer(
+        &mut self,
+        uv_id: TypeSymbolId,
+        params: &mut [AstNode],
+        return_type_node: &mut Option<BoxedAstNode>,
+        span: Span,
+    ) -> Result<(), BoxedError> {
+        let param_types: Vec<Type> = params.iter_mut()
+            .map(|p| self.collect_uvs(p))
+            .collect::<Result<_, _>>()?;
+
+        let return_type = if let Some(rt_node) = return_type_node {
+            self.collect_uvs(rt_node)?
+        } else {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Null))
+        };
+
+        let fn_ptr_sig_id = self.symbol_table.add_type_symbol(
+            &format!("#fn_ptr_sig_{}", uv_id),
+            TypeSymbolKind::FunctionSignature {
+                params: param_types,
+                return_type,
+                instance: None
+            },
+            vec![],
+            QualifierKind::Private,
+            Some(span)
+        )?;
+
+        self.unification_context.register_constraint(Constraint::Equality(
+            uv_id, Type::new_base(fn_ptr_sig_id)
+        ));
+        
+        Ok(())
+    }
+
     fn collect_uv_struct_literal(&mut self, uv_id: TypeSymbolId, scope_id: ScopeId, name: &str, span: Span) -> Result<(), BoxedError> {
         let Some(symbol) = self.symbol_table.find_type_symbol_from_scope(scope_id, name) else {
             return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
@@ -413,7 +518,12 @@ impl SemanticAnalyzer {
                 self.collect_uv_for_loop(uv_id, initializer, condition, increment, body)?,
             Return(opt_expr) =>
                 self.collect_uv_return(uv_id, opt_expr)?,
-            // Function garbage
+            Function { parameters, return_type, body, instance, .. } => 
+                self.collect_uv_function(uv_id, parameters, return_type, body, *instance, expr.span)?,
+            FunctionPointer { params, return_type } =>
+                self.collect_uv_function_pointer(uv_id, params, return_type, expr.span)?,
+            FunctionParameter { type_annotation, initializer, .. } =>
+                self.collect_uv_function_parameter(uv_id, type_annotation, initializer)?,
             StructLiteral { name, .. } =>
                 self.collect_uv_struct_literal(uv_id, expr.scope_id.expect("scope_id should exist on StructLiteral node"), name, expr.span)?,
             AssociatedConstant { type_annotation, initializer, .. } =>

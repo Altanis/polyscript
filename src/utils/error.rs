@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::{boxed, utils::kind::Operation};
+use crate::boxed;
 
 use super::kind::Span;
 

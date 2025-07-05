@@ -2,6 +2,8 @@
 #![allow(clippy::wrong_self_convention)]
 #![allow(non_upper_case_globals)]
 #![allow(clippy::needless_return)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 #![feature(let_chains)]
 #![feature(if_let_guard)]
 
