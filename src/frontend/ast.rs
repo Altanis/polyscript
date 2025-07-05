@@ -59,30 +59,24 @@ pub enum AstNodeKind {
     Continue,
     
     // FUNCTIONS //
-    FunctionSignature {
+    Function {
+        qualifier: Option<QualifierKind>,
         name: String,
         generic_parameters: Vec<AstNode>,
         parameters: Vec<AstNode>,
         return_type: Option<BoxedAstNode>,
-        instance: Option<ReferenceKind>
+        instance: Option<ReferenceKind>,
+        body: Option<BoxedAstNode>
     },
     FunctionPointer {
         params: Vec<AstNode>,
         return_type: Option<BoxedAstNode>
-    },
-    FunctionDeclaration {
-        signature: BoxedAstNode,
-        body: BoxedAstNode,
     },
     FunctionParameter {
         name: String,
         type_annotation: BoxedAstNode,
         initializer: Option<BoxedAstNode>,
         mutable: bool
-    },
-    FunctionExpression {
-        signature: BoxedAstNode,
-        body: BoxedAstNode
     },
 
     // STRUCTS //
@@ -123,11 +117,6 @@ pub enum AstNodeKind {
         name: String,
         type_annotation: Option<BoxedAstNode>,
         initializer: BoxedAstNode
-    },
-    AssociatedFunction {
-        qualifier: QualifierKind,
-        signature: BoxedAstNode,
-        body: BoxedAstNode,
     },
     AssociatedType {
         qualifier: QualifierKind,
@@ -232,7 +221,7 @@ impl AstNode {
             AstNodeKind::Identifier(name) => Some(name.clone()),
 
             AstNodeKind::VariableDeclaration { name, .. } => Some(name.clone()),
-            AstNodeKind::FunctionSignature { name, .. } => Some(name.clone()),
+            AstNodeKind::Function { name, .. } => if name.is_empty() { None } else { Some(name.clone()) },
             AstNodeKind::FunctionParameter { name, .. } => Some(name.clone()),
 
             AstNodeKind::StructDeclaration { name, .. } => Some(name.clone()),
@@ -247,7 +236,6 @@ impl AstNode {
             AstNodeKind::TraitType(name) => Some(name.clone()),
 
             AstNodeKind::AssociatedConstant { name, .. } => Some(name.clone()),
-            AstNodeKind::AssociatedFunction { signature, .. } => signature.get_name(),
             AstNodeKind::AssociatedType { name, .. } => Some(name.clone()),
 
             AstNodeKind::GenericParameter { name, .. } => Some(name.clone()),
@@ -344,47 +332,50 @@ impl AstNode {
                 write!(f, "{}", "}".dimmed())?
             }
 
-            AstNodeKind::FunctionSignature {
+            AstNodeKind::Function {
+                qualifier,
                 name,
                 generic_parameters,
                 parameters,
                 return_type,
+                body,
                 ..
             } => {
-                write!(f, "{}fn {}", indent_str, name.yellow())?;
+                write!(f, "{}", indent_str)?;
+                if let Some(q) = qualifier {
+                    write!(f, "{} ", match q {
+                        QualifierKind::Public => "public".purple(),
+                        QualifierKind::Private => "private".purple()
+                    })?;
+                }
+                write!(f, "{} {}", "fn".bright_blue(), if name.is_empty() { "".white() } else { name.yellow() })?;
 
                 if !generic_parameters.is_empty() {
                     write!(f, "[")?;
                     for (i, param) in generic_parameters.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
+                        if i > 0 { write!(f, ", ")?; }
                         param.fmt_with_indent(f, 0)?;
                     }
                     write!(f, "]")?;
                 }
 
                 write!(f, "(")?;
-
                 for (i, param) in parameters.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
+                    if i > 0 { write!(f, ", ")?; }
                     param.fmt_with_indent(f, 0)?;
                 }
                 write!(f, ")")?;
+
                 if let Some(ret_ty) = return_type {
                     write!(f, ": {}", ret_ty)?;
                 }
-            }
 
-            AstNodeKind::FunctionDeclaration {
-                signature,
-                body,
-            } => {
-                write!(f, "{}", signature)?;
-                write!(f, " ")?;
-                body.fmt_with_indent(f, indent)?
+                if let Some(b) = body {
+                    write!(f, " ")?;
+                    b.fmt_with_indent(f, indent)?;
+                } else {
+                    write!(f, ";")?;
+                }
             }
 
             AstNodeKind::ImplDeclaration {
@@ -455,22 +446,6 @@ impl AstNode {
                 }
 
                 write!(f, " = {}", initializer)?;
-            }
-
-            AstNodeKind::AssociatedFunction {
-                qualifier,
-                signature,
-                body
-            } => {
-                write!(f, "{}", indent_str)?;
-                write!(f, "{} ", match qualifier {
-                    QualifierKind::Public => "public".purple(),
-                    QualifierKind::Private => "private".purple()
-                })?;
-
-                write!(f, "{}", signature)?;
-                write!(f, " ")?;
-                body.fmt_with_indent(f, indent)?
             }
 
             AstNodeKind::SelfValue => write!(f, "{}this", indent_str)?,
@@ -557,15 +532,6 @@ impl AstNode {
                     write!(f, " = ")?;
                     default.fmt_with_indent(f, 0)?;
                 }
-            }
-
-            AstNodeKind::FunctionExpression {
-                signature,
-                body
-            } => {
-                write!(f, "{}", signature)?;
-                write!(f, " ")?;
-                body.fmt_with_indent(f, indent)?
             }
 
             AstNodeKind::StructDeclaration {
@@ -875,26 +841,26 @@ impl AstNode {
 
             Break | Continue => vec![],
 
-            FunctionSignature {
+            Function {
                 generic_parameters,
                 parameters,
                 return_type,
+                body,
                 ..
             } => {
                 let mut children = vec![];
 
-                for gp in generic_parameters.iter_mut() {
-                    children.push(gp);
+                children.extend(generic_parameters.iter_mut());
+                children.extend(parameters.iter_mut());
+                
+                if let Some(rt) = return_type.as_mut() {
+                    children.push(rt.as_mut());
                 }
 
-                for param in parameters.iter_mut() {
-                    children.push(param);
+                if let Some(b) = body.as_mut() {
+                    children.push(b.as_mut());
                 }
-
-                if let Some(ret) = return_type.as_mut() {
-                    children.push(ret.as_mut());
-                }
-
+                
                 children
             }
 
@@ -912,9 +878,6 @@ impl AstNode {
                 children
             }
 
-            FunctionDeclaration { signature, body } =>
-                vec![signature.as_mut(), body.as_mut()],
-
             FunctionParameter {
                 type_annotation,
                 initializer,
@@ -929,9 +892,6 @@ impl AstNode {
 
                 children
             }
-
-            FunctionExpression { signature, body } =>
-                vec![signature.as_mut(), body.as_mut()],
 
             StructDeclaration {
                 generic_parameters,
@@ -1013,9 +973,6 @@ impl AstNode {
                 children.push(initializer.as_mut());
                 children
             }
-
-            AssociatedFunction { signature, body, .. } =>
-                vec![signature.as_mut(), body.as_mut()],
 
             AssociatedType { value, .. } => vec![value.as_mut()],
 

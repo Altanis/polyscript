@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 
-use crate::{boxed, utils::{error::*, kind::*}};
+use crate::{boxed, frontend::ast::BoxedAstNode, utils::{error::*, kind::*}};
 
 use super::ast::{AstNode, AstNodeKind};
 
@@ -631,26 +631,72 @@ impl Parser {
         })
     }
 
+    fn parse_function_signature(
+        &mut self,
+        is_expression: bool,
+        is_associated: bool,
+        allow_generics: bool,
+    ) -> Result<(String, Vec<AstNode>, Vec<AstNode>, Option<BoxedAstNode>, Option<ReferenceKind>), BoxedError> {
+        self.consume(TokenKind::Keyword(KeywordKind::Fn))?;
+        
+        let name = if !is_expression {
+            self.consume(TokenKind::Identifier)?.get_value().to_string()
+        } else {
+            String::new()
+        };
+
+        let generic_parameters = if allow_generics {
+            self.parse_generic_parameter_list()?
+        } else {
+            vec![]
+        };
+        
+        let (parameters, instance) = if is_associated {
+            self.parse_associated_function_parameter_list()?
+        } else {
+            (self.parse_function_parameter_list()?, None)
+        };
+
+        let mut return_type = None;
+        if self.match_token(TokenKind::Colon) {
+            return_type = Some(boxed!(self.parse_type()?));
+        }
+
+        Ok((name, generic_parameters, parameters, return_type, instance))
+    }
+
     fn parse_function_declaration(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            let signature = boxed!(parser.parse_function_signature(false, false, true)?);
-            let body = boxed!(parser.parse_block()?);
+            let (name, generic_parameters, parameters, return_type, instance) =
+                parser.parse_function_signature(false, false, true)?;
+            let body = Some(boxed!(parser.parse_block()?));
 
-            Ok(AstNodeKind::FunctionDeclaration {
-                signature,
-                body
+            Ok(AstNodeKind::Function {
+                qualifier: None,
+                name,
+                generic_parameters,
+                parameters,
+                return_type,
+                instance,
+                body,
             })
         })
     }
 
     fn parse_function_expression(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            let signature = boxed!(parser.parse_function_signature(true, false, false)?);
-            let body = boxed!(parser.parse_block()?);
+            let (name, generic_parameters, parameters, return_type, instance) =
+                parser.parse_function_signature(true, false, false)?;
+            let body = Some(boxed!(parser.parse_block()?));
 
-            Ok(AstNodeKind::FunctionExpression {
-                signature,
-                body
+            Ok(AstNodeKind::Function {
+                qualifier: None,
+                name,
+                generic_parameters,
+                parameters,
+                return_type,
+                instance,
+                body,
             })
         })
     }
@@ -669,7 +715,7 @@ impl Parser {
                     if next_token_is_this || third_token_is_this {
                         parser.advance();
                         
-                        let (operator, kind) = if parser.match_token(TokenKind::Keyword(KeywordKind::Mut)) {
+                        let (_, kind) = if parser.match_token(TokenKind::Keyword(KeywordKind::Mut)) {
                             (Operation::MutableAddressOf, ReferenceKind::MutableReference)
                         } else {
                             (Operation::ImmutableAddressOf, ReferenceKind::Reference)
@@ -1041,7 +1087,7 @@ impl Parser {
 
                 match parser.peek().get_token_kind() {
                     TokenKind::Keyword(KeywordKind::Const) => associated_constants.push(parser.parse_associated_constant_declaration(qualifier)?),
-                    TokenKind::Keyword(KeywordKind::Fn) => associated_functions.push(parser.parse_associated_function_declaration(qualifier)?),
+                    TokenKind::Keyword(KeywordKind::Fn) => associated_functions.push(parser.parse_associated_function(qualifier)?),
                     TokenKind::Keyword(KeywordKind::Type) => associated_types.push(parser.parse_associated_type_declaration(qualifier)?),
                     kind => {
                         let span = parser.previous().get_span();
@@ -1087,39 +1133,20 @@ impl Parser {
         })
     }
 
-    fn parse_associated_function_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, BoxedError> {
+    fn parse_associated_function(&mut self, qualifier: QualifierKind) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            parser.advance();
-            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
-            let generic_parameters = parser.parse_generic_parameter_list()?;
-            let (parameters, instance_kind) = parser.parse_associated_function_parameter_list()?;
+            let (name, generic_parameters, parameters, return_type, instance) =
+                parser.parse_function_signature(false, true, true)?;
+            let body = Some(boxed!(parser.parse_block()?));
 
-            let mut return_type = None;
-            if parser.peek().get_token_kind() == TokenKind::Colon {
-                parser.consume(TokenKind::Colon)?;
-                return_type = Some(boxed!(parser.parse_type()?));
-            }
-
-            let signature = boxed!(AstNode {
-                kind: AstNodeKind::FunctionSignature {
-                    name,
-                    generic_parameters,
-                    parameters,
-                    return_type,
-                    instance: instance_kind
-                },
-                span: Span::default(),
-                type_id: None,
-                value_id: None,
-                scope_id: None
-            });
-
-            let body = boxed!(parser.parse_block()?);
-
-            Ok(AstNodeKind::AssociatedFunction {
-                qualifier,
-                signature,
-                body
+            Ok(AstNodeKind::Function {
+                qualifier: Some(qualifier),
+                name,
+                generic_parameters,
+                parameters,
+                return_type,
+                instance,
+                body,
             })
         })
     }
@@ -1192,10 +1219,7 @@ impl Parser {
             while parser.peek().get_token_kind() != TokenKind::CloseBrace {
                 match parser.peek().get_token_kind() {
                     TokenKind::Keyword(KeywordKind::Const) => constants.push(parser.parse_trait_constant()?),
-                    TokenKind::Keyword(KeywordKind::Fn) => {
-                        signatures.push(parser.parse_function_signature(false, true, true)?);
-                        parser.consume(TokenKind::Semicolon)?;
-                    },
+                    TokenKind::Keyword(KeywordKind::Fn) => signatures.push(parser.parse_trait_method_signature()?),
                     TokenKind::Keyword(KeywordKind::Type) => types.push(parser.parse_trait_type()?),
                     kind => {
                         let span = parser.previous().get_span();
@@ -1205,8 +1229,6 @@ impl Parser {
                         ));
                     }
                 }
-                // signatures.push(parser.parse_function_signature(false, true, true)?);
-                // parser.consume(TokenKind::Semicolon)?;
             }
 
             parser.consume(TokenKind::CloseBrace)?;
@@ -1227,6 +1249,24 @@ impl Parser {
         })
     }
 
+    fn parse_trait_method_signature(&mut self) -> Result<AstNode, BoxedError> {
+        self.spanned_node(|parser| {
+            let (name, generic_parameters, parameters, return_type, instance) =
+                parser.parse_function_signature(false, true, true)?;
+            parser.consume(TokenKind::Semicolon)?;
+
+            Ok(AstNodeKind::Function {
+                qualifier: None,
+                name,
+                generic_parameters,
+                parameters,
+                return_type,
+                instance,
+                body: None,
+            })
+        })
+    }
+
     fn parse_trait_type(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::Type))?;
@@ -1234,44 +1274,6 @@ impl Parser {
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::TraitType(name))
-        })
-    }
-
-    fn parse_function_signature(&mut self, anonymous: bool, associated_fn: bool, allowed_generic_parameters: bool) -> Result<AstNode, BoxedError> {
-        self.spanned_node(|parser| {
-            parser.consume(TokenKind::Keyword(KeywordKind::Fn))?;
-
-            let name = if !anonymous {
-                parser.consume(TokenKind::Identifier)?.get_value().to_string()
-            } else {
-                String::new()
-            };
-
-            let generic_parameters = if allowed_generic_parameters {
-                parser.parse_generic_parameter_list()?
-            } else {
-                vec![]
-            };
-
-            let (parameters, instance) = if associated_fn {
-                parser.parse_associated_function_parameter_list()?
-            } else {
-                (parser.parse_function_parameter_list()?, None)
-            };
-
-            let mut return_type = None;
-            if parser.peek().get_token_kind() == TokenKind::Colon {
-                parser.consume(TokenKind::Colon)?;
-                return_type = Some(boxed!(parser.parse_type()?));
-            }
-
-            Ok(AstNodeKind::FunctionSignature {
-                name,
-                generic_parameters,
-                parameters,
-                return_type,
-                instance
-            })
         })
     }
 

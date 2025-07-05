@@ -29,10 +29,8 @@ impl SemanticAnalyzer {
         let declared_symbol_opt = match &mut node.kind {
             VariableDeclaration { name, mutable, type_annotation, initializer } => 
                 self.collect_variable_symbol(name, *mutable, type_annotation, initializer, node.span),
-            FunctionDeclaration { signature, body } 
-                => self.collect_function_declaration(signature, body, node.span),
-            FunctionExpression { .. } => 
-                self.collect_function_expression_symbols(node),
+            Function { .. } => 
+                self.collect_function_item_symbols(node),
             StructDeclaration { name, fields, generic_parameters } =>
                 self.collect_struct_symbols(name, fields, generic_parameters, node.span),
             ImplDeclaration { .. } => Ok((None, None)),
@@ -84,65 +82,40 @@ impl SemanticAnalyzer {
         Ok((Some(value_id), None))
     }
 
-    fn collect_function_declaration(
-        &mut self,
-        signature: &mut BoxedAstNode,
-        body: &mut BoxedAstNode,
-        span: Span
-    ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
-        let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
-        self.symbol_collector_check_node(signature)?;
-
-        let (name, generic_params, params) = match &mut signature.kind {
-            AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } => {
-                (name.clone(), generic_parameters, parameters)
-            }
-            _ => unreachable!(),
-        };
-
-        self.collect_generic_parameters(generic_params)?;
-        self.collect_function_parameters(params)?;
-        self.symbol_collector_check_node(body)?;
+    fn collect_function_item_symbols(&mut self, node: &mut AstNode) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
+        let (is_declaration, qualifier, name, generic_parameters, parameters, return_type, body) =
+            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, return_type, body, .. } = &mut node.kind {
+                (!name.is_empty(), *qualifier, name.clone(), generic_parameters, parameters, return_type, body)
+            } else { 
+                unreachable!(); 
+            };
         
-        self.symbol_table.exit_scope();
-
-        let value_id = self.symbol_table.add_value_symbol(
-            &name,
-            ValueSymbolKind::Function(scope_id),
-            false,
-            QualifierKind::Public,
-            None,
-            Some(span)
-        )?;
-
-        Ok((Some(value_id), None))
-    }
-
-    fn collect_function_expression_symbols(
-        &mut self,
-        node: &mut AstNode,
-    ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
         node.scope_id = Some(scope_id);
 
-        let AstNodeKind::FunctionExpression { signature, body } = &mut node.kind else {
-            unreachable!();
-        };
-
-        self.symbol_collector_check_node(signature)?;
-
-        if let AstNodeKind::FunctionSignature { generic_parameters, parameters, return_type, .. } = &mut signature.kind {
-            self.collect_generic_parameters(generic_parameters)?;
-            self.collect_function_parameters(parameters)?;
-            self.collect_optional_node(return_type)?;
-        } else {
-            unreachable!();
+        self.collect_generic_parameters(generic_parameters)?;
+        self.collect_function_parameters(parameters)?;
+        self.collect_optional_node(return_type)?;
+        
+        if let Some(b) = body {
+            self.symbol_collector_check_node(b)?;
         }
 
-        self.symbol_collector_check_node(body)?;
         self.symbol_table.exit_scope();
-        
-        Ok((None, None))
+
+        if is_declaration {
+            let value_id = self.symbol_table.add_value_symbol(
+                &name,
+                ValueSymbolKind::Function(scope_id),
+                false,
+                qualifier.unwrap_or(QualifierKind::Public),
+                None,
+                Some(node.span)
+            )?;
+            Ok((Some(value_id), None))
+        } else {
+            Ok((None, None))
+        }
     }
 
     fn collect_struct_symbols(
@@ -254,7 +227,7 @@ impl SemanticAnalyzer {
 
         for signature in signatures.iter_mut() {
             self.symbol_collector_check_node(signature)?;
-            if let AstNodeKind::FunctionSignature { name, generic_parameters, instance, .. } = &mut signature.kind {
+            if let AstNodeKind::Function { name, generic_parameters, instance, .. } = &mut signature.kind {
                 let sig_generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
                 
                 let sig_type_id = self.symbol_table.add_type_symbol(
@@ -560,27 +533,25 @@ impl SemanticAnalyzer {
         associated_functions: &mut [AstNode],
     ) -> Result<(), BoxedError> {
         for func_node in associated_functions {
-            if let AstNodeKind::AssociatedFunction { qualifier, signature, body } = &mut func_node.kind {
-                if let AstNodeKind::FunctionSignature { name, generic_parameters, parameters, .. } = &mut signature.kind {
-                    let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
-                    self.collect_generic_parameters(generic_parameters)?;
-                    for generic in generic_parameters.iter_mut() {
-                        self.collect_generic_constraint(generic)?;
-                    }
-
-                    self.collect_function_parameters(parameters)?;
-                    self.symbol_collector_check_node(body)?;
-                    self.symbol_table.exit_scope();
-
-                    func_node.value_id = Some(self.symbol_table.add_value_symbol(
-                        name, 
-                        ValueSymbolKind::Function(func_scope_id), 
-                        false, 
-                        *qualifier, 
-                        None, 
-                        Some(func_node.span)
-                    )?);
+            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, body, .. } = &mut func_node.kind {
+                let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
+                self.collect_generic_parameters(generic_parameters)?;
+                for generic in generic_parameters.iter_mut() {
+                    self.collect_generic_constraint(generic)?;
                 }
+
+                self.collect_function_parameters(parameters)?;
+                self.symbol_collector_check_node(body.as_mut().unwrap())?;
+                self.symbol_table.exit_scope();
+
+                func_node.value_id = Some(self.symbol_table.add_value_symbol(
+                    name, 
+                    ValueSymbolKind::Function(func_scope_id), 
+                    false, 
+                    qualifier.unwrap(),
+                    None, 
+                    Some(func_node.span)
+                )?);
             }
         }
         
