@@ -651,7 +651,9 @@ impl TraitRegistry {
 pub enum Constraint {
     Equality(TypeSymbolId, Type),
     DereferenceEquality(TypeSymbolId, Type),
-    Trait(TypeSymbolId, Type)
+    FunctionalEquality(TypeSymbolId, Vec<Type>, Type),
+    Trait(TypeSymbolId, Type),
+    MemberAccess(TypeSymbolId, Type, String)
 }
 
 #[derive(Default)]
@@ -746,7 +748,7 @@ impl SemanticAnalyzer {
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
-        // pass!(self, type_collector_pass, &mut program);
+        // pass!(self, uv_collector_pass, &mut program);
 
         Ok(program)
     }
@@ -875,8 +877,6 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "--- Root Scope (0) ---")?;
-        self.display_scope(0, 0, f)?;
         writeln!(f, "--- User Scope ({}) ---", self.real_starting_scope)?;
         self.display_scope(self.real_starting_scope, 0, f)
     }
@@ -890,6 +890,11 @@ impl TraitRegistry {
                 for (trait_id, impls) in &self.registry.register {
                     let trait_symbol = &self.table.type_symbols[trait_id];
                     let trait_name = self.table.get_type_name(trait_symbol.name_id);
+
+                    if self.registry.default_traits.contains_key(trait_name) {
+                        continue;
+                    }
+
                     writeln!(f, "{}", format!("[Trait({})] {}", trait_id, trait_name).underline())?;
                     for (type_id, impl_details) in impls {
                         let type_symbol = &self.table.type_symbols[type_id];
