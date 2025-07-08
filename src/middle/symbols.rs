@@ -83,9 +83,9 @@ impl SemanticAnalyzer {
     }
 
     fn collect_function_item_symbols(&mut self, node: &mut AstNode) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
-        let (is_declaration, qualifier, name, generic_parameters, parameters, return_type, body) =
-            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, return_type, body, .. } = &mut node.kind {
-                (!name.is_empty(), *qualifier, name.clone(), generic_parameters, parameters, return_type, body)
+        let (is_declaration, qualifier, name, generic_parameters, parameters, return_type, body, instance) =
+            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, return_type, body, instance } = &mut node.kind {
+                (!name.is_empty(), *qualifier, name.clone(), generic_parameters, parameters, return_type, body, instance)
             } else { 
                 unreachable!(); 
             };
@@ -93,6 +93,9 @@ impl SemanticAnalyzer {
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
         node.scope_id = Some(scope_id);
 
+        let scope = self.symbol_table.get_scope_mut(scope_id).unwrap();
+        scope.receiver_kind = *instance;
+    
         self.collect_generic_parameters(generic_parameters)?;
         self.collect_function_parameters(parameters)?;
         self.collect_optional_node(return_type)?;
@@ -375,6 +378,8 @@ impl SemanticAnalyzer {
     }
 
     fn collect_generic_constraint(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        node.scope_id = Some(self.symbol_table.get_current_scope_id());
+
         if node.type_id.is_none() {
             return Ok(());
         }
@@ -464,7 +469,12 @@ impl SemanticAnalyzer {
             self.collect_generic_constraint(generic)?;
         }
 
+        node.scope_id = Some(impl_scope_id);
+        type_reference.scope_id = Some(impl_scope_id);
+
         if let Some(trait_node) = trait_node {
+            trait_node.scope_id = Some(impl_scope_id);
+
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
@@ -533,8 +543,13 @@ impl SemanticAnalyzer {
         associated_functions: &mut [AstNode],
     ) -> Result<(), BoxedError> {
         for func_node in associated_functions {
-            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, body, .. } = &mut func_node.kind {
+            if let AstNodeKind::Function { qualifier, name, generic_parameters, parameters, body, instance, .. } = &mut func_node.kind {
                 let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
+                func_node.scope_id = Some(func_scope_id);
+
+                let scope = self.symbol_table.get_scope_mut(func_scope_id).unwrap();
+                scope.receiver_kind = *instance;
+
                 self.collect_generic_parameters(generic_parameters)?;
                 for generic in generic_parameters.iter_mut() {
                     self.collect_generic_constraint(generic)?;
@@ -556,6 +571,8 @@ impl SemanticAnalyzer {
         }
         
         for const_node in associated_constants {
+            const_node.scope_id = Some(self.symbol_table.get_current_scope_id());
+
             if let AstNodeKind::AssociatedConstant { qualifier, name, .. } = &const_node.kind {
                 let const_id = self.symbol_table.add_value_symbol(name, ValueSymbolKind::Variable, false, *qualifier, None, Some(const_node.span))?;
                 const_node.value_id = Some(const_id);
@@ -563,6 +580,8 @@ impl SemanticAnalyzer {
         }
 
         for type_node in associated_types {
+            type_node.scope_id = Some(self.symbol_table.get_current_scope_id());
+
             if let AstNodeKind::AssociatedType { name, qualifier, .. } = &type_node.kind {
                 let type_id = self.symbol_table.add_type_symbol(
                     name, 

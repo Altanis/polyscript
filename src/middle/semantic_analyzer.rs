@@ -184,7 +184,8 @@ pub struct Scope {
     pub types: HashMap<TypeNameId, TypeSymbolId>,
     pub kind: ScopeKind,
     pub parent: Option<ScopeId>,
-    pub id: ScopeId
+    pub id: ScopeId,
+    pub receiver_kind: Option<ReferenceKind>
 }
 
 pub struct SymbolTable {
@@ -230,6 +231,7 @@ impl SymbolTable {
             parent: None,
             id: root_scope_id,
             kind: ScopeKind::Root,
+            receiver_kind: None
         };
         table.scopes.insert(root_scope_id, root_scope);
         
@@ -250,6 +252,7 @@ impl SymbolTable {
             parent: Some(root_scope_id),
             id: init_scope_id,
             kind: ScopeKind::Block,
+            receiver_kind: None
         };
 
         table.scopes.insert(init_scope_id, init_scope);
@@ -593,7 +596,8 @@ impl SymbolTable {
             types: HashMap::new(),
             parent: Some(parent_id),
             id: new_id,
-            kind
+            kind,
+            receiver_kind: None
         };
 
         self.scopes.insert(new_id, new_scope);
@@ -748,7 +752,7 @@ impl SemanticAnalyzer {
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
-        // pass!(self, uv_collector_pass, &mut program);
+        pass!(self, uv_collector_pass, &mut program);
 
         Ok(program)
     }
@@ -914,12 +918,96 @@ impl TraitRegistry {
     }
 }
 
+impl Constraint {
+    fn fmt<'a>(&'a self, table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
+        struct C<'a> { c: &'a Constraint, t: &'a SymbolTable }
+        impl std::fmt::Display for C<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use Constraint::*;
+                let ty = |id| self.t.display_type(&Type::new_base(id));
+                match self.c {
+                    Equality(id, rhs)              =>
+                        write!(f, "{} {} {}",        ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
+                    DereferenceEquality(id, rhs)   =>
+                        write!(f, "*{} {} {}",       ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
+                    FunctionalEquality(id, ps, r)  => {
+                        let ps = ps.iter().map(|p| self.t.display_type(p)).collect::<Vec<_>>().join(", ");
+                        write!(f, "fn({}) -> {} {} {}", ps, self.t.display_type(r),
+                               "=".blue(), ty(*id).yellow())
+                    }
+                    Trait(trait_id, ty_inst)       =>
+                        write!(f, "{} {} {}",        ty(*trait_id).cyan(), "⊧".blue(), self.t.display_type(ty_inst).yellow()),
+                    MemberAccess(id, base, m)      =>
+                        write!(f, "{}.{} {} {}",     self.t.display_type(base), m.green(),
+                               "=".blue(), ty(*id).yellow()),
+                }
+            }
+        }
+        C { c: self, t: table }
+    }
+}
+
+impl UnificationContext {
+    pub fn display<'a>(&'a self,
+                       table: &'a SymbolTable)
+                       -> impl std::fmt::Display + 'a {
+        use colored::*;
+
+        struct D<'a> { ctx: &'a UnificationContext, tbl: &'a SymbolTable }
+        impl std::fmt::Display for D<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                if self.ctx.substitutions.is_empty() {
+                    writeln!(f, "{}", "* Substitutions: (none)".dimmed())?;
+                } else {
+                    writeln!(f, "* {}", "Substitutions:".bold())?;
+                    let mut subs: Vec<_> = self.ctx.substitutions.iter().collect();
+                    subs.sort_by_key(|(uv, _)| *uv);
+                    for (uv, sym) in subs {
+                        let lhs = format!("#uv_{}", uv).red().bold();
+                        let rhs = self.tbl.display_type(&Type::new_base(*sym)).green();
+                        writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
+                    }
+                }
+
+                let unresolved: Vec<_> = (0..self.ctx.next_id)
+                    .filter(|id| !self.ctx.substitutions.contains_key(id))
+                    .collect();
+                if unresolved.is_empty() {
+                    writeln!(f, "{}", "* Unresolved UVs: (none)".dimmed())?;
+                } else {
+                    let list = unresolved.iter()
+                        .map(|id| format!("#uv_{}", id).red().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(f, "* {} {}", "Unresolved UVs:".bold(), list)?;
+                }
+
+                // --- constraints ------------------------------------------------------------
+                if self.ctx.constraints.is_empty() {
+                    writeln!(f, "{}", "* Constraints: (none)".dimmed())
+                } else {
+                    writeln!(f, "* {}", "Constraints:".bold())?;
+                    for (i, c) in self.ctx.constraints.iter().enumerate() {
+                        writeln!(f, "    {}) {}", i + 1, c.fmt(self.tbl))?;
+                    }
+                    Ok(())
+                }
+            }
+        }
+        
+        D { ctx: self, tbl: table }
+    }
+}
+
 impl std::fmt::Display for SemanticAnalyzer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", "Symbol Table:".bold().underline())?;
         writeln!(f, "{}", self.symbol_table)?;
         writeln!(f, "\n{}", "Trait Registry:".bold().underline())?;
         writeln!(f, "{}", self.trait_registry.display(&self.symbol_table))?;
+        writeln!(f, "\n{}", "Unification Context:".bold().underline())?;
+        writeln!(f, "{}", self.unification_context.display(&self.symbol_table))?;
+
         Ok(())
     }
 }

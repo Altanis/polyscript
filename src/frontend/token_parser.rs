@@ -315,7 +315,7 @@ impl Parser {
                     let mut fields = IndexMap::new();
 
                     self.advance();
-                    loop {
+                    while self.peek().get_token_kind() != TokenKind::CloseBrace {
                         let name_token = self.consume(TokenKind::Identifier)?.clone();
                         let name = name_token.get_value().to_string();
 
@@ -328,7 +328,7 @@ impl Parser {
                                 span: name_token.get_span(),
                                 type_id: None,
                                 value_id: None,
-                    scope_id: None
+                                scope_id: None
                             }
                         };
 
@@ -350,7 +350,7 @@ impl Parser {
                         span: span.set_end_from_span(self.previous().get_span()),
                         type_id: None,
                         value_id: None,
-                    scope_id: None
+                        scope_id: None
                     })
                 } else {
                     Ok(AstNode {
