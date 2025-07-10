@@ -2,16 +2,16 @@ use colored::*;
 use indexmap::IndexMap;
 use crate::{middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
 
+/// The various denominations of an AstNode.
 #[derive(Debug, Clone)]
 pub enum AstNodeKind {
-    // LITERALS //
     IntegerLiteral(i64),
     FloatLiteral(f64),
     BooleanLiteral(bool),
     StringLiteral(String),
     CharLiteral(char),
 
-    // VARIABLES //
+    /// A named entity with no semantic meaning.
     Identifier(String),
     VariableDeclaration {
         name: String,
@@ -20,7 +20,6 @@ pub enum AstNodeKind {
         initializer: Option<BoxedAstNode>,
     },
     
-    // OPERATIONS //
     UnaryOperation {
         operator: Operation,
         operand: BoxedAstNode
@@ -36,7 +35,7 @@ pub enum AstNodeKind {
         right: BoxedAstNode,
     },
     
-    // CONTROL FLOW //
+    // A sequence of statements encapsulated by braces.
     Block(Vec<AstNode>),
     IfStatement {
         condition: BoxedAstNode,
@@ -58,7 +57,7 @@ pub enum AstNodeKind {
     Break,
     Continue,
     
-    // FUNCTIONS //
+    /// An expression or declaration that takes inputs and returns an output.
     Function {
         qualifier: Option<QualifierKind>,
         name: String,
@@ -68,10 +67,12 @@ pub enum AstNodeKind {
         instance: Option<ReferenceKind>,
         body: Option<BoxedAstNode>
     },
+    /// A type that denotes the signature of a function.
     FunctionPointer {
         params: Vec<AstNode>,
         return_type: Option<BoxedAstNode>
     },
+    /// A parameter inside a function declaration or expression.
     FunctionParameter {
         name: String,
         type_annotation: BoxedAstNode,
@@ -79,7 +80,6 @@ pub enum AstNodeKind {
         mutable: bool
     },
 
-    // STRUCTS //
     StructDeclaration {
         name: String,
         generic_parameters: Vec<AstNode>,
@@ -95,7 +95,6 @@ pub enum AstNodeKind {
         fields: IndexMap<String, AstNode>
     },
 
-    // ENUMS //
     EnumDeclaration {
         name: String,
         variants: IndexMap<String, (AstNode, Option<AstNode>)>
@@ -103,7 +102,6 @@ pub enum AstNodeKind {
     EnumVariant(String),
 
 
-    // IMPLEMENTATIONS //
     ImplDeclaration {
         generic_parameters: Vec<AstNode>,
         type_reference: BoxedAstNode,
@@ -124,19 +122,23 @@ pub enum AstNodeKind {
         value: BoxedAstNode
     },
 
+    ///`this`
     SelfValue,
+    /// `Self`, used as the type annotation for `this`, `&this`, and `&mut this`
+    /// in an associated function.
     SelfType(ReferenceKind),
 
+    /// A member access operation (i.e. `x.y`).
     FieldAccess {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+    /// A function call (i.e. `f()`).
     FunctionCall {
         function: BoxedAstNode,
         arguments: Vec<AstNode>
     },
 
-    // TRAITS //
     TraitDeclaration {
         name: String,
         generic_parameters: Vec<AstNode>,
@@ -150,13 +152,11 @@ pub enum AstNodeKind {
     },
     TraitType(String),
 
-    // GENERICS //
     GenericParameter {
         name: String,
         constraints: Vec<String>
     },
 
-    // TYPES //
     TypeReference {
         type_name: String,
         generic_types: Vec<AstNode>,
@@ -174,10 +174,15 @@ pub enum AstNodeKind {
 
 #[derive(Debug, Clone)]
 pub struct AstNode {
+    /// The type of node.
     pub kind: AstNodeKind,
+    /// The location of the node in the source file.
     pub span: Span,
+    /// A pointer to the value it holds in the symbol table.
     pub value_id: Option<ValueSymbolId>,
+    /// A pointer to the type it holds in the symbol table.
     pub type_id: Option<Type>,
+    /// The scope the node lives in.
     pub scope_id: Option<ScopeId>
 }
 

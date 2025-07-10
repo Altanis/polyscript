@@ -9,6 +9,7 @@ pub type TypeNameId = usize;
 pub type ValueSymbolId = usize;
 pub type TypeSymbolId = usize;
 
+/// A lookup table that maps Strings to numbers.
 #[derive(Default, Debug)]
 pub struct NameInterner {
     map: HashMap<String, usize>,
@@ -20,6 +21,7 @@ impl NameInterner {
         Self::default()
     }
 
+    /// Generates a unique ID for a string.
     pub fn intern(&mut self, s: &str) -> usize {
         if let Some(&id) = self.map.get(s) {
             return id;
@@ -32,6 +34,7 @@ impl NameInterner {
         id
     }
 
+    /// Finds a string given an id.
     pub fn lookup(&self, id: usize) -> &str {
         &self.vec[id]
     }
