@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::{HashMap, VecDeque}, rc::Rc};
 use colored::*;
 use strum::IntoEnumIterator;
 use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
@@ -8,7 +8,6 @@ pub type ValueNameId = usize;
 pub type TypeNameId = usize;
 pub type ValueSymbolId = usize;
 pub type TypeSymbolId = usize;
-pub type UnificationVariableId = usize;
 
 #[derive(Default, Debug)]
 pub struct NameInterner {
@@ -102,7 +101,7 @@ pub enum TypeSymbolKind {
         instance: Option<ReferenceKind>
     },
     Generic(Vec<TypeSymbolId>),
-    UnificationVariable(UnificationVariableId)
+    UnificationVariable(TypeSymbolId)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,11 +133,6 @@ impl Type {
 
     pub fn is_base(&self) -> bool {
         matches!(self, Type::Base { .. })
-    }
-
-    pub fn is_equivalent(&self, other: &Type) -> bool {
-        // unification algorithm soon
-        self == other
     }
 
     pub fn get_base_symbol(&self) -> TypeSymbolId {
@@ -653,31 +647,41 @@ impl TraitRegistry {
 }
 
 pub enum Constraint {
+    /// The metavariable is equal to a type.
     Equality(TypeSymbolId, Type),
-    DereferenceEquality(TypeSymbolId, Type),
-    FunctionalEquality(TypeSymbolId, Vec<Type>, Type),
-    Trait(TypeSymbolId, Type),
+    /// The metavariable is meant for `self` and is of type Self, but
+    /// its reference kind is unknown.
+    SelfValue(TypeSymbolId, Type),
+    /// The metavariable denotes a function pointer.
+    FunctionSignature(TypeSymbolId, Vec<Type>, Type),
+    /// The metavariable denotes the result of an operation that
+    /// is trait overloadable.
+    Operation(TypeSymbolId, Type),
+    /// The metavariable denotes the value of a member on an
+    /// instance variable or a static field.
     MemberAccess(TypeSymbolId, Type, String)
 }
 
 #[derive(Default)]
 pub struct UnificationContext {
-    next_id: UnificationVariableId,
-    substitutions: HashMap<UnificationVariableId, TypeSymbolId>,
-    constraints: Vec<Constraint>
+    next_id: TypeSymbolId,
+    pub substitutions: HashMap<TypeSymbolId, Type>,
+    pub constraints: VecDeque<Constraint>
 }
 
 impl UnificationContext {
-    fn get_next_uv_id(&mut self) -> UnificationVariableId {
+    fn get_next_uv_id(&mut self) -> TypeSymbolId {
         let old = self.next_id;
         self.next_id += 1;
         old
     }
 
     pub fn generate_uv_type(&mut self, symbol_table: &mut SymbolTable, span: Span) -> Type {
+        let id = self.get_next_uv_id();
+
         let symbol = symbol_table.add_type_symbol(
-            &format!("#uv_{}", self.get_next_uv_id()), 
-            TypeSymbolKind::UnificationVariable(self.get_next_uv_id()), 
+            &format!("#uv_{}", id), 
+            TypeSymbolKind::UnificationVariable(id), 
             vec![], 
             QualifierKind::Private, 
             Some(span)
@@ -690,7 +694,7 @@ impl UnificationContext {
     }
 
     pub fn register_constraint(&mut self, constraint: Constraint) {
-        self.constraints.push(constraint);
+        self.constraints.push_back(constraint);
     }
 }
 
@@ -753,6 +757,7 @@ impl SemanticAnalyzer {
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
+        pass!(self, unification_pass, &mut program);
 
         Ok(program)
     }
@@ -928,14 +933,14 @@ impl Constraint {
                 match self.c {
                     Equality(id, rhs)              =>
                         write!(f, "{} {} {}",        ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
-                    DereferenceEquality(id, rhs)   =>
+                    SelfValue(id, rhs)   =>
                         write!(f, "*{} {} {}",       ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
-                    FunctionalEquality(id, ps, r)  => {
+                    FunctionSignature(id, ps, r)  => {
                         let ps = ps.iter().map(|p| self.t.display_type(p)).collect::<Vec<_>>().join(", ");
                         write!(f, "fn({}) -> {} {} {}", ps, self.t.display_type(r),
                                "=".blue(), ty(*id).yellow())
                     }
-                    Trait(trait_id, ty_inst)       =>
+                    Operation(trait_id, ty_inst)       =>
                         write!(f, "{} {} {}",        ty(*trait_id).cyan(), "⊧".blue(), self.t.display_type(ty_inst).yellow()),
                     MemberAccess(id, base, m)      =>
                         write!(f, "{}.{} {} {}",     self.t.display_type(base), m.green(),
@@ -964,7 +969,7 @@ impl UnificationContext {
                     subs.sort_by_key(|(uv, _)| *uv);
                     for (uv, sym) in subs {
                         let lhs = format!("#uv_{}", uv).red().bold();
-                        let rhs = self.tbl.display_type(&Type::new_base(*sym)).green();
+                        let rhs = self.tbl.display_type(sym).green();
                         writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
                     }
                 }

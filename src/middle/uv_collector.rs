@@ -21,12 +21,12 @@ impl SemanticAnalyzer {
         let uv_type = self.collect_uvs(operand)?;
         match operator.to_trait_data() {
             Some((trait_name, _)) => {
-                self.unification_context.register_constraint(Constraint::Trait(
+                self.unification_context.register_constraint(Constraint::Operation(
                     uv_type.get_base_symbol(), Type::new_base(self.trait_registry.get_default_trait(&trait_name))
                 ));
             },
             None => match operator {
-                Operation::Dereference => self.unification_context.register_constraint(Constraint::DereferenceEquality(
+                Operation::Dereference => self.unification_context.register_constraint(Constraint::SelfValue(
                     uv_id, uv_type
                 )),
                 Operation::ImmutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
@@ -48,7 +48,7 @@ impl SemanticAnalyzer {
 
         match operator.to_trait_data() {
             Some((trait_name, _)) => {
-                self.unification_context.register_constraint(Constraint::Trait(
+                self.unification_context.register_constraint(Constraint::Operation(
                     left_type.get_base_symbol(), Type::Base {
                         symbol: self.trait_registry.get_default_trait(&trait_name),
                         args: vec![right_type.clone()]
@@ -548,7 +548,7 @@ impl SemanticAnalyzer {
 
         let return_uv_type = self.unification_context.generate_uv_type(&mut self.symbol_table, span);
         
-        self.unification_context.register_constraint(Constraint::FunctionalEquality(
+        self.unification_context.register_constraint(Constraint::FunctionSignature(
             function_type.get_base_symbol(), argument_types, return_uv_type.clone()
         ));
 

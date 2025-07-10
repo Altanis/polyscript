@@ -34,7 +34,8 @@ pub enum ErrorKind {
     BadVariableDeclaration,
     SelfOutsideImpl,
     InvalidThis(&'static str),
-    ExpectedIdentifier
+    ExpectedIdentifier,
+    TypeMismatch(String, String)
     // InvalidOperation()
     // MismatchedTypes(TypeInfo, TypeInfo),
 }
@@ -72,7 +73,8 @@ impl ErrorKind {
             ErrorKind::BadVariableDeclaration => "variable declaration must be annotated with a type or value".to_string(),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidThis(place) => format!("found \"this\" {}", place),
-            ErrorKind::ExpectedIdentifier => "expected an identifier for the rhs of a field access operation".to_string()
+            ErrorKind::ExpectedIdentifier => "expected an identifier for the rhs of a field access operation".to_string(),
+            ErrorKind::TypeMismatch(t1, t2) => format!("types {} and {} are incompatible", t1, t2)
         }
     }
 }
