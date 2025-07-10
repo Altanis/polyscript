@@ -99,9 +99,9 @@ pub enum Operation {
     GreaterThan,
     Geq, // ≥
     LessThan,
-    Leq, // ≤
+    Leq,         // ≤
     Equivalence, // ==
-    NotEqual, // !=
+    NotEqual,    // !=
 
     // CALL
     FieldAccess,
@@ -174,58 +174,52 @@ impl Operation {
 
     pub fn binding_power(&self) -> (u8, u8) {
         match self {
-            Operation::Assign 
-            | Operation::PlusEq 
-            | Operation::MinusEq 
-            | Operation::MulEq 
-            | Operation::ExpEq 
-            | Operation::DivEq 
-            | Operation::ModEq 
-            | Operation::BitwiseAndEq 
-            | Operation::BitwiseOrEq 
-            | Operation::BitwiseXorEq 
-            | Operation::RightBitShiftEq 
+            Operation::Assign
+            | Operation::PlusEq
+            | Operation::MinusEq
+            | Operation::MulEq
+            | Operation::ExpEq
+            | Operation::DivEq
+            | Operation::ModEq
+            | Operation::BitwiseAndEq
+            | Operation::BitwiseOrEq
+            | Operation::BitwiseXorEq
+            | Operation::RightBitShiftEq
             | Operation::LeftBitShiftEq
             | Operation::NotEqual => (1, 2),
-    
-            Operation::Or => (2, 3),
-            
-            Operation::And => (3, 4),
-    
-            Operation::Equivalence => (4, 5),
-    
-            Operation::GreaterThan 
-            | Operation::Geq 
-            | Operation::LessThan 
-            | Operation::Leq => (5, 6),
-    
-            Operation::BitwiseOr => (6, 7),
-    
-            Operation::BitwiseXor => (7, 8),
-    
-            Operation::BitwiseAnd => (8, 9),
-    
-            Operation::Plus 
-            | Operation::Minus => (9, 10),
-    
-            Operation::Mul 
-            | Operation::Div 
-            | Operation::Mod => (10, 11),
-    
-            Operation::LeftBitShift 
-            | Operation::RightBitShift => (11, 12),
-    
-            Operation::Exp => (12, 11),
-    
-            Operation::Not 
-            | Operation::BitwiseNegate => (13, 14),
 
-            | Operation::FunctionCall => (14, 0),
+            Operation::Or => (2, 3),
+
+            Operation::And => (3, 4),
+
+            Operation::Equivalence => (4, 5),
+
+            Operation::GreaterThan | Operation::Geq | Operation::LessThan | Operation::Leq => {
+                (5, 6)
+            }
+
+            Operation::BitwiseOr => (6, 7),
+
+            Operation::BitwiseXor => (7, 8),
+
+            Operation::BitwiseAnd => (8, 9),
+
+            Operation::Plus | Operation::Minus => (9, 10),
+
+            Operation::Mul | Operation::Div | Operation::Mod => (10, 11),
+
+            Operation::LeftBitShift | Operation::RightBitShift => (11, 12),
+
+            Operation::Exp => (12, 11),
+
+            Operation::Not | Operation::BitwiseNegate => (13, 14),
+
+            Operation::FunctionCall => (14, 0),
             Operation::FieldAccess => (14, 15),
 
             Operation::Dereference
             | Operation::ImmutableAddressOf
-            | Operation::MutableAddressOf => (15, 16)
+            | Operation::MutableAddressOf => (15, 16),
         }
     }
 
@@ -269,7 +263,7 @@ impl Operation {
             Operation::Dereference => None,
             Operation::ImmutableAddressOf => None,
             Operation::MutableAddressOf => None,
-            Operation::Assign => None
+            Operation::Assign => None,
         }
     }
 
@@ -283,20 +277,16 @@ impl Operation {
                 Not => Some(Bool),
                 BitwiseNegate => Some(Int),
 
-                Plus | Minus | Mul | Div | Mod |
-                Exp | BitwiseAnd | BitwiseOr | BitwiseXor |
-                RightBitShift | LeftBitShift => Some(Int),
+                Plus | Minus | Mul | Div | Mod | Exp | BitwiseAnd | BitwiseOr | BitwiseXor
+                | RightBitShift | LeftBitShift => Some(Int),
 
-                And | Or |
-                GreaterThan | Geq | LessThan | Leq |
-                Equivalence | NotEqual => Some(Bool),
+                And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => {
+                    Some(Bool)
+                }
 
-                Assign
-                | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
-                | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
-                | RightBitShiftEq | LeftBitShiftEq
-                | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq
+                | BitwiseOrEq | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess
+                | FunctionCall | Dereference | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Float => match self {
@@ -305,66 +295,47 @@ impl Operation {
 
                 Plus | Minus | Mul | Div | Mod | Exp => Some(Float),
 
-                BitwiseAnd | BitwiseOr | BitwiseXor |
-                RightBitShift | LeftBitShift => None,
+                BitwiseAnd | BitwiseOr | BitwiseXor | RightBitShift | LeftBitShift => None,
 
-                And | Or |
-                GreaterThan | Geq | LessThan | Leq |
-                Equivalence | NotEqual => Some(Bool),
+                And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => {
+                    Some(Bool)
+                }
 
-                Assign
-                | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
-                | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
-                | RightBitShiftEq | LeftBitShiftEq
-                | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq
+                | BitwiseOrEq | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess
+                | FunctionCall | Dereference | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Bool => match self {
                 Not => Some(Bool),
                 And | Or | Equivalence | NotEqual | Assign => Some(Bool),
 
-                BitwiseNegate |
-                Plus | Minus | Mul | Div | Mod | Exp |
-                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
-                BitwiseAnd | BitwiseOr | BitwiseXor |
-                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
-                GreaterThan | Geq | LessThan | Leq |
-                RightBitShift | LeftBitShift |
-                RightBitShiftEq | LeftBitShiftEq |
-                FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq
+                | DivEq | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq
+                | BitwiseOrEq | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq
+                | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | FieldAccess
+                | FunctionCall | Dereference | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             String => match self {
                 Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                PlusEq | Not | BitwiseNegate |
-                Minus | Mul | Div | Mod | Exp |
-                MinusEq | MulEq | DivEq | ModEq | ExpEq |
-                BitwiseAnd | BitwiseOr | BitwiseXor |
-                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
-                RightBitShift | LeftBitShift |
-                RightBitShiftEq | LeftBitShiftEq |
-                And | Or |
-                Assign | FieldAccess | FunctionCall | Dereference
+                PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq
+                | DivEq | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq
+                | BitwiseOrEq | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq
+                | LeftBitShiftEq | And | Or | Assign | FieldAccess | FunctionCall | Dereference
                 | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Char => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Plus | Minus | Mul | Div | Mod | Exp |
-                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq |
-                BitwiseAnd | BitwiseOr | BitwiseXor |
-                BitwiseAndEq | BitwiseOrEq | BitwiseXorEq |
-                RightBitShift | LeftBitShift |
-                RightBitShiftEq | LeftBitShiftEq |
-                Not | BitwiseNegate |
-                And | Or |
-                Assign | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq
+                | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq
+                | LeftBitShiftEq | Not | BitwiseNegate | And | Or | Assign | FieldAccess
+                | FunctionCall | Dereference | ImmutableAddressOf | MutableAddressOf => None,
             },
 
             Null => None,
@@ -401,8 +372,13 @@ impl std::fmt::Display for Operation {
             Operation::BitwiseAndEq => format!("{}{}", BITWISE_AND_TOKEN, ASSIGNMENT_TOKEN),
             Operation::BitwiseOrEq => format!("{}{}", BITWISE_OR_TOKEN, ASSIGNMENT_TOKEN),
             Operation::BitwiseXorEq => format!("{}{}", BITWISE_XOR_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::RightBitShiftEq => format!("{}{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN),
-            Operation::LeftBitShiftEq => format!("{}{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::RightBitShiftEq => format!(
+                "{}{}{}",
+                GREATER_THAN_TOKEN, GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN
+            ),
+            Operation::LeftBitShiftEq => {
+                format!("{}{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN, ASSIGNMENT_TOKEN)
+            }
             Operation::NotEqual => format!("{}{}", NOT_TOKEN, ASSIGNMENT_TOKEN),
 
             Operation::And => format!("{}{}", BITWISE_AND_TOKEN, BITWISE_AND_TOKEN),
@@ -415,7 +391,7 @@ impl std::fmt::Display for Operation {
 
             Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
             Operation::FunctionCall => "()".to_string(),
-            Operation::MutableAddressOf => "&mut".to_string()
+            Operation::MutableAddressOf => "&mut".to_string(),
         };
 
         write!(f, "{}", s)
@@ -431,13 +407,13 @@ pub enum NumberKind {
     Hex,
 
     // FLOATS
-    Float
+    Float,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LoopKind {
     For,
-    While
+    While,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -445,7 +421,7 @@ pub enum ControlFlowKind {
     Return,
     Break,
     Continue,
-    Throw
+    Throw,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -474,20 +450,20 @@ pub enum KeywordKind {
     This,
     Trait,
     Type,
-    Mut
+    Mut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QualifierKind {
     Public,
-    Private
+    Private,
 }
 
 impl std::fmt::Display for QualifierKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             QualifierKind::Public => write!(f, "public"),
-            QualifierKind::Private => write!(f, "private")
+            QualifierKind::Private => write!(f, "private"),
         }
     }
 }
@@ -520,7 +496,6 @@ pub const SYNC_TOKENS: [TokenKind; 16] = [
     TokenKind::Keyword(KeywordKind::Return),
     TokenKind::Keyword(KeywordKind::Break),
     TokenKind::Keyword(KeywordKind::Continue),
-
     TokenKind::Keyword(KeywordKind::Let),
     TokenKind::Keyword(KeywordKind::Const),
     TokenKind::Keyword(KeywordKind::Fn),
@@ -529,7 +504,6 @@ pub const SYNC_TOKENS: [TokenKind; 16] = [
     TokenKind::Keyword(KeywordKind::Impl),
     TokenKind::Keyword(KeywordKind::Trait),
     TokenKind::Keyword(KeywordKind::Type),
-
     TokenKind::Keyword(KeywordKind::Public),
     TokenKind::Keyword(KeywordKind::Private),
 ];
@@ -537,7 +511,7 @@ pub const SYNC_TOKENS: [TokenKind; 16] = [
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
     pub line: usize,
-    pub column: usize
+    pub column: usize,
 }
 
 impl Default for Position {
@@ -551,12 +525,13 @@ pub struct Span {
     pub start: usize,
     pub end: usize,
     pub start_pos: Position,
-    pub end_pos: Position
+    pub end_pos: Position,
 }
 
 impl std::fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,
+        write!(
+            f,
             "{}..{} | {}:{} → {}:{}",
             self.start,
             self.end,
@@ -564,13 +539,14 @@ impl std::fmt::Debug for Span {
             self.start_pos.column,
             self.end_pos.line,
             self.end_pos.column
-        )   
+        )
     }
 }
 
 impl std::fmt::Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,
+        write!(
+            f,
             "starting line {}, starting col {} | span {}..{} | ending line {}, ending col {}",
             self.start_pos.line,
             self.start_pos.column,
@@ -586,14 +562,14 @@ impl Span {
     pub fn set_end_from_values(mut self, index: usize, line: usize, column: usize) -> Span {
         self.end = index;
         self.end_pos = Position { line, column };
-        
+
         self
     }
 
     pub fn set_end_from_span(mut self, span: Span) -> Span {
         self.end = span.end;
         self.end_pos = span.end_pos;
-        
+
         self
     }
 
@@ -624,12 +600,16 @@ pub struct Token {
     /// The type of token.
     token_kind: TokenKind,
     /// Details about the token's placement in source.
-    span: Span
+    span: Span,
 }
 
 impl Token {
     pub fn new(value: String, token_type: TokenKind, span: Span) -> Token {
-        Token { value, token_kind: token_type, span }
+        Token {
+            value,
+            token_kind: token_type,
+            span,
+        }
     }
 
     pub fn get_value(&self) -> &String {
@@ -679,8 +659,8 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::This => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
-                KeywordKind::Type => "Keyword::Type".purple()
-            },            
+                KeywordKind::Type => "Keyword::Type".purple(),
+            },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),
             TokenKind::CloseParenthesis => "CloseParen".dimmed(),
@@ -690,7 +670,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::CloseBrace => "CloseCurly".dimmed(),
             TokenKind::Comma => "Comma".dimmed(),
             TokenKind::Colon => "Colon".dimmed(),
-            TokenKind::EndOfFile => "<EOF>".into()
+            TokenKind::EndOfFile => "<EOF>".into(),
         };
 
         write!(f, "{}", token_type_str)
@@ -713,5 +693,5 @@ impl std::fmt::Display for Token {
 pub enum ReferenceKind {
     Value,
     Reference,
-    MutableReference
+    MutableReference,
 }

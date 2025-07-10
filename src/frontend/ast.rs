@@ -1,6 +1,11 @@
+use crate::{
+    middle::semantic_analyzer::{
+        ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId,
+    },
+    utils::kind::*,
+};
 use colored::*;
 use indexmap::IndexMap;
-use crate::{middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId}, utils::kind::*};
 
 /// The various denominations of an AstNode.
 #[derive(Debug, Clone)]
@@ -19,10 +24,10 @@ pub enum AstNodeKind {
         type_annotation: Option<BoxedAstNode>,
         initializer: Option<BoxedAstNode>,
     },
-    
+
     UnaryOperation {
         operator: Operation,
-        operand: BoxedAstNode
+        operand: BoxedAstNode,
     },
     BinaryOperation {
         operator: Operation,
@@ -34,7 +39,7 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
-    
+
     // A sequence of statements encapsulated by braces.
     Block(Vec<AstNode>),
     IfStatement {
@@ -56,7 +61,7 @@ pub enum AstNodeKind {
     Return(Option<BoxedAstNode>),
     Break,
     Continue,
-    
+
     /// An expression or declaration that takes inputs and returns an output.
     Function {
         qualifier: Option<QualifierKind>,
@@ -65,42 +70,41 @@ pub enum AstNodeKind {
         parameters: Vec<AstNode>,
         return_type: Option<BoxedAstNode>,
         instance: Option<ReferenceKind>,
-        body: Option<BoxedAstNode>
+        body: Option<BoxedAstNode>,
     },
     /// A type that denotes the signature of a function.
     FunctionPointer {
         params: Vec<AstNode>,
-        return_type: Option<BoxedAstNode>
+        return_type: Option<BoxedAstNode>,
     },
     /// A parameter inside a function declaration or expression.
     FunctionParameter {
         name: String,
         type_annotation: BoxedAstNode,
         initializer: Option<BoxedAstNode>,
-        mutable: bool
+        mutable: bool,
     },
 
     StructDeclaration {
         name: String,
         generic_parameters: Vec<AstNode>,
-        fields: Vec<AstNode>
+        fields: Vec<AstNode>,
     },
     StructField {
         qualifier: QualifierKind,
         name: String,
-        type_annotation: BoxedAstNode
+        type_annotation: BoxedAstNode,
     },
     StructLiteral {
         name: String,
-        fields: IndexMap<String, AstNode>
+        fields: IndexMap<String, AstNode>,
     },
 
     EnumDeclaration {
         name: String,
-        variants: IndexMap<String, (AstNode, Option<AstNode>)>
+        variants: IndexMap<String, (AstNode, Option<AstNode>)>,
     },
     EnumVariant(String),
-
 
     ImplDeclaration {
         generic_parameters: Vec<AstNode>,
@@ -108,18 +112,18 @@ pub enum AstNodeKind {
         trait_node: Option<BoxedAstNode>,
         associated_constants: Vec<AstNode>,
         associated_functions: Vec<AstNode>,
-        associated_types: Vec<AstNode>
+        associated_types: Vec<AstNode>,
     },
     AssociatedConstant {
         qualifier: QualifierKind,
         name: String,
         type_annotation: Option<BoxedAstNode>,
-        initializer: BoxedAstNode
+        initializer: BoxedAstNode,
     },
     AssociatedType {
         qualifier: QualifierKind,
         name: String,
-        value: BoxedAstNode
+        value: BoxedAstNode,
     },
 
     ///`this`
@@ -136,7 +140,7 @@ pub enum AstNodeKind {
     /// A function call (i.e. `f()`).
     FunctionCall {
         function: BoxedAstNode,
-        arguments: Vec<AstNode>
+        arguments: Vec<AstNode>,
     },
 
     TraitDeclaration {
@@ -144,23 +148,23 @@ pub enum AstNodeKind {
         generic_parameters: Vec<AstNode>,
         types: Vec<AstNode>,
         constants: Vec<AstNode>,
-        signatures: Vec<AstNode>
+        signatures: Vec<AstNode>,
     },
     TraitConstant {
         name: String,
-        type_annotation: BoxedAstNode
+        type_annotation: BoxedAstNode,
     },
     TraitType(String),
 
     GenericParameter {
         name: String,
-        constraints: Vec<String>
+        constraints: Vec<String>,
     },
 
     TypeReference {
         type_name: String,
         generic_types: Vec<AstNode>,
-        reference_kind: ReferenceKind
+        reference_kind: ReferenceKind,
     },
     TypeDeclaration {
         name: String,
@@ -169,7 +173,7 @@ pub enum AstNodeKind {
     },
 
     // PROGRAM //
-    Program(Vec<AstNode>)
+    Program(Vec<AstNode>),
 }
 
 #[derive(Debug, Clone)]
@@ -183,7 +187,7 @@ pub struct AstNode {
     /// A pointer to the type it holds in the symbol table.
     pub type_id: Option<Type>,
     /// The scope the node lives in.
-    pub scope_id: Option<ScopeId>
+    pub scope_id: Option<ScopeId>,
 }
 
 pub type BoxedAstNode = Box<AstNode>;
@@ -197,7 +201,10 @@ impl AstNode {
         None
     }
 
-    pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
+    pub fn get_value_symbol_mut<'a>(
+        &self,
+        symbol_table: &'a mut SymbolTable,
+    ) -> Option<&'a mut ValueSymbol> {
         if let Some(id) = self.value_id {
             return symbol_table.get_value_symbol_mut(id);
         }
@@ -213,7 +220,10 @@ impl AstNode {
         None
     }
 
-    pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
+    pub fn get_type_symbol_mut<'a>(
+        &self,
+        symbol_table: &'a mut SymbolTable,
+    ) -> Option<&'a mut TypeSymbol> {
         if let Some(id) = self.value_id {
             return symbol_table.get_type_symbol_mut(id);
         }
@@ -226,7 +236,13 @@ impl AstNode {
             AstNodeKind::Identifier(name) => Some(name.clone()),
 
             AstNodeKind::VariableDeclaration { name, .. } => Some(name.clone()),
-            AstNodeKind::Function { name, .. } => if name.is_empty() { None } else { Some(name.clone()) },
+            AstNodeKind::Function { name, .. } => {
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            }
             AstNodeKind::FunctionParameter { name, .. } => Some(name.clone()),
 
             AstNodeKind::StructDeclaration { name, .. } => Some(name.clone()),
@@ -277,10 +293,18 @@ impl AstNode {
                     writeln!(f)?;
                 }
             }
-            AstNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
-            AstNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
-            AstNodeKind::BooleanLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().magenta())?,
-            AstNodeKind::StringLiteral(s) => write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?,
+            AstNodeKind::IntegerLiteral(val) => {
+                write!(f, "{}{}", indent_str, val.to_string().blue())?
+            }
+            AstNodeKind::FloatLiteral(val) => {
+                write!(f, "{}{}", indent_str, val.to_string().blue())?
+            }
+            AstNodeKind::BooleanLiteral(val) => {
+                write!(f, "{}{}", indent_str, val.to_string().magenta())?
+            }
+            AstNodeKind::StringLiteral(s) => {
+                write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?
+            }
             AstNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
             AstNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
             AstNodeKind::VariableDeclaration {
@@ -307,14 +331,22 @@ impl AstNode {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{}{}", operator, operand)?
             }
-            AstNodeKind::BinaryOperation { operator, left, right } => {
+            AstNodeKind::BinaryOperation {
+                operator,
+                left,
+                right,
+            } => {
                 write!(f, "{}(", indent_str)?;
                 left.fmt_with_indent(f, 0)?;
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")?
             }
-            AstNodeKind::ConditionalOperation { operator, left, right } => {
+            AstNodeKind::ConditionalOperation {
+                operator,
+                left,
+                right,
+            } => {
                 write!(f, "{}(", indent_str)?;
                 left.fmt_with_indent(f, 0)?;
                 write!(f, " {} ", operator)?;
@@ -348,17 +380,32 @@ impl AstNode {
             } => {
                 write!(f, "{}", indent_str)?;
                 if let Some(q) = qualifier {
-                    write!(f, "{} ", match q {
-                        QualifierKind::Public => "public".purple(),
-                        QualifierKind::Private => "private".purple()
-                    })?;
+                    write!(
+                        f,
+                        "{} ",
+                        match q {
+                            QualifierKind::Public => "public".purple(),
+                            QualifierKind::Private => "private".purple(),
+                        }
+                    )?;
                 }
-                write!(f, "{} {}", "fn".bright_blue(), if name.is_empty() { "".white() } else { name.yellow() })?;
+                write!(
+                    f,
+                    "{} {}",
+                    "fn".bright_blue(),
+                    if name.is_empty() {
+                        "".white()
+                    } else {
+                        name.yellow()
+                    }
+                )?;
 
                 if !generic_parameters.is_empty() {
                     write!(f, "[")?;
                     for (i, param) in generic_parameters.iter().enumerate() {
-                        if i > 0 { write!(f, ", ")?; }
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
                         param.fmt_with_indent(f, 0)?;
                     }
                     write!(f, "]")?;
@@ -366,7 +413,9 @@ impl AstNode {
 
                 write!(f, "(")?;
                 for (i, param) in parameters.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     param.fmt_with_indent(f, 0)?;
                 }
                 write!(f, ")")?;
@@ -389,7 +438,7 @@ impl AstNode {
                 trait_node: trait_name,
                 associated_constants,
                 associated_functions,
-                associated_types
+                associated_types,
             } => {
                 write!(f, "{}{} ", indent_str, "impl".bright_cyan())?;
                 if !generic_parameters.is_empty() {
@@ -421,11 +470,20 @@ impl AstNode {
                 write!(f, "{}", "}".dimmed())?
             }
 
-            AstNodeKind::AssociatedType { qualifier, name, value } => {
-                write!(f, "{} ", match qualifier {
-                    QualifierKind::Public => "public",
-                    QualifierKind::Private => "private"
-                }.purple())?;
+            AstNodeKind::AssociatedType {
+                qualifier,
+                name,
+                value,
+            } => {
+                write!(
+                    f,
+                    "{} ",
+                    match qualifier {
+                        QualifierKind::Public => "public",
+                        QualifierKind::Private => "private",
+                    }
+                    .purple()
+                )?;
 
                 write!(f, "type ")?;
                 write!(f, "{}", name.yellow())?;
@@ -436,12 +494,17 @@ impl AstNode {
                 qualifier,
                 name,
                 type_annotation,
-                initializer
+                initializer,
             } => {
-                write!(f, "{} ", match qualifier {
-                    QualifierKind::Public => "public",
-                    QualifierKind::Private => "private"
-                }.purple())?;
+                write!(
+                    f,
+                    "{} ",
+                    match qualifier {
+                        QualifierKind::Public => "public",
+                        QualifierKind::Private => "private",
+                    }
+                    .purple()
+                )?;
 
                 write!(f, "const ")?;
                 write!(f, "{}", name.yellow())?;
@@ -458,11 +521,11 @@ impl AstNode {
                 let operation_str = match operation {
                     ReferenceKind::Reference => "&",
                     ReferenceKind::MutableReference => "&mut ",
-                    ReferenceKind::Value => ""
+                    ReferenceKind::Value => "",
                 };
 
                 write!(f, "{}{operation_str}Self", indent_str)?
-            },
+            }
 
             AstNodeKind::IfStatement {
                 condition,
@@ -473,18 +536,18 @@ impl AstNode {
                 write!(f, "{}if (", indent_str)?;
                 condition.fmt_with_indent(f, 0)?;
                 write!(f, ") ")?;
-                then_branch.fmt_with_indent(f, indent)?;  // Same indent for block
-                
+                then_branch.fmt_with_indent(f, indent)?; // Same indent for block
+
                 for (cond, branch) in else_if_branches {
                     write!(f, "{}else if (", indent_str)?;
                     cond.fmt_with_indent(f, 0)?;
                     write!(f, ") ")?;
-                    branch.fmt_with_indent(f, indent)?;  // Same indent for block
+                    branch.fmt_with_indent(f, indent)?; // Same indent for block
                 }
-                
+
                 if let Some(else_node) = else_branch {
                     write!(f, "{}else ", indent_str)?;
-                    else_node.fmt_with_indent(f, indent)?;  // Same indent for block
+                    else_node.fmt_with_indent(f, indent)?; // Same indent for block
                 }
             }
 
@@ -507,14 +570,14 @@ impl AstNode {
                     inc.fmt_with_indent(f, 0)?;
                 }
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)?  // Same indent for block
+                body.fmt_with_indent(f, indent)? // Same indent for block
             }
 
             AstNodeKind::WhileLoop { condition, body } => {
                 write!(f, "{}while (", indent_str)?;
                 condition.fmt_with_indent(f, 0)?;
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)?  // Same indent for block
+                body.fmt_with_indent(f, indent)? // Same indent for block
             }
 
             AstNodeKind::Return(Some(expr)) => {
@@ -529,10 +592,20 @@ impl AstNode {
                 name,
                 type_annotation,
                 initializer,
-                mutable
+                mutable,
             } => {
                 write!(f, "{}", indent_str)?;
-                write!(f, "{}{}: {}", if *mutable { "mut ".purple() } else { "".white() }, name.yellow(), type_annotation)?;
+                write!(
+                    f,
+                    "{}{}: {}",
+                    if *mutable {
+                        "mut ".purple()
+                    } else {
+                        "".white()
+                    },
+                    name.yellow(),
+                    type_annotation
+                )?;
                 if let Some(default) = initializer {
                     write!(f, " = ")?;
                     default.fmt_with_indent(f, 0)?;
@@ -558,12 +631,12 @@ impl AstNode {
                 }
 
                 writeln!(f, " {}", "{".dimmed())?;
-                
+
                 for field in fields {
                     field.fmt_with_indent(f, child_indent)?;
                     writeln!(f)?;
                 }
-                
+
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::StructField {
@@ -572,10 +645,14 @@ impl AstNode {
                 type_annotation,
             } => {
                 write!(f, "{}", indent_str)?;
-                write!(f, "{} ", match qualifier {
-                    QualifierKind::Public => "public".purple(),
-                    QualifierKind::Private => "private".purple()
-                })?;
+                write!(
+                    f,
+                    "{} ",
+                    match qualifier {
+                        QualifierKind::Public => "public".purple(),
+                        QualifierKind::Private => "private".purple(),
+                    }
+                )?;
 
                 write!(f, "{}", name.yellow())?;
                 write!(f, ": {}", type_annotation)?;
@@ -583,7 +660,7 @@ impl AstNode {
             AstNodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
                 write!(f, "{}", "{".dimmed())?;
-            
+
                 for (i, (field_name, expr)) in fields.iter().enumerate() {
                     write!(f, " ")?;
                     write!(f, "{}: ", field_name.yellow())?;
@@ -591,13 +668,13 @@ impl AstNode {
 
                     write!(f, "{}", if i + 1 < fields.len() { "," } else { " " })?;
                 }
-            
+
                 write!(f, "{}{}", indent_str, "}".dimmed())?
-            }      
+            }
             AstNodeKind::EnumDeclaration { name, variants } => {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
-                
+
                 for (_, (variant, expr)) in variants {
                     write!(f, "{}", " ".repeat(child_indent + 4))?;
                     write!(f, "{}", variant)?;
@@ -607,11 +684,15 @@ impl AstNode {
                     }
                     writeln!(f)?;
                 }
-                
+
                 write!(f, "{}{}", indent_str, "}".dimmed())?
-            },
+            }
             AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
-            AstNodeKind::TypeReference { type_name, generic_types, reference_kind } => {
+            AstNodeKind::TypeReference {
+                type_name,
+                generic_types,
+                reference_kind,
+            } => {
                 let type_name = match reference_kind {
                     ReferenceKind::Value => type_name.clone(),
                     ReferenceKind::MutableReference => format!("&mut {type_name}"),
@@ -630,10 +711,14 @@ impl AstNode {
                     write!(f, "]")?;
                 }
             }
-            AstNodeKind::TypeDeclaration { name, generic_parameters, value } => {
+            AstNodeKind::TypeDeclaration {
+                name,
+                generic_parameters,
+                value,
+            } => {
                 write!(f, "{}", "type ".purple())?;
                 write!(f, "{}", name)?;
-                
+
                 if !generic_parameters.is_empty() {
                     write!(f, "[")?;
                     for (i, param) in generic_parameters.iter().enumerate() {
@@ -655,7 +740,10 @@ impl AstNode {
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")?
             }
-            AstNodeKind::FunctionCall { function, arguments } => {
+            AstNodeKind::FunctionCall {
+                function,
+                arguments,
+            } => {
                 write!(f, "{}", indent_str)?;
                 function.fmt_with_indent(f, 0)?;
                 write!(f, "(")?;
@@ -667,7 +755,13 @@ impl AstNode {
                 }
                 write!(f, ")")?
             }
-            AstNodeKind::TraitDeclaration { name, generic_parameters, signatures, types, constants } => {
+            AstNodeKind::TraitDeclaration {
+                name,
+                generic_parameters,
+                signatures,
+                types,
+                constants,
+            } => {
                 write!(f, "{}trait", indent_str)?;
                 if !generic_parameters.is_empty() {
                     write!(f, "[")?;
@@ -695,16 +789,25 @@ impl AstNode {
                     constant.fmt_with_indent(f, 0)?;
                     writeln!(f)?;
                 }
-                
+
                 for signature in signatures {
                     signature.fmt_with_indent(f, child_indent)?;
                     writeln!(f)?;
                 }
-                
+
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             }
-            AstNodeKind::TraitConstant { name, type_annotation } => {
-                write!(f, "{}const {}: {}", indent_str, name.yellow(), type_annotation)?;
+            AstNodeKind::TraitConstant {
+                name,
+                type_annotation,
+            } => {
+                write!(
+                    f,
+                    "{}const {}: {}",
+                    indent_str,
+                    name.yellow(),
+                    type_annotation
+                )?;
             }
             AstNodeKind::TraitType(name) => {
                 write!(f, "{}type {}", indent_str, name.bright_blue())?;
@@ -722,8 +825,11 @@ impl AstNode {
                         write!(f, " + ")?;
                     }
                 }
-            },
-            AstNodeKind::FunctionPointer { params, return_type } => {
+            }
+            AstNodeKind::FunctionPointer {
+                params,
+                return_type,
+            } => {
                 write!(f, "{}{}", indent_str, "fn".bright_blue())?;
                 write!(f, "(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -741,9 +847,7 @@ impl AstNode {
         }
 
         if let Some(id) = &self.type_id {
-            write!(f, " {}",
-                format_args!("[{}]", id)
-            )?;
+            write!(f, " {}", format_args!("[{}]", id))?;
         }
 
         if let Some(id) = self.value_id {
@@ -757,14 +861,18 @@ impl AstNode {
 impl AstNode {
     pub fn children_mut(&mut self) -> Vec<&mut AstNode> {
         use AstNodeKind::*;
-        
+
         match &mut self.kind {
-            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_)
-            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
+            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_)
+            | CharLiteral(_) | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
 
-            VariableDeclaration { type_annotation, initializer, .. } => {
+            VariableDeclaration {
+                type_annotation,
+                initializer,
+                ..
+            } => {
                 let mut children = vec![];
 
                 if let Some(node) = type_annotation.as_mut() {
@@ -780,9 +888,9 @@ impl AstNode {
 
             UnaryOperation { operand, .. } => vec![operand.as_mut()],
 
-            BinaryOperation { left, right, .. }
-            | ConditionalOperation { left, right, .. } =>
-                vec![left.as_mut(), right.as_mut()],
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
+                vec![left.as_mut(), right.as_mut()]
+            }
 
             Block(statements) => statements.iter_mut().collect(),
 
@@ -857,7 +965,7 @@ impl AstNode {
 
                 children.extend(generic_parameters.iter_mut());
                 children.extend(parameters.iter_mut());
-                
+
                 if let Some(rt) = return_type.as_mut() {
                     children.push(rt.as_mut());
                 }
@@ -865,11 +973,14 @@ impl AstNode {
                 if let Some(b) = body.as_mut() {
                     children.push(b.as_mut());
                 }
-                
+
                 children
             }
 
-            FunctionPointer { params, return_type } => {
+            FunctionPointer {
+                params,
+                return_type,
+            } => {
                 let mut children = vec![];
 
                 for p in params.iter_mut() {
@@ -916,7 +1027,9 @@ impl AstNode {
                 children
             }
 
-            StructField { type_annotation, .. } => vec![type_annotation.as_mut()],
+            StructField {
+                type_annotation, ..
+            } => vec![type_annotation.as_mut()],
 
             StructLiteral { fields, .. } => fields.values_mut().collect(),
 
@@ -1009,12 +1122,13 @@ impl AstNode {
                 children
             }
 
-            TraitConstant { type_annotation, .. } => vec![type_annotation.as_mut()],
+            TraitConstant {
+                type_annotation, ..
+            } => vec![type_annotation.as_mut()],
 
             TraitType(_) => vec![],
 
-            TypeReference { generic_types, .. } =>
-                generic_types.iter_mut().collect(),
+            TypeReference { generic_types, .. } => generic_types.iter_mut().collect(),
 
             TypeDeclaration {
                 generic_parameters,
@@ -1033,7 +1147,10 @@ impl AstNode {
 
             FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
 
-            FunctionCall { function, arguments } => {
+            FunctionCall {
+                function,
+                arguments,
+            } => {
                 let mut children = vec![];
                 children.push(function.as_mut());
 
@@ -1042,9 +1159,9 @@ impl AstNode {
                 }
 
                 children
-            },
+            }
 
-            GenericParameter { .. } => vec![]
+            GenericParameter { .. } => vec![],
         }
     }
 }

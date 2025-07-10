@@ -7,11 +7,22 @@ trait CharClassifier {
 
 impl CharClassifier for char {
     fn is_operation(self) -> bool {
-        matches!(self,
-            NOT_TOKEN | BITWISE_NEGATE_TOKEN | ADD_TOKEN | SUB_TOKEN 
-            | MUL_TOKEN | DIV_TOKEN | MOD_TOKEN | BITWISE_AND_TOKEN 
-            | BITWISE_OR_TOKEN | BITWISE_XOR_TOKEN | ASSIGNMENT_TOKEN | GREATER_THAN_TOKEN | LESS_THAN_TOKEN
-            | FIELD_ACCESS_TOKEN
+        matches!(
+            self,
+            NOT_TOKEN
+                | BITWISE_NEGATE_TOKEN
+                | ADD_TOKEN
+                | SUB_TOKEN
+                | MUL_TOKEN
+                | DIV_TOKEN
+                | MOD_TOKEN
+                | BITWISE_AND_TOKEN
+                | BITWISE_OR_TOKEN
+                | BITWISE_XOR_TOKEN
+                | ASSIGNMENT_TOKEN
+                | GREATER_THAN_TOKEN
+                | LESS_THAN_TOKEN
+                | FIELD_ACCESS_TOKEN
         )
     }
 
@@ -32,7 +43,7 @@ pub struct Lexer {
     /// The index in the source the lexer is reading.
     index: usize,
     /// The tokens collected from the source.
-    tokens: Vec<Token>
+    tokens: Vec<Token>,
 }
 
 impl Lexer {
@@ -43,13 +54,13 @@ impl Lexer {
     }
 
     /// Goes to the index, or next line if '\n' is encountered.
-    fn next_index(&mut self) {        
+    fn next_index(&mut self) {
         if self.source[self.index] == '\n' {
             self.next_line();
         } else {
             self.column += 1;
         }
-        
+
         self.index += 1;
     }
 
@@ -61,23 +72,39 @@ impl Lexer {
             Span {
                 start: self.index,
                 end: self.index,
-                start_pos: Position { line: self.line, column: self.column },
-                end_pos: Position { line: self.line, column: self.column }
+                start_pos: Position {
+                    line: self.line,
+                    column: self.column,
+                },
+                end_pos: Position {
+                    line: self.line,
+                    column: self.column,
+                },
             }
         };
 
-        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
+        Error::from_one_error(
+            kind,
+            span,
+            (self.lines[span.end_pos.line - 1].clone(), self.line),
+        )
     }
 
     /// Peeks at the next character.
     fn peek(&self) -> Result<char, BoxedError> {
-        self.source.get(self.index + 1).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
+        self.source
+            .get(self.index + 1)
+            .ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None))
+            .copied()
     }
 
     /// Consumes the next character.
     fn consume(&mut self) -> Result<char, BoxedError> {
         self.next_index();
-        self.source.get(self.index).ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None)).copied()
+        self.source
+            .get(self.index)
+            .ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None))
+            .copied()
     }
 
     fn parse_escape_char(&mut self) -> Result<char, BoxedError> {
@@ -100,8 +127,11 @@ impl Lexer {
                         c if c.is_ascii_hexdigit() => hex.push(c),
                         c => {
                             return Err(self.generate_error(
-                                ErrorKind::InvalidEscapeSequence(format!("\\x{} (invalid char '{}')", hex, c)),
-                                None
+                                ErrorKind::InvalidEscapeSequence(format!(
+                                    "\\x{} (invalid char '{}')",
+                                    hex, c
+                                )),
+                                None,
                             ));
                         }
                     }
@@ -113,8 +143,10 @@ impl Lexer {
             'u' => {
                 if self.consume()? != '{' {
                     return Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence("\\u (does not have opening brace)".to_string()),
-                        None
+                        ErrorKind::InvalidEscapeSequence(
+                            "\\u (does not have opening brace)".to_string(),
+                        ),
+                        None,
                     ));
                 }
 
@@ -126,8 +158,12 @@ impl Lexer {
 
                     if !c.is_ascii_hexdigit() {
                         return Err(self.generate_error(
-                            ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid char '{}')", hex + &c.to_string(), c)), 
-                            None
+                            ErrorKind::InvalidEscapeSequence(format!(
+                                "\\u{{{}}} (invalid char '{}')",
+                                hex + &c.to_string(),
+                                c
+                            )),
+                            None,
                         ));
                     }
 
@@ -135,16 +171,19 @@ impl Lexer {
 
                     if hex.len() > 6 {
                         return Err(self.generate_error(
-                            ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (too long of an escape sequence)", hex)), 
-                            None
+                            ErrorKind::InvalidEscapeSequence(format!(
+                                "\\u{{{}}} (too long of an escape sequence)",
+                                hex
+                            )),
+                            None,
                         ));
                     }
                 }
 
                 if hex.is_empty() {
                     return Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence("\\u{}".to_string()), 
-                        None
+                        ErrorKind::InvalidEscapeSequence("\\u{}".to_string()),
+                        None,
                     ));
                 }
 
@@ -152,18 +191,21 @@ impl Lexer {
                 match char::from_u32(value) {
                     Some(ch) => Ok(ch),
                     None => Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid Unicode scalar)", hex)), 
-                        None
+                        ErrorKind::InvalidEscapeSequence(format!(
+                            "\\u{{{}}} (invalid Unicode scalar)",
+                            hex
+                        )),
+                        None,
                     )),
                 }
             }
 
             other => Err(self.generate_error(
-                ErrorKind::InvalidEscapeSequence(format!("\\{}", other)), 
-                None
-            ))
+                ErrorKind::InvalidEscapeSequence(format!("\\{}", other)),
+                None,
+            )),
         }
-    }    
+    }
 }
 
 impl Lexer {
@@ -175,167 +217,243 @@ impl Lexer {
             end: 0,
             start_pos: Position {
                 line: self.line,
-                column: self.column
+                column: self.column,
             },
-            end_pos: Position::default()
+            end_pos: Position::default(),
         };
-    
+
         match operator.chars().next().unwrap() {
             NOT_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::NotEqual)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Not),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },            
-            BITWISE_NEGATE_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::BitwiseNegate), span.set_end_from_values(self.index, self.line, self.column))),
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            BITWISE_NEGATE_TOKEN => Ok(Token::new(
+                operator,
+                TokenKind::Operator(Operation::BitwiseNegate),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             ADD_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::PlusEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Plus),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             SUB_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::MinusEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Minus),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             MUL_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::MulEq)
-                    },
+                    }
                     Ok(c) if c == MUL_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::Exp)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Mul),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             DIV_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::DivEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Div),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             MOD_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::ModEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Mod),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             BITWISE_AND_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == BITWISE_AND_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::And)
-                    },
+                    }
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::BitwiseAndEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::BitwiseAnd),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             BITWISE_OR_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == BITWISE_OR_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::Or)
-                    },
+                    }
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::BitwiseOrEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::BitwiseOr),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             BITWISE_XOR_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::BitwiseXorEq)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::BitwiseXor),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
             ASSIGNMENT_TOKEN => {
                 let token_type = match self.peek() {
                     Ok(c) if c == ASSIGNMENT_TOKEN => {
                         operator.push(self.consume()?);
                         TokenKind::Operator(Operation::Equivalence)
-                    },
+                    }
                     _ => TokenKind::Operator(Operation::Assign),
                 };
-                Ok(Token::new(operator, token_type, span.set_end_from_values(self.index, self.line, self.column)))
-            },
-            GREATER_THAN_TOKEN => {
-                match self.peek() {
-                    Ok(c) if c == ASSIGNMENT_TOKEN => {
-                        operator.push(self.consume()?);
-                        Ok(Token::new(operator, TokenKind::Operator(Operation::Geq), span.set_end_from_values(self.index, self.line, self.column)))
-                    },
-                    Ok(c) if c == GREATER_THAN_TOKEN => {
-                        operator.push(self.consume()?);
-                        if let Ok(c2) = self.peek() {
-                            if c2 == ASSIGNMENT_TOKEN {
-                                operator.push(self.consume()?);
-                                return Ok(Token::new(operator, TokenKind::Operator(Operation::RightBitShiftEq), span.set_end_from_values(self.index, self.line, self.column)));
-                            }
-                        }
-                        Ok(Token::new(operator, TokenKind::Operator(Operation::RightBitShift), span.set_end_from_values(self.index, self.line, self.column)))
-                    },
-                    _ => Ok(Token::new(operator, TokenKind::Operator(Operation::GreaterThan), span.set_end_from_values(self.index, self.line, self.column))),
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            GREATER_THAN_TOKEN => match self.peek() {
+                Ok(c) if c == ASSIGNMENT_TOKEN => {
+                    operator.push(self.consume()?);
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::Geq),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
                 }
-            },
-            LESS_THAN_TOKEN => {
-                match self.peek() {
-                    Ok(c) if c == ASSIGNMENT_TOKEN => {
-                        operator.push(self.consume()?);
-                        Ok(Token::new(operator, TokenKind::Operator(Operation::Leq), span.set_end_from_values(self.index, self.line, self.column)))
-                    },
-                    Ok(c) if c == LESS_THAN_TOKEN => {
-                        operator.push(self.consume()?);
-                        if let Ok(c2) = self.peek() {
-                            if c2 == ASSIGNMENT_TOKEN {
-                                operator.push(self.consume()?);
-                                return Ok(Token::new(operator, TokenKind::Operator(Operation::LeftBitShiftEq), span.set_end_from_values(self.index, self.line, self.column)));
-                            }
+                Ok(c) if c == GREATER_THAN_TOKEN => {
+                    operator.push(self.consume()?);
+                    if let Ok(c2) = self.peek() {
+                        if c2 == ASSIGNMENT_TOKEN {
+                            operator.push(self.consume()?);
+                            return Ok(Token::new(
+                                operator,
+                                TokenKind::Operator(Operation::RightBitShiftEq),
+                                span.set_end_from_values(self.index, self.line, self.column),
+                            ));
                         }
-                        Ok(Token::new(operator, TokenKind::Operator(Operation::LeftBitShift), span.set_end_from_values(self.index, self.line, self.column)))
-                    },
-                    _ => Ok(Token::new(operator, TokenKind::Operator(Operation::LessThan), span.set_end_from_values(self.index, self.line, self.column))),
+                    }
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::RightBitShift),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
                 }
+                _ => Ok(Token::new(
+                    operator,
+                    TokenKind::Operator(Operation::GreaterThan),
+                    span.set_end_from_values(self.index, self.line, self.column),
+                )),
             },
-            FIELD_ACCESS_TOKEN => Ok(Token::new(operator, TokenKind::Operator(Operation::FieldAccess), span.set_end_from_values(self.index, self.line, self.column))),
-            _ => Err(self.generate_error(ErrorKind::UnrecognizedSymbol(operator), Some(span)))
+            LESS_THAN_TOKEN => match self.peek() {
+                Ok(c) if c == ASSIGNMENT_TOKEN => {
+                    operator.push(self.consume()?);
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::Leq),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                Ok(c) if c == LESS_THAN_TOKEN => {
+                    operator.push(self.consume()?);
+                    if let Ok(c2) = self.peek() {
+                        if c2 == ASSIGNMENT_TOKEN {
+                            operator.push(self.consume()?);
+                            return Ok(Token::new(
+                                operator,
+                                TokenKind::Operator(Operation::LeftBitShiftEq),
+                                span.set_end_from_values(self.index, self.line, self.column),
+                            ));
+                        }
+                    }
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::LeftBitShift),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                _ => Ok(Token::new(
+                    operator,
+                    TokenKind::Operator(Operation::LessThan),
+                    span.set_end_from_values(self.index, self.line, self.column),
+                )),
+            },
+            FIELD_ACCESS_TOKEN => Ok(Token::new(
+                operator,
+                TokenKind::Operator(Operation::FieldAccess),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            _ => Err(self.generate_error(ErrorKind::UnrecognizedSymbol(operator), Some(span))),
         }
-    }    
+    }
 
     /// Parses a word.
     fn parse_word(&mut self) -> Result<Token, BoxedError> {
@@ -345,43 +463,149 @@ impl Lexer {
             end: 0,
             start_pos: Position {
                 line: self.line,
-                column: self.column
+                column: self.column,
             },
-            end_pos: Position::default()
+            end_pos: Position::default(),
         };
 
-        while let Ok(char) = self.peek() && (char.is_alphanumeric() || char == '_') {
+        while let Ok(char) = self.peek()
+            && (char.is_alphanumeric() || char == '_')
+        {
             self.next_index();
             word.push(self.source[self.index]);
         }
 
         match word.as_str() {
-            INT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Int), span.set_end_from_values(self.index, self.line, self.column))),
-            FLOAT_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Float), span.set_end_from_values(self.index, self.line, self.column))),
-            BOOL_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Bool), span.set_end_from_values(self.index, self.line, self.column))),
-            STRING_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::String), span.set_end_from_values(self.index, self.line, self.column))),
-            CHAR_TYPE => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Char), span.set_end_from_values(self.index, self.line, self.column))),
-            LET_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Let), span.set_end_from_values(self.index, self.line, self.column))),
-            CONST_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Const), span.set_end_from_values(self.index, self.line, self.column))),
-            STRUCT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Struct), span.set_end_from_values(self.index, self.line, self.column))),
-            ENUM_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Enum), span.set_end_from_values(self.index, self.line, self.column))),
-            TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(word, TokenKind::BooleanLiteral, span.set_end_from_values(self.index, self.line, self.column))),
-            FN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Fn), span.set_end_from_values(self.index, self.line, self.column))),
-            FOR_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::For), span.set_end_from_values(self.index, self.line, self.column))),
-            WHILE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::While), span.set_end_from_values(self.index, self.line, self.column))),
-            RETURN_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Return), span.set_end_from_values(self.index, self.line, self.column))),
-            BREAK_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Break), span.set_end_from_values(self.index, self.line, self.column))),
-            CONTINUE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Continue), span.set_end_from_values(self.index, self.line, self.column))),
-            IF_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::If), span.set_end_from_values(self.index, self.line, self.column))),
-            ELSE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Else), span.set_end_from_values(self.index, self.line, self.column))),
-            THIS_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::This), span.set_end_from_values(self.index, self.line, self.column))),
-            PUBLIC_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Public), span.set_end_from_values(self.index, self.line, self.column))),
-            PRIVATE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Private), span.set_end_from_values(self.index, self.line, self.column))),
-            IMPL_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Impl), span.set_end_from_values(self.index, self.line, self.column))),
-            TRAIT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Trait), span.set_end_from_values(self.index, self.line, self.column))),
-            TYPE_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Type), span.set_end_from_values(self.index, self.line, self.column))),
-            MUT_KEYWORD => Ok(Token::new(word, TokenKind::Keyword(KeywordKind::Mut), span.set_end_from_values(self.index, self.line, self.column))),
-            _ => Ok(Token::new(word, TokenKind::Identifier, span.set_end_from_values(self.index, self.line, self.column)))   
+            INT_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Int),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FLOAT_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Float),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            BOOL_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Bool),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            STRING_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::String),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CHAR_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Char),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            LET_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Let),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CONST_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Const),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            STRUCT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Struct),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            ENUM_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Enum),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::BooleanLiteral,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FN_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Fn),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FOR_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::For),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            WHILE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::While),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            RETURN_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Return),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            BREAK_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Break),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CONTINUE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Continue),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            IF_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::If),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            ELSE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Else),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            THIS_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::This),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            PUBLIC_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Public),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            PRIVATE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Private),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            IMPL_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Impl),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TRAIT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Trait),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TYPE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Type),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            MUT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Mut),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            _ => Ok(Token::new(
+                word,
+                TokenKind::Identifier,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
         }
     }
 
@@ -390,7 +614,7 @@ impl Lexer {
         let mut number_str = String::new();
         let mut has_decimal_point = false;
         let mut has_exponent = false;
-    
+
         let first_char = self.source[self.index];
         number_str.push(first_char);
         let span = Span {
@@ -398,9 +622,9 @@ impl Lexer {
             end: 0,
             start_pos: Position {
                 line: self.line,
-                column: self.column
+                column: self.column,
             },
-            end_pos: Position::default()
+            end_pos: Position::default(),
         };
 
         if first_char == '0' {
@@ -425,7 +649,10 @@ impl Lexer {
 
                     if !has_digits {
                         let invalid_char = self.peek().unwrap_or('\0');
-                        return Err(self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
+                        return Err(self.generate_error(
+                            ErrorKind::InvalidDigit(invalid_char.to_string()),
+                            Some(span),
+                        ));
                     }
 
                     let number_type = match base {
@@ -435,11 +662,15 @@ impl Lexer {
                         _ => unreachable!(),
                     };
 
-                    return Ok(Token::new(number_str, TokenKind::NumberLiteral(number_type), span.set_end_from_values(self.index, self.line, self.column)));
+                    return Ok(Token::new(
+                        number_str,
+                        TokenKind::NumberLiteral(number_type),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ));
                 }
             }
         }
-    
+
         while let Ok(next_char) = self.peek() {
             if next_char.is_ascii_digit() {
                 number_str.push(self.consume()?);
@@ -478,20 +709,27 @@ impl Lexer {
 
                 if !exponent_digit_found {
                     let invalid_char = self.peek().unwrap_or('\0');
-                    return Err(self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
+                    return Err(self.generate_error(
+                        ErrorKind::InvalidDigit(invalid_char.to_string()),
+                        Some(span),
+                    ));
                 }
             } else {
                 break;
             }
         }
-    
+
         let number_type = if has_decimal_point || has_exponent {
             NumberKind::Float
         } else {
             NumberKind::Decimal
         };
-    
-        Ok(Token::new(number_str, TokenKind::NumberLiteral(number_type), span.set_end_from_values(self.index, self.line, self.column)))
+
+        Ok(Token::new(
+            number_str,
+            TokenKind::NumberLiteral(number_type),
+            span.set_end_from_values(self.index, self.line, self.column),
+        ))
     }
 
     fn parse_symbol(&mut self) -> Result<Token, BoxedError> {
@@ -503,27 +741,67 @@ impl Lexer {
             end: 0,
             start_pos: Position {
                 line: self.line,
-                column: self.column
+                column: self.column,
             },
-            end_pos: Position::default()
+            end_pos: Position::default(),
         };
 
         match symbol {
-            END_OF_LINE => Ok(Token::new(symbol_buffer, TokenKind::Semicolon, span.set_end_from_values(self.index, self.line, self.column))),
-            OPEN_PARENTHESIS => Ok(Token::new(symbol_buffer, TokenKind::OpenParenthesis, span.set_end_from_values(self.index, self.line, self.column))),
-            CLOSE_PARENTHESIS => Ok(Token::new(symbol_buffer, TokenKind::CloseParenthesis, span.set_end_from_values(self.index, self.line, self.column))),
-            OPEN_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::OpenBracket, span.set_end_from_values(self.index, self.line, self.column))),
-            CLOSE_BRACKET => Ok(Token::new(symbol_buffer, TokenKind::CloseBracket, span.set_end_from_values(self.index, self.line, self.column))),
-            OPEN_BRACE => Ok(Token::new(symbol_buffer, TokenKind::OpenBrace, span.set_end_from_values(self.index, self.line, self.column))),
-            CLOSE_BRACE => Ok(Token::new(symbol_buffer, TokenKind::CloseBrace, span.set_end_from_values(self.index, self.line, self.column))),
-            COMMA => Ok(Token::new(symbol_buffer, TokenKind::Comma, span.set_end_from_values(self.index, self.line, self.column))),
-            COLON => Ok(Token::new(symbol_buffer, TokenKind::Colon, span.set_end_from_values(self.index, self.line, self.column))),
+            END_OF_LINE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Semicolon,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_PARENTHESIS => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenParenthesis,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_PARENTHESIS => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseParenthesis,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_BRACKET => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenBracket,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_BRACKET => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseBracket,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_BRACE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenBrace,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_BRACE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseBrace,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            COMMA => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Comma,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            COLON => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Colon,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             STRING_DELIMITER => {
                 while let Ok(c) = self.peek() {
                     if c == STRING_DELIMITER {
                         self.consume()?;
                         symbol_buffer.push(c);
-                        return Ok(Token::new(symbol_buffer, TokenKind::StringLiteral, span.set_end_from_values(self.index, self.line, self.column)));
+                        return Ok(Token::new(
+                            symbol_buffer,
+                            TokenKind::StringLiteral,
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
                     }
 
                     if c == '\\' {
@@ -536,7 +814,7 @@ impl Lexer {
                 }
 
                 return Err(self.generate_error(ErrorKind::UnterminatedString, Some(span)));
-            },
+            }
             CHAR_DELIMITER => {
                 let c = self.consume()?;
 
@@ -546,17 +824,28 @@ impl Lexer {
                 } else if c != CHAR_DELIMITER {
                     symbol_buffer.push(c);
                 } else {
-                    return Err(self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span)));
+                    return Err(
+                        self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span))
+                    );
                 }
 
                 if self.consume()? == CHAR_DELIMITER {
                     symbol_buffer.push(CHAR_DELIMITER);
-                    Ok(Token::new(symbol_buffer, TokenKind::CharLiteral, span.set_end_from_values(self.index, self.line, self.column)))
+                    Ok(Token::new(
+                        symbol_buffer,
+                        TokenKind::CharLiteral,
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
                 } else {
                     return Err(self.generate_error(ErrorKind::UnterminatedChar, Some(span)));
                 }
-            },
-            _ => return Err(self.generate_error(ErrorKind::UnrecognizedSymbol(symbol.to_string()), Some(span)))
+            }
+            _ => {
+                return Err(self.generate_error(
+                    ErrorKind::UnrecognizedSymbol(symbol.to_string()),
+                    Some(span),
+                ))
+            }
         }
     }
 }
@@ -569,22 +858,24 @@ impl Lexer {
             line: 1,
             column: 1,
             index: 0,
-            tokens: vec![]
+            tokens: vec![],
         }
     }
-    
+
     pub fn tokenize(&mut self) -> Result<(), BoxedError> {
         while let Some(&char) = self.source.get(self.index) {
-
-            if char.is_whitespace() {} 
-            else if char == COMMENT_TOKEN {
+            if char.is_whitespace() {
+            } else if char == COMMENT_TOKEN {
                 while let Ok(c) = self.peek() {
-                    if c == '\n' { break; }
-                    else { self.next_index(); }
+                    if c == '\n' {
+                        break;
+                    } else {
+                        self.next_index();
+                    }
                 }
             } else if char.is_operation() {
                 let token = self.parse_operator()?;
-                self.tokens.push(token);                
+                self.tokens.push(token);
             } else if char.is_alphabetic() {
                 let token = self.parse_word()?;
                 self.tokens.push(token);
@@ -599,12 +890,22 @@ impl Lexer {
             self.next_index();
         }
 
-        self.tokens.push(Token::new("".to_string(), TokenKind::EndOfFile, Span {
-            start: self.index - 1,
-            end: self.index - 1,
-            start_pos: Position { line: self.line, column: if self.column == 1 { 1 } else { self.column - 1 } },
-            end_pos: Position { line: self.line, column: if self.column == 1 { 1 } else { self.column - 1 } }
-        }));
+        self.tokens.push(Token::new(
+            "".to_string(),
+            TokenKind::EndOfFile,
+            Span {
+                start: self.index - 1,
+                end: self.index - 1,
+                start_pos: Position {
+                    line: self.line,
+                    column: if self.column == 1 { 1 } else { self.column - 1 },
+                },
+                end_pos: Position {
+                    line: self.line,
+                    column: if self.column == 1 { 1 } else { self.column - 1 },
+                },
+            },
+        ));
 
         Ok(())
     }

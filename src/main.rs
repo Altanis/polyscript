@@ -11,13 +11,13 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
-use middle::semantic_analyzer::SemanticAnalyzer;
 use frontend::ast::AstNode;
 use frontend::token_parser::Parser;
+use middle::semantic_analyzer::SemanticAnalyzer;
 use utils::kind::Token;
 
-mod middle;
 mod frontend;
+mod middle;
 mod utils;
 
 pub const READ_TOKENS: bool = false;
@@ -47,12 +47,15 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
             }
 
             std::process::exit(1);
-        },
-        Ok(program) => program
+        }
+        Ok(program) => program,
     }
 }
 
-fn analyze_tokens(lined_source: Vec<String>, program: frontend::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
+fn analyze_tokens(
+    lined_source: Vec<String>,
+    program: frontend::ast::AstNode,
+) -> (SemanticAnalyzer, AstNode) {
     let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
     match analyzer.analyze(program) {
         Err(errs) => {
@@ -62,8 +65,8 @@ fn analyze_tokens(lined_source: Vec<String>, program: frontend::ast::AstNode) ->
             }
 
             std::process::exit(1);
-        },
-        Ok(program) => (analyzer, program)
+        }
+        Ok(program) => (analyzer, program),
     }
 }
 
@@ -99,9 +102,10 @@ fn assert_scripts_work() {
 
     if let Ok(entries) = fs::read_dir(path) {
         paths.extend(
-            entries.filter_map(Result::ok)
-                   .map(|entry| entry.path())
-                   .filter(|path| path.is_file())
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file()),
         );
     }
 

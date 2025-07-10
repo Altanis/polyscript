@@ -1,7 +1,13 @@
-use std::{collections::{HashMap, VecDeque}, rc::Rc};
+use crate::{
+    frontend::ast::AstNode,
+    utils::{error::*, kind::*},
+};
 use colored::*;
+use std::{
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+};
 use strum::IntoEnumIterator;
-use crate::{frontend::ast::AstNode, utils::{error::*, kind::*}};
 
 pub type ScopeId = usize;
 pub type ValueNameId = usize;
@@ -49,7 +55,7 @@ pub enum ValueSymbolKind {
     Variable,
     Function(ScopeId),
     StructField,
-    EnumVariant
+    EnumVariant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, strum_macros::EnumIter, strum_macros::Display)]
@@ -59,7 +65,7 @@ pub enum PrimitiveKind {
     Bool,
     String,
     Char,
-    Null
+    Null,
 }
 
 impl PrimitiveKind {
@@ -70,7 +76,7 @@ impl PrimitiveKind {
             PrimitiveKind::Bool => BOOL_TYPE,
             PrimitiveKind::String => STRING_TYPE,
             PrimitiveKind::Char => CHAR_TYPE,
-            PrimitiveKind::Null => NULL_TYPE
+            PrimitiveKind::Null => NULL_TYPE,
         }
     }
 }
@@ -79,7 +85,7 @@ impl PrimitiveKind {
 pub struct InherentImpl {
     pub scope_id: ScopeId,
     pub specialization: Vec<TypeSymbolId>,
-    pub generic_params: Vec<TypeSymbolId>
+    pub generic_params: Vec<TypeSymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +93,8 @@ pub struct TraitImpl {
     pub impl_scope_id: ScopeId,
     pub impl_generic_params: Vec<TypeSymbolId>,
     pub trait_generic_specialization: Vec<TypeSymbolId>,
-    pub type_specialization: Vec<TypeSymbolId>
+    pub type_specialization: Vec<TypeSymbolId>,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum TypeSymbolKind {
@@ -101,10 +106,10 @@ pub enum TypeSymbolKind {
     FunctionSignature {
         params: Vec<Type>,
         return_type: Type,
-        instance: Option<ReferenceKind>
+        instance: Option<ReferenceKind>,
     },
     Generic(Vec<TypeSymbolId>),
-    UnificationVariable(TypeSymbolId)
+    UnificationVariable(TypeSymbolId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,7 +121,7 @@ pub enum ScopeKind {
     Struct,
     Impl,
     Trait,
-    Type
+    Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -131,7 +136,10 @@ pub enum Type {
 
 impl Type {
     pub fn new_base(symbol: TypeSymbolId) -> Self {
-        Type::Base { symbol, args: vec![] }
+        Type::Base {
+            symbol,
+            args: vec![],
+        }
     }
 
     pub fn is_base(&self) -> bool {
@@ -155,7 +163,7 @@ pub struct ValueSymbol {
     pub span: Option<Span>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
-    pub type_id: Option<Type>
+    pub type_id: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +174,7 @@ pub struct TypeSymbol {
     pub generic_parameters: Vec<TypeSymbolId>,
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
-    pub span: Option<Span>
+    pub span: Option<Span>,
 }
 
 impl TypeSymbol {
@@ -182,7 +190,7 @@ pub struct Scope {
     pub kind: ScopeKind,
     pub parent: Option<ScopeId>,
     pub id: ScopeId,
-    pub receiver_kind: Option<ReferenceKind>
+    pub receiver_kind: Option<ReferenceKind>,
 }
 
 pub struct SymbolTable {
@@ -190,18 +198,18 @@ pub struct SymbolTable {
     pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>,
     value_names: NameInterner,
     type_names: NameInterner,
-    
+
     pub default_trait_impl_scopes: HashMap<(TypeSymbolId, TypeSymbolId), ScopeId>,
 
     pub scopes: HashMap<ScopeId, Scope>,
-    
+
     lines: Rc<Vec<String>>,
     current_scope_id: ScopeId,
     next_scope_id: ScopeId,
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
 
-    real_starting_scope: ScopeId
+    real_starting_scope: ScopeId,
 }
 
 impl SymbolTable {
@@ -218,7 +226,7 @@ impl SymbolTable {
             next_scope_id: 0,
             next_value_symbol_id: 0,
             next_type_symbol_id: 0,
-            real_starting_scope: 0
+            real_starting_scope: 0,
         };
 
         let root_scope_id = table.get_next_scope_id();
@@ -228,18 +236,20 @@ impl SymbolTable {
             parent: None,
             id: root_scope_id,
             kind: ScopeKind::Root,
-            receiver_kind: None
+            receiver_kind: None,
         };
         table.scopes.insert(root_scope_id, root_scope);
-        
+
         for ty in PrimitiveKind::iter() {
-            table.add_type_symbol(
-                ty.to_symbol_str(),
-                TypeSymbolKind::Primitive(ty),
-                vec![],
-                QualifierKind::Public,
-                None
-            ).unwrap();
+            table
+                .add_type_symbol(
+                    ty.to_symbol_str(),
+                    TypeSymbolKind::Primitive(ty),
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
         }
 
         let init_scope_id = table.get_next_scope_id();
@@ -249,7 +259,7 @@ impl SymbolTable {
             parent: Some(root_scope_id),
             id: init_scope_id,
             kind: ScopeKind::Block,
-            receiver_kind: None
+            receiver_kind: None,
         };
 
         table.scopes.insert(init_scope_id, init_scope);
@@ -266,92 +276,196 @@ impl SymbolTable {
 
         // TRAITS //
         for op in Operation::iter() {
-            let Some((trait_name, is_binary)) = op.to_trait_data() else { continue; };
+            let Some((trait_name, is_binary)) = op.to_trait_data() else {
+                continue;
+            };
             let is_unary = !is_binary;
 
-            let fn_name = trait_name.chars().enumerate().map(|(i, c)| {
-                if i != 0 && c.is_uppercase() { format!("_{}", c.to_lowercase()) }
-                else { c.to_lowercase().to_string() }
-            }).collect::<String>();
+            let fn_name = trait_name
+                .chars()
+                .enumerate()
+                .map(|(i, c)| {
+                    if i != 0 && c.is_uppercase() {
+                        format!("_{}", c.to_lowercase())
+                    } else {
+                        c.to_lowercase().to_string()
+                    }
+                })
+                .collect::<String>();
 
             let trait_scope_id = self.enter_scope(ScopeKind::Trait);
 
-            let self_type_id = self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None).unwrap();
-            let output_type_id = self.add_type_symbol("Output", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None).unwrap();
-            
+            let self_type_id = self
+                .add_type_symbol(
+                    "Self",
+                    TypeSymbolKind::TypeAlias((None, None)),
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
+            let output_type_id = self
+                .add_type_symbol(
+                    "Output",
+                    TypeSymbolKind::TypeAlias((None, None)),
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
+
             let trait_generics = if is_unary { vec![] } else { vec!["Rhs"] };
             let trait_generic_ids: Vec<TypeSymbolId> = trait_generics
                 .iter()
-                .map(|&name| self.add_type_symbol(name, TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap())
+                .map(|&name| {
+                    self.add_type_symbol(
+                        name,
+                        TypeSymbolKind::Generic(vec![]),
+                        vec![],
+                        QualifierKind::Public,
+                        None,
+                    )
+                    .unwrap()
+                })
                 .collect();
 
             let mut params = vec![Type::new_base(self_type_id)];
             if !is_unary {
                 params.push(Type::new_base(trait_generic_ids[0]));
             }
-            
+
             self.add_type_symbol(
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params,
                     return_type: Type::new_base(output_type_id),
-                    instance: Some(ReferenceKind::Value)
+                    instance: Some(ReferenceKind::Value),
                 },
-                vec![], QualifierKind::Public, None
-            ).unwrap();
+                vec![],
+                QualifierKind::Public,
+                None,
+            )
+            .unwrap();
 
             self.exit_scope();
 
-            let trait_id = self.add_type_symbol(
-                &trait_name, 
-                TypeSymbolKind::Trait(trait_scope_id), 
-                trait_generic_ids.clone(),
-                QualifierKind::Public, None
-            ).unwrap();
+            let trait_id = self
+                .add_type_symbol(
+                    &trait_name,
+                    TypeSymbolKind::Trait(trait_scope_id),
+                    trait_generic_ids.clone(),
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
 
-            trait_registry.default_traits.insert(trait_name.clone(), trait_id);
+            trait_registry
+                .default_traits
+                .insert(trait_name.clone(), trait_id);
 
             // DEFAULT IMPLS //
             for primitive in PrimitiveKind::iter() {
-                let Some(return_type) = op.to_default_trait_return_type(primitive) else { continue; };
-                let output_id = self.find_type_symbol(return_type.to_symbol_str()).unwrap().id;
+                let Some(return_type) = op.to_default_trait_return_type(primitive) else {
+                    continue;
+                };
+                let output_id = self
+                    .find_type_symbol(return_type.to_symbol_str())
+                    .unwrap()
+                    .id;
                 let self_id = self.find_type_symbol(primitive.to_symbol_str()).unwrap().id;
 
                 let impl_scope_id = self.enter_scope(ScopeKind::Impl);
-                
+
                 let trait_specialization = if is_unary { vec![] } else { vec![self_id] };
-                trait_registry.register(trait_id, self_id, TraitImpl {
-                    impl_scope_id,
-                    impl_generic_params: vec![],
-                    trait_generic_specialization: trait_specialization,
-                    type_specialization: vec![],
-                });
-                
-                self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))), vec![], QualifierKind::Public, None).unwrap();
-                self.add_type_symbol("Output", TypeSymbolKind::TypeAlias((None, Some(Type::new_base(output_id)))), vec![], QualifierKind::Public, None).unwrap();
+                trait_registry.register(
+                    trait_id,
+                    self_id,
+                    TraitImpl {
+                        impl_scope_id,
+                        impl_generic_params: vec![],
+                        trait_generic_specialization: trait_specialization,
+                        type_specialization: vec![],
+                    },
+                );
+
+                self.add_type_symbol(
+                    "Self",
+                    TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))),
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
+                self.add_type_symbol(
+                    "Output",
+                    TypeSymbolKind::TypeAlias((None, Some(Type::new_base(output_id)))),
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
                 if !is_unary {
-                    self.add_type_symbol(trait_generics[0], TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))), vec![], QualifierKind::Public, None).unwrap();
+                    self.add_type_symbol(
+                        trait_generics[0],
+                        TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))),
+                        vec![],
+                        QualifierKind::Public,
+                        None,
+                    )
+                    .unwrap();
                 }
 
                 let func_scope_id = self.enter_scope(ScopeKind::Function);
-                self.add_value_symbol("this", ValueSymbolKind::Variable, false, QualifierKind::Public, Some(Type::new_base(self_id)), None).unwrap();
+                self.add_value_symbol(
+                    "this",
+                    ValueSymbolKind::Variable,
+                    false,
+                    QualifierKind::Public,
+                    Some(Type::new_base(self_id)),
+                    None,
+                )
+                .unwrap();
                 if !is_unary {
-                    self.add_value_symbol("other", ValueSymbolKind::Variable, false, QualifierKind::Public, Some(Type::new_base(self_id)), None).unwrap();
+                    self.add_value_symbol(
+                        "other",
+                        ValueSymbolKind::Variable,
+                        false,
+                        QualifierKind::Public,
+                        Some(Type::new_base(self_id)),
+                        None,
+                    )
+                    .unwrap();
                 }
 
-                let concrete_sig_params = if is_unary { vec![Type::new_base(self_id)] } else { vec![Type::new_base(self_id), Type::new_base(self_id)] };
-                let concrete_sig_id = self.add_type_symbol(
+                let concrete_sig_params = if is_unary {
+                    vec![Type::new_base(self_id)]
+                } else {
+                    vec![Type::new_base(self_id), Type::new_base(self_id)]
+                };
+                let concrete_sig_id = self
+                    .add_type_symbol(
+                        &fn_name,
+                        TypeSymbolKind::FunctionSignature {
+                            params: concrete_sig_params,
+                            return_type: Type::new_base(output_id),
+                            instance: Some(ReferenceKind::Value),
+                        },
+                        vec![],
+                        QualifierKind::Public,
+                        None,
+                    )
+                    .unwrap();
+
+                self.add_value_symbol(
                     &fn_name,
-                    TypeSymbolKind::FunctionSignature {
-                        params: concrete_sig_params,
-                        return_type: Type::new_base(output_id),
-                        instance: Some(ReferenceKind::Value)
-                    },
-                    vec![], QualifierKind::Public, None
-                ).unwrap();
-                
-                self.add_value_symbol(&fn_name, ValueSymbolKind::Function(func_scope_id), false, QualifierKind::Public, Some(Type::new_base(concrete_sig_id)), None).unwrap();
-                
+                    ValueSymbolKind::Function(func_scope_id),
+                    false,
+                    QualifierKind::Public,
+                    Some(Type::new_base(concrete_sig_id)),
+                    None,
+                )
+                .unwrap();
+
                 self.exit_scope(); // function scope
                 self.exit_scope(); // impl scope
             }
@@ -367,7 +481,7 @@ impl SymbolTable {
         mutable: bool,
         qualifier: QualifierKind,
         type_id: Option<Type>,
-        span: Option<Span>
+        span: Option<Span>,
     ) -> Result<ValueSymbolId, BoxedError> {
         let name_id = self.value_names.intern(name);
         let scope_id = self.current_scope_id;
@@ -380,9 +494,22 @@ impl SymbolTable {
 
         let id = self.next_value_symbol_id;
         self.next_value_symbol_id += 1;
-        let symbol = ValueSymbol { id, name_id, kind, mutable, qualifier, type_id, span, scope_id };
+        let symbol = ValueSymbol {
+            id,
+            name_id,
+            kind,
+            mutable,
+            qualifier,
+            type_id,
+            span,
+            scope_id,
+        };
         self.value_symbols.insert(id, symbol);
-        self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
+        self.scopes
+            .get_mut(&scope_id)
+            .unwrap()
+            .values
+            .insert(name_id, id);
 
         Ok(id)
     }
@@ -393,7 +520,7 @@ impl SymbolTable {
         kind: TypeSymbolKind,
         generic_parameters: Vec<TypeSymbolId>,
         qualifier: QualifierKind,
-        span: Option<Span>
+        span: Option<Span>,
     ) -> Result<TypeSymbolId, BoxedError> {
         let name_id = self.type_names.intern(name);
         let scope_id = self.current_scope_id;
@@ -406,9 +533,21 @@ impl SymbolTable {
 
         let id = self.next_type_symbol_id;
         self.next_type_symbol_id += 1;
-        let symbol = TypeSymbol { id, name_id, kind, generic_parameters, qualifier, span, scope_id };
+        let symbol = TypeSymbol {
+            id,
+            name_id,
+            kind,
+            generic_parameters,
+            qualifier,
+            span,
+            scope_id,
+        };
         self.type_symbols.insert(id, symbol);
-        self.scopes.get_mut(&scope_id).unwrap().types.insert(name_id, id);
+        self.scopes
+            .get_mut(&scope_id)
+            .unwrap()
+            .types
+            .insert(name_id, id);
 
         Ok(id)
     }
@@ -428,7 +567,7 @@ impl SymbolTable {
 
         None
     }
-    
+
     pub fn find_value_symbol_mut(&mut self, name: &str) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let mut scope_id = Some(self.current_scope_id);
@@ -444,7 +583,7 @@ impl SymbolTable {
 
         None
     }
-    
+
     pub fn find_type_symbol(&self, name: &str) -> Option<&TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let mut scope_id = Some(self.current_scope_id);
@@ -477,7 +616,11 @@ impl SymbolTable {
         None
     }
 
-    pub fn find_value_symbol_from_scope(&self, scope_id: ScopeId, name: &str) -> Option<&ValueSymbol> {
+    pub fn find_value_symbol_from_scope(
+        &self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<&ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let mut scope_id = Some(scope_id);
 
@@ -493,7 +636,11 @@ impl SymbolTable {
         None
     }
 
-    pub fn find_value_symbol_from_scope_mut(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut ValueSymbol> {
+    pub fn find_value_symbol_from_scope_mut(
+        &mut self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let mut scope_id = Some(scope_id);
 
@@ -509,7 +656,11 @@ impl SymbolTable {
         None
     }
 
-    pub fn find_type_symbol_from_scope(&self, scope_id: ScopeId, name: &str) -> Option<&TypeSymbol> {
+    pub fn find_type_symbol_from_scope(
+        &self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<&TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let mut scope_id = Some(scope_id);
 
@@ -525,7 +676,11 @@ impl SymbolTable {
         None
     }
 
-    pub fn find_type_symbol_from_scope_mut(&mut self, scope_id: ScopeId, name: &str) -> Option<&mut TypeSymbol> {
+    pub fn find_type_symbol_from_scope_mut(
+        &mut self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<&mut TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let mut scope_id = Some(scope_id);
 
@@ -541,7 +696,11 @@ impl SymbolTable {
         None
     }
 
-    pub fn find_value_symbol_in_scope(&self, name: &str, scope_id: ScopeId) -> Option<&ValueSymbol> {
+    pub fn find_value_symbol_in_scope(
+        &self,
+        name: &str,
+        scope_id: ScopeId,
+    ) -> Option<&ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
 
@@ -555,24 +714,44 @@ impl SymbolTable {
         self.type_symbols.get(symbol_id)
     }
 
-    pub fn find_value_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut ValueSymbol> {
+    pub fn find_value_symbol_in_scope_mut(
+        &mut self,
+        name: &str,
+        scope_id: ScopeId,
+    ) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
         self.value_symbols.get_mut(symbol_id)
     }
 
-    pub fn find_type_symbol_in_scope_mut(&mut self, name: &str, scope_id: ScopeId) -> Option<&mut TypeSymbol> {
+    pub fn find_type_symbol_in_scope_mut(
+        &mut self,
+        name: &str,
+        scope_id: ScopeId,
+    ) -> Option<&mut TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
         self.type_symbols.get_mut(symbol_id)
     }
 
-    pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> { self.value_symbols.get(&id) }
-    pub fn get_value_symbol_mut(&mut self, id: ValueSymbolId) -> Option<&mut ValueSymbol> { self.value_symbols.get_mut(&id) }
-    pub fn get_type_symbol(&self, id: TypeSymbolId) -> Option<&TypeSymbol> { self.type_symbols.get(&id) }
-    pub fn get_type_symbol_mut(&mut self, id: TypeSymbolId) -> Option<&mut TypeSymbol> { self.type_symbols.get_mut(&id) }
-    pub fn get_value_name(&self, id: ValueNameId) -> &str { self.value_names.lookup(id) }
-    pub fn get_type_name(&self, id: TypeNameId) -> &str { self.type_names.lookup(id) }
+    pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> {
+        self.value_symbols.get(&id)
+    }
+    pub fn get_value_symbol_mut(&mut self, id: ValueSymbolId) -> Option<&mut ValueSymbol> {
+        self.value_symbols.get_mut(&id)
+    }
+    pub fn get_type_symbol(&self, id: TypeSymbolId) -> Option<&TypeSymbol> {
+        self.type_symbols.get(&id)
+    }
+    pub fn get_type_symbol_mut(&mut self, id: TypeSymbolId) -> Option<&mut TypeSymbol> {
+        self.type_symbols.get_mut(&id)
+    }
+    pub fn get_value_name(&self, id: ValueNameId) -> &str {
+        self.value_names.lookup(id)
+    }
+    pub fn get_type_name(&self, id: TypeNameId) -> &str {
+        self.type_names.lookup(id)
+    }
 
     pub fn get_current_scope_id(&self) -> ScopeId {
         self.current_scope_id
@@ -594,7 +773,7 @@ impl SymbolTable {
             parent: Some(parent_id),
             id: new_id,
             kind,
-            receiver_kind: None
+            receiver_kind: None,
         };
 
         self.scopes.insert(new_id, new_scope);
@@ -610,15 +789,40 @@ impl SymbolTable {
         }
     }
 
-    pub fn current_scope_mut(&mut self) -> &mut Scope { self.scopes.get_mut(&self.current_scope_id).expect("Scope should exist") }
-    pub fn current_scope(&self) -> &Scope { self.scopes.get(&self.current_scope_id).expect("Scope should exist") }
-    pub fn get_scope_mut(&mut self, scope_id: ScopeId) -> Option<&mut Scope> { self.scopes.get_mut(&scope_id) }
-    pub fn get_scope(&self, scope_id: ScopeId) -> Option<&Scope> { self.scopes.get(&scope_id) }
+    pub fn current_scope_mut(&mut self) -> &mut Scope {
+        self.scopes
+            .get_mut(&self.current_scope_id)
+            .expect("Scope should exist")
+    }
+    pub fn current_scope(&self) -> &Scope {
+        self.scopes
+            .get(&self.current_scope_id)
+            .expect("Scope should exist")
+    }
+    pub fn get_scope_mut(&mut self, scope_id: ScopeId) -> Option<&mut Scope> {
+        self.scopes.get_mut(&scope_id)
+    }
+    pub fn get_scope(&self, scope_id: ScopeId) -> Option<&Scope> {
+        self.scopes.get(&scope_id)
+    }
 
-    fn create_redeclaration_error(&self, name: String, span1: Option<Span>, span2: Option<Span>) -> BoxedError {
+    fn create_redeclaration_error(
+        &self,
+        name: String,
+        span1: Option<Span>,
+        span2: Option<Span>,
+    ) -> BoxedError {
         match (span1, span2) {
-            (Some(s1), Some(s2)) => Error::from_multiple_errors(ErrorKind::AlreadyDeclared(name), s2, Span::get_all_lines(self.lines.clone(), &[s1, s2])),
-            (Some(s), None) | (None, Some(s)) => Error::from_one_error(ErrorKind::AlreadyDeclared(name), s, (self.lines[s.start_pos.line - 1].clone(), s.start_pos.line)),
+            (Some(s1), Some(s2)) => Error::from_multiple_errors(
+                ErrorKind::AlreadyDeclared(name),
+                s2,
+                Span::get_all_lines(self.lines.clone(), &[s1, s2]),
+            ),
+            (Some(s), None) | (None, Some(s)) => Error::from_one_error(
+                ErrorKind::AlreadyDeclared(name),
+                s,
+                (self.lines[s.start_pos.line - 1].clone(), s.start_pos.line),
+            ),
             (None, None) => Error::new(ErrorKind::AlreadyDeclared(name)),
         }
     }
@@ -627,7 +831,7 @@ impl SymbolTable {
 #[derive(Default)]
 pub struct TraitRegistry {
     pub register: HashMap<TypeSymbolId, HashMap<TypeSymbolId, Vec<TraitImpl>>>,
-    pub default_traits: HashMap<String, TypeSymbolId>
+    pub default_traits: HashMap<String, TypeSymbolId>,
 }
 
 impl TraitRegistry {
@@ -635,7 +839,12 @@ impl TraitRegistry {
         Self::default()
     }
 
-    pub fn register(&mut self, trait_id: TypeSymbolId, type_id: TypeSymbolId, implementation: TraitImpl) {
+    pub fn register(
+        &mut self,
+        trait_id: TypeSymbolId,
+        type_id: TypeSymbolId,
+        implementation: TraitImpl,
+    ) {
         self.register
             .entry(trait_id)
             .or_default()
@@ -663,21 +872,21 @@ pub enum Constraint {
     Operation(TypeSymbolId, Type),
     /// The metavariable denotes the value of a member on an
     /// instance variable or a static field.
-    MemberAccess(TypeSymbolId, Type, String)
+    MemberAccess(TypeSymbolId, Type, String),
 }
 
 /// Additional information about a constraint.
 #[derive(Debug, Clone, Copy)]
 pub struct ConstraintInfo {
     pub span: Span,
-    pub scope_id: ScopeId
+    pub scope_id: ScopeId,
 }
 
 #[derive(Default)]
 pub struct UnificationContext {
     next_id: TypeSymbolId,
     pub substitutions: HashMap<TypeSymbolId, Type>,
-    pub constraints: VecDeque<(Constraint, ConstraintInfo)>
+    pub constraints: VecDeque<(Constraint, ConstraintInfo)>,
 }
 
 impl UnificationContext {
@@ -690,17 +899,19 @@ impl UnificationContext {
     pub fn generate_uv_type(&mut self, symbol_table: &mut SymbolTable, span: Span) -> Type {
         let id = self.get_next_uv_id();
 
-        let symbol = symbol_table.add_type_symbol(
-            &format!("#uv_{}", id), 
-            TypeSymbolKind::UnificationVariable(id), 
-            vec![], 
-            QualifierKind::Private, 
-            Some(span)
-        ).unwrap();
+        let symbol = symbol_table
+            .add_type_symbol(
+                &format!("#uv_{}", id),
+                TypeSymbolKind::UnificationVariable(id),
+                vec![],
+                QualifierKind::Private,
+                Some(span),
+            )
+            .unwrap();
 
         Type::Base {
             symbol,
-            args: vec![]
+            args: vec![],
         }
     }
 
@@ -715,7 +926,7 @@ pub struct SemanticAnalyzer {
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     errors: Vec<Error>,
-    lines: Rc<Vec<String>>
+    lines: Rc<Vec<String>>,
 }
 
 impl SemanticAnalyzer {
@@ -724,7 +935,7 @@ impl SemanticAnalyzer {
         let mut trait_registry = TraitRegistry::new();
 
         symbol_table.populate_with_defaults(&mut trait_registry);
-        
+
         let builtin_types: Vec<TypeSymbolId> = PrimitiveKind::iter()
             .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
             .collect();
@@ -735,7 +946,7 @@ impl SemanticAnalyzer {
             builtin_types,
             unification_context: UnificationContext::default(),
             errors: vec![],
-            lines
+            lines,
         }
     }
 
@@ -763,7 +974,7 @@ impl SemanticAnalyzer {
          * 5: Resolves unification variables via a unification algorithm.
          * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop).
          */
-        
+
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
@@ -776,8 +987,11 @@ impl SemanticAnalyzer {
 
 impl std::fmt::Display for InherentImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "InherentImpl(scope_id: {}, specialization: {:?}, generic_params: {:?})", 
-            self.scope_id, self.specialization, self.generic_params)
+        write!(
+            f,
+            "InherentImpl(scope_id: {}, specialization: {:?}, generic_params: {:?})",
+            self.scope_id, self.specialization, self.generic_params
+        )
     }
 }
 
@@ -801,54 +1015,99 @@ impl std::fmt::Display for ValueSymbolKind {
 }
 
 impl SymbolTable {
-    pub fn display_value_symbol<'a>(&'a self, symbol: &'a ValueSymbol) -> impl std::fmt::Display + 'a {
-        struct Displayer<'a> { symbol: &'a ValueSymbol, table: &'a SymbolTable }
+    pub fn display_value_symbol<'a>(
+        &'a self,
+        symbol: &'a ValueSymbol,
+    ) -> impl std::fmt::Display + 'a {
+        struct Displayer<'a> {
+            symbol: &'a ValueSymbol,
+            table: &'a SymbolTable,
+        }
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_value_name(self.symbol.name_id);
                 write!(f, "{}", name.cyan().bold())?;
                 write!(f, " ({})", self.symbol.kind)?;
-                if self.symbol.mutable { write!(f, " {}", "mut".red())?; }
+                if self.symbol.mutable {
+                    write!(f, " {}", "mut".red())?;
+                }
                 write!(f, " {}", self.symbol.qualifier)?;
                 Ok(())
             }
         }
-        Displayer { symbol, table: self }
+        Displayer {
+            symbol,
+            table: self,
+        }
     }
 
-    pub fn display_type_symbol<'a>(&'a self, symbol: &'a TypeSymbol) -> impl std::fmt::Display + 'a {
-        struct Displayer<'a> { symbol: &'a TypeSymbol, table: &'a SymbolTable }
+    pub fn display_type_symbol<'a>(
+        &'a self,
+        symbol: &'a TypeSymbol,
+    ) -> impl std::fmt::Display + 'a {
+        struct Displayer<'a> {
+            symbol: &'a TypeSymbol,
+            table: &'a SymbolTable,
+        }
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_type_name(self.symbol.name_id);
                 let type_variant = match &self.symbol.kind {
-                    TypeSymbolKind::Struct((id, scopes)) => format!("Struct({}, {:?})", id, scopes).blue(),
+                    TypeSymbolKind::Struct((id, scopes)) => {
+                        format!("Struct({}, {:?})", id, scopes).blue()
+                    }
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
-                    TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
+                    TypeSymbolKind::Enum((id, scopes)) => {
+                        format!("Enum({}, {:?})", id, scopes).blue()
+                    }
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
-                    TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
-                        let params_str = params.iter()
+                    TypeSymbolKind::FunctionSignature {
+                        params,
+                        return_type,
+                        ..
+                    } => {
+                        let params_str = params
+                            .iter()
                             .map(|p_ty| self.table.display_type(p_ty))
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
-                    },
-                    TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
-                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
+                        format!(
+                            "fn({}): {}",
+                            params_str,
+                            self.table.display_type(return_type)
+                        )
+                        .blue()
+                    }
+                    TypeSymbolKind::Generic(constraints) => {
+                        format!("Generic({:?})", constraints).white()
+                    }
+                    TypeSymbolKind::UnificationVariable(id) => {
+                        format!("UnificationVariable({})", id).red()
+                    }
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {
-                    let params = self.symbol.generic_parameters.iter()
-                        .map(|id| self.table.get_type_name(self.table.type_symbols[id].name_id))
-                        .collect::<Vec<_>>().join(", ");
+                    let params = self
+                        .symbol
+                        .generic_parameters
+                        .iter()
+                        .map(|id| {
+                            self.table
+                                .get_type_name(self.table.type_symbols[id].name_id)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     write!(f, "<{}>", params)?;
                 }
                 Ok(())
             }
         }
 
-        Displayer { symbol, table: self }
+        Displayer {
+            symbol,
+            table: self,
+        }
     }
 
     pub fn display_type<'a>(&'a self, ty: &'a Type) -> String {
@@ -871,17 +1130,38 @@ impl SymbolTable {
         }
     }
 
-    fn display_scope(&self, scope_id: ScopeId, indent: usize, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn display_scope(
+        &self,
+        scope_id: ScopeId,
+        indent: usize,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
         let scope = self.scopes.get(&scope_id).unwrap();
         for symbol_id in scope.values.values() {
             let symbol = &self.value_symbols[symbol_id];
-            writeln!(f, "{:indent$}[Value({})] {}", "", symbol_id, self.display_value_symbol(symbol), indent = indent)?;
+            writeln!(
+                f,
+                "{:indent$}[Value({})] {}",
+                "",
+                symbol_id,
+                self.display_value_symbol(symbol),
+                indent = indent
+            )?;
         }
         for symbol_id in scope.types.values() {
             let symbol = &self.type_symbols[symbol_id];
-            writeln!(f, "{:indent$}[Type({})] {}", "", symbol_id, self.display_type_symbol(symbol), indent = indent)?;
+            writeln!(
+                f,
+                "{:indent$}[Type({})] {}",
+                "",
+                symbol_id,
+                self.display_type_symbol(symbol),
+                indent = indent
+            )?;
         }
-        let mut child_scope_ids: Vec<ScopeId> = self.scopes.values()
+        let mut child_scope_ids: Vec<ScopeId> = self
+            .scopes
+            .values()
             .filter(|s| s.parent == Some(scope_id))
             .map(|s| s.id)
             .collect();
@@ -904,7 +1184,10 @@ impl std::fmt::Display for SymbolTable {
 
 impl TraitRegistry {
     pub fn display<'a>(&'a self, symbol_table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
-        struct Displayer<'a> { registry: &'a TraitRegistry, table: &'a SymbolTable }
+        struct Displayer<'a> {
+            registry: &'a TraitRegistry,
+            table: &'a SymbolTable,
+        }
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 for (trait_id, impls) in &self.registry.register {
@@ -915,13 +1198,19 @@ impl TraitRegistry {
                         continue;
                     }
 
-                    writeln!(f, "{}", format!("[Trait({})] {}", trait_id, trait_name).underline())?;
+                    writeln!(
+                        f,
+                        "{}",
+                        format!("[Trait({})] {}", trait_id, trait_name).underline()
+                    )?;
                     for (type_id, impl_details) in impls {
                         let type_symbol = &self.table.type_symbols[type_id];
                         let type_name = self.table.get_type_name(type_symbol.name_id);
                         write!(f, "  for [Type({})] {}: ", type_id, type_name)?;
                         for (i, impl_detail) in impl_details.iter().enumerate() {
-                            if i > 0 { write!(f, ", ")?; }
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
                             write!(f, "{:?}", impl_detail)?;
                         }
                         writeln!(f)?;
@@ -930,32 +1219,68 @@ impl TraitRegistry {
                 Ok(())
             }
         }
-        Displayer { registry: self, table: symbol_table }
+        Displayer {
+            registry: self,
+            table: symbol_table,
+        }
     }
 }
 
 impl Constraint {
     fn fmt<'a>(&'a self, table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
-        struct C<'a> { c: &'a Constraint, t: &'a SymbolTable }
+        struct C<'a> {
+            c: &'a Constraint,
+            t: &'a SymbolTable,
+        }
         impl std::fmt::Display for C<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 use Constraint::*;
                 let ty = |id| self.t.display_type(&Type::new_base(id));
                 match self.c {
-                    Equality(id, rhs)              =>
-                        write!(f, "{} {} {}",        ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
-                    SelfValue(id, rhs)   =>
-                        write!(f, "*{} {} {}",       ty(*id).yellow(), "=".blue(), self.t.display_type(rhs).yellow()),
-                    FunctionSignature(id, ps, r)  => {
-                        let ps = ps.iter().map(|p| self.t.display_type(p)).collect::<Vec<_>>().join(", ");
-                        write!(f, "fn({}) -> {} {} {}", ps, self.t.display_type(r),
-                               "=".blue(), ty(*id).yellow())
+                    Equality(id, rhs) => write!(
+                        f,
+                        "{} {} {}",
+                        ty(*id).yellow(),
+                        "=".blue(),
+                        self.t.display_type(rhs).yellow()
+                    ),
+                    SelfValue(id, rhs) => write!(
+                        f,
+                        "*{} {} {}",
+                        ty(*id).yellow(),
+                        "=".blue(),
+                        self.t.display_type(rhs).yellow()
+                    ),
+                    FunctionSignature(id, ps, r) => {
+                        let ps = ps
+                            .iter()
+                            .map(|p| self.t.display_type(p))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        write!(
+                            f,
+                            "fn({}) -> {} {} {}",
+                            ps,
+                            self.t.display_type(r),
+                            "=".blue(),
+                            ty(*id).yellow()
+                        )
                     }
-                    Operation(trait_id, ty_inst)       =>
-                        write!(f, "{} {} {}",        ty(*trait_id).cyan(), "⊧".blue(), self.t.display_type(ty_inst).yellow()),
-                    MemberAccess(id, base, m)      =>
-                        write!(f, "{}.{} {} {}",     self.t.display_type(base), m.green(),
-                               "=".blue(), ty(*id).yellow()),
+                    Operation(trait_id, ty_inst) => write!(
+                        f,
+                        "{} {} {}",
+                        ty(*trait_id).cyan(),
+                        "⊧".blue(),
+                        self.t.display_type(ty_inst).yellow()
+                    ),
+                    MemberAccess(id, base, m) => write!(
+                        f,
+                        "{}.{} {} {}",
+                        self.t.display_type(base),
+                        m.green(),
+                        "=".blue(),
+                        ty(*id).yellow()
+                    ),
                 }
             }
         }
@@ -964,12 +1289,13 @@ impl Constraint {
 }
 
 impl UnificationContext {
-    pub fn display<'a>(&'a self,
-                       table: &'a SymbolTable)
-                       -> impl std::fmt::Display + 'a {
+    pub fn display<'a>(&'a self, table: &'a SymbolTable) -> impl std::fmt::Display + 'a {
         use colored::*;
 
-        struct D<'a> { ctx: &'a UnificationContext, tbl: &'a SymbolTable }
+        struct D<'a> {
+            ctx: &'a UnificationContext,
+            tbl: &'a SymbolTable,
+        }
         impl std::fmt::Display for D<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if self.ctx.substitutions.is_empty() {
@@ -991,7 +1317,8 @@ impl UnificationContext {
                 if unresolved.is_empty() {
                     writeln!(f, "{}", "* Unresolved UVs: (none)".dimmed())?;
                 } else {
-                    let list = unresolved.iter()
+                    let list = unresolved
+                        .iter()
                         .map(|id| format!("#uv_{}", id).red().to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -1010,8 +1337,11 @@ impl UnificationContext {
                 }
             }
         }
-        
-        D { ctx: self, tbl: table }
+
+        D {
+            ctx: self,
+            tbl: table,
+        }
     }
 }
 
@@ -1022,7 +1352,11 @@ impl std::fmt::Display for SemanticAnalyzer {
         writeln!(f, "\n{}", "Trait Registry:".bold().underline())?;
         writeln!(f, "{}", self.trait_registry.display(&self.symbol_table))?;
         writeln!(f, "\n{}", "Unification Context:".bold().underline())?;
-        writeln!(f, "{}", self.unification_context.display(&self.symbol_table))?;
+        writeln!(
+            f,
+            "{}",
+            self.unification_context.display(&self.symbol_table)
+        )?;
 
         Ok(())
     }
