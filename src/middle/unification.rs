@@ -1,4 +1,4 @@
-use crate::{frontend::ast::AstNode, middle::semantic_analyzer::{Constraint, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::Span}};
+use crate::{frontend::ast::AstNode, middle::semantic_analyzer::{Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::Span}};
 
 impl SemanticAnalyzer {
     pub fn unification_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
@@ -16,7 +16,7 @@ impl SemanticAnalyzer {
 
             iterations += 1;
 
-            if let Err(e) = self.process_constraint(constraint) {
+            if let Err(e) = self.process_constraint(constraint.0, constraint.1) {
                 errors.push(*e);
             }
         }
@@ -24,7 +24,7 @@ impl SemanticAnalyzer {
         errors
     }
 
-    fn process_constraint(&mut self, constraint: Constraint) -> Result<(), BoxedError> {
+    fn process_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) -> Result<(), BoxedError> {
         match constraint {
             Constraint::Equality(uv_symbol_id, ty) => self.unify(Type::new_base(uv_symbol_id), ty)?,
             Constraint::SelfValue(uv_symbol_id, ty) => {},

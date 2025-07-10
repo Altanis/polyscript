@@ -649,6 +649,7 @@ impl TraitRegistry {
     }
 }
 
+/// A constraint imposed onto a metavariable.
 pub enum Constraint {
     /// The metavariable is equal to a type.
     Equality(TypeSymbolId, Type),
@@ -665,11 +666,18 @@ pub enum Constraint {
     MemberAccess(TypeSymbolId, Type, String)
 }
 
+/// Additional information about a constraint.
+#[derive(Debug, Clone, Copy)]
+pub struct ConstraintInfo {
+    pub span: Span,
+    pub scope_id: ScopeId
+}
+
 #[derive(Default)]
 pub struct UnificationContext {
     next_id: TypeSymbolId,
     pub substitutions: HashMap<TypeSymbolId, Type>,
-    pub constraints: VecDeque<Constraint>
+    pub constraints: VecDeque<(Constraint, ConstraintInfo)>
 }
 
 impl UnificationContext {
@@ -696,8 +704,8 @@ impl UnificationContext {
         }
     }
 
-    pub fn register_constraint(&mut self, constraint: Constraint) {
-        self.constraints.push_back(constraint);
+    pub fn register_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) {
+        self.constraints.push_back((constraint, info));
     }
 }
 
@@ -996,7 +1004,7 @@ impl UnificationContext {
                 } else {
                     writeln!(f, "* {}", "Constraints:".bold())?;
                     for (i, c) in self.ctx.constraints.iter().enumerate() {
-                        writeln!(f, "    {}) {}", i + 1, c.fmt(self.tbl))?;
+                        writeln!(f, "    {}) {}", i + 1, c.0.fmt(self.tbl))?;
                     }
                     Ok(())
                 }
