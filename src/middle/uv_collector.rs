@@ -2,8 +2,8 @@ use crate::{
     boxed,
     frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type,
-        TypeSymbolId, TypeSymbolKind,
+        Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId,
+        TypeSymbolKind,
     },
     utils::{
         error::{BoxedError, Error, ErrorKind},
@@ -16,29 +16,13 @@ impl SemanticAnalyzer {
         self.builtin_types[primitive as usize]
     }
 
-    fn get_type_of_identifier(
-        &self,
-        scope_id: ScopeId,
-        name: &str,
-        span: Span,
-    ) -> Result<Type, BoxedError> {
-        match self
-            .symbol_table
-            .find_value_symbol_from_scope(scope_id, name)
-        {
+    fn get_type_of_identifier(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<Type, BoxedError> {
+        match self.symbol_table.find_value_symbol_from_scope(scope_id, name) {
             Some(value_symbol) => match value_symbol.type_id.clone() {
                 Some(type_id) => Ok(type_id),
-                None => Err(self.create_error(
-                    ErrorKind::UnresolvedType(name.to_string()),
-                    span,
-                    &[span],
-                )),
+                None => Err(self.create_error(ErrorKind::UnresolvedType(name.to_string()), span, &[span])),
             },
-            None => Err(self.create_error(
-                ErrorKind::UnknownIdentifier(name.to_string()),
-                span,
-                &[span],
-            )),
+            None => Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span])),
         }
     }
 
@@ -199,10 +183,8 @@ impl SemanticAnalyzer {
                 info,
             );
         } else if let Some(init_type) = init_type {
-            self.unification_context.register_constraint(
-                Constraint::Equality(symbol_uv.get_base_symbol(), init_type),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(symbol_uv.get_base_symbol(), init_type), info);
         } else {
             return Err(self.create_error(ErrorKind::BadVariableDeclaration, span, &[span]));
         }
@@ -285,10 +267,8 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         let cond_type = self.collect_uvs(condition)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-        self.unification_context.register_constraint(
-            Constraint::Equality(cond_type.get_base_symbol(), bool_type),
-            info,
-        );
+        self.unification_context
+            .register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type), info);
 
         self.collect_uvs(body)?;
 
@@ -319,10 +299,8 @@ impl SemanticAnalyzer {
         if let Some(cond) = condition {
             let cond_type = self.collect_uvs(cond)?;
             let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-            self.unification_context.register_constraint(
-                Constraint::Equality(cond_type.get_base_symbol(), bool_type),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type), info);
         }
 
         if let Some(inc) = increment {
@@ -516,10 +494,8 @@ impl SemanticAnalyzer {
             Some(span),
         )?;
 
-        self.unification_context.register_constraint(
-            Constraint::Equality(uv_id, Type::new_base(fn_ptr_sig_id)),
-            info,
-        );
+        self.unification_context
+            .register_constraint(Constraint::Equality(uv_id, Type::new_base(fn_ptr_sig_id)), info);
 
         Ok(())
     }
@@ -532,15 +508,8 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        let Some(symbol) = self
-            .symbol_table
-            .find_type_symbol_from_scope(scope_id, name)
-        else {
-            return Err(self.create_error(
-                ErrorKind::UnknownIdentifier(name.to_owned()),
-                span,
-                &[span],
-            ));
+        let Some(symbol) = self.symbol_table.find_type_symbol_from_scope(scope_id, name) else {
+            return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
         };
 
         self.unification_context
@@ -588,10 +557,8 @@ impl SemanticAnalyzer {
             .unification_context
             .generate_uv_type(&mut self.symbol_table, span);
 
-        self.unification_context.register_constraint(
-            Constraint::Equality(symbol_uv.get_base_symbol(), init_type),
-            info,
-        );
+        self.unification_context
+            .register_constraint(Constraint::Equality(symbol_uv.get_base_symbol(), init_type), info);
 
         self.symbol_table
             .get_value_symbol_mut(node.value_id.unwrap())
@@ -615,11 +582,7 @@ impl SemanticAnalyzer {
             .symbol_table
             .find_type_symbol_from_scope(scope_id, type_name)
             .ok_or_else(|| {
-                self.create_error(
-                    ErrorKind::UnknownIdentifier(type_name.to_owned()),
-                    span,
-                    &[span],
-                )
+                self.create_error(ErrorKind::UnknownIdentifier(type_name.to_owned()), span, &[span])
             })?
             .id;
 
@@ -730,11 +693,7 @@ impl SemanticAnalyzer {
         };
 
         if impl_scope.kind != ScopeKind::Impl {
-            return Err(self.create_error(
-                ErrorKind::InvalidThis("outside of an impl block"),
-                span,
-                &[span],
-            ));
+            return Err(self.create_error(ErrorKind::InvalidThis("outside of an impl block"), span, &[span]));
         }
 
         let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self
@@ -752,9 +711,7 @@ impl SemanticAnalyzer {
                 match receiver_kind {
                     ReferenceKind::Value => self_type.clone(),
                     ReferenceKind::Reference => Type::Reference(Box::new(self_type.clone())),
-                    ReferenceKind::MutableReference => {
-                        Type::MutableReference(Box::new(self_type.clone()))
-                    }
+                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(self_type.clone())),
                 },
             ),
             info,
@@ -802,9 +759,9 @@ impl SemanticAnalyzer {
         right: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        let right_name = right.get_name().ok_or_else(|| {
-            self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span])
-        })?;
+        let right_name = right
+            .get_name()
+            .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
         let left_type = {
             if let AstNodeKind::Identifier(left_name) = &left.kind {
@@ -897,10 +854,7 @@ impl SemanticAnalyzer {
 
         match &mut expr.kind {
             IntegerLiteral(_) => self.unification_context.register_constraint(
-                Constraint::Equality(
-                    uv_id,
-                    Type::new_base(self.get_primitive_type(PrimitiveKind::Int)),
-                ),
+                Constraint::Equality(uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Int))),
                 info,
             ),
             FloatLiteral(_) => self.unification_context.register_constraint(
@@ -970,9 +924,7 @@ impl SemanticAnalyzer {
                 else_branch,
                 info,
             )?,
-            WhileLoop { condition, body } => {
-                self.collect_uv_while_loop(uv_id, condition, body, info)?
-            }
+            WhileLoop { condition, body } => self.collect_uv_while_loop(uv_id, condition, body, info)?,
             ForLoop {
                 initializer,
                 condition,
@@ -981,40 +933,22 @@ impl SemanticAnalyzer {
             } => self.collect_uv_for_loop(uv_id, initializer, condition, increment, body, info)?,
             Return(opt_expr) => self.collect_uv_return(uv_id, opt_expr, info)?,
             Function { .. } => self.collect_uv_function(uv_id, expr, expr.span, info)?,
-            FunctionPointer {
-                params,
-                return_type,
-            } => self.collect_uv_function_pointer(uv_id, params, return_type, expr.span, info)?,
-            FunctionParameter { .. } => {
-                self.collect_uv_function_parameter(uv_id, expr, expr.span, info)?
+            FunctionPointer { params, return_type } => {
+                self.collect_uv_function_pointer(uv_id, params, return_type, expr.span, info)?
             }
-            StructLiteral { name, .. } => self.collect_uv_struct_literal(
-                uv_id,
-                expr.scope_id.unwrap(),
-                name,
-                expr.span,
-                info,
-            )?,
-            AssociatedConstant { .. } => {
-                self.collect_uv_associated_const(uv_id, expr, expr.span, info)?
+            FunctionParameter { .. } => self.collect_uv_function_parameter(uv_id, expr, expr.span, info)?,
+            StructLiteral { name, .. } => {
+                self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, expr.span, info)?
             }
-            SelfValue => {
-                self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?
+            AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
+            SelfValue => self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?,
+            SelfType(reference_kind) => {
+                self.collect_uv_self_type(uv_id, expr.scope_id.unwrap(), *reference_kind, expr.span, info)?
             }
-            SelfType(reference_kind) => self.collect_uv_self_type(
-                uv_id,
-                expr.scope_id.unwrap(),
-                *reference_kind,
-                expr.span,
-                info,
-            )?,
-            FieldAccess { left, right } => {
-                self.collect_uv_field_access(uv_id, left, right, info)?
+            FieldAccess { left, right } => self.collect_uv_field_access(uv_id, left, right, info)?,
+            FunctionCall { function, arguments } => {
+                self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?
             }
-            FunctionCall {
-                function,
-                arguments,
-            } => self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?,
             TypeReference {
                 type_name,
                 generic_types,
@@ -1054,10 +988,7 @@ impl SemanticAnalyzer {
         expr.type_id = Some(uv.clone());
 
         if let Some(value_id) = expr.value_id {
-            self.symbol_table
-                .get_value_symbol_mut(value_id)
-                .unwrap()
-                .type_id = Some(uv.clone());
+            self.symbol_table.get_value_symbol_mut(value_id).unwrap().type_id = Some(uv.clone());
         }
 
         Ok(uv)

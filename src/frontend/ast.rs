@@ -1,7 +1,5 @@
 use crate::{
-    middle::semantic_analyzer::{
-        ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId,
-    },
+    middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -201,10 +199,7 @@ impl AstNode {
         None
     }
 
-    pub fn get_value_symbol_mut<'a>(
-        &self,
-        symbol_table: &'a mut SymbolTable,
-    ) -> Option<&'a mut ValueSymbol> {
+    pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
         if let Some(id) = self.value_id {
             return symbol_table.get_value_symbol_mut(id);
         }
@@ -220,10 +215,7 @@ impl AstNode {
         None
     }
 
-    pub fn get_type_symbol_mut<'a>(
-        &self,
-        symbol_table: &'a mut SymbolTable,
-    ) -> Option<&'a mut TypeSymbol> {
+    pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
         if let Some(id) = self.value_id {
             return symbol_table.get_type_symbol_mut(id);
         }
@@ -293,18 +285,10 @@ impl AstNode {
                     writeln!(f)?;
                 }
             }
-            AstNodeKind::IntegerLiteral(val) => {
-                write!(f, "{}{}", indent_str, val.to_string().blue())?
-            }
-            AstNodeKind::FloatLiteral(val) => {
-                write!(f, "{}{}", indent_str, val.to_string().blue())?
-            }
-            AstNodeKind::BooleanLiteral(val) => {
-                write!(f, "{}{}", indent_str, val.to_string().magenta())?
-            }
-            AstNodeKind::StringLiteral(s) => {
-                write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?
-            }
+            AstNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            AstNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            AstNodeKind::BooleanLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().magenta())?,
+            AstNodeKind::StringLiteral(s) => write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?,
             AstNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
             AstNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
             AstNodeKind::VariableDeclaration {
@@ -598,11 +582,7 @@ impl AstNode {
                 write!(
                     f,
                     "{}{}: {}",
-                    if *mutable {
-                        "mut ".purple()
-                    } else {
-                        "".white()
-                    },
+                    if *mutable { "mut ".purple() } else { "".white() },
                     name.yellow(),
                     type_annotation
                 )?;
@@ -740,10 +720,7 @@ impl AstNode {
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")?
             }
-            AstNodeKind::FunctionCall {
-                function,
-                arguments,
-            } => {
+            AstNodeKind::FunctionCall { function, arguments } => {
                 write!(f, "{}", indent_str)?;
                 function.fmt_with_indent(f, 0)?;
                 write!(f, "(")?;
@@ -801,13 +778,7 @@ impl AstNode {
                 name,
                 type_annotation,
             } => {
-                write!(
-                    f,
-                    "{}const {}: {}",
-                    indent_str,
-                    name.yellow(),
-                    type_annotation
-                )?;
+                write!(f, "{}const {}: {}", indent_str, name.yellow(), type_annotation)?;
             }
             AstNodeKind::TraitType(name) => {
                 write!(f, "{}type {}", indent_str, name.bright_blue())?;
@@ -826,10 +797,7 @@ impl AstNode {
                     }
                 }
             }
-            AstNodeKind::FunctionPointer {
-                params,
-                return_type,
-            } => {
+            AstNodeKind::FunctionPointer { params, return_type } => {
                 write!(f, "{}{}", indent_str, "fn".bright_blue())?;
                 write!(f, "(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -863,8 +831,8 @@ impl AstNode {
         use AstNodeKind::*;
 
         match &mut self.kind {
-            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_)
-            | CharLiteral(_) | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
+            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_)
+            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
 
@@ -977,10 +945,7 @@ impl AstNode {
                 children
             }
 
-            FunctionPointer {
-                params,
-                return_type,
-            } => {
+            FunctionPointer { params, return_type } => {
                 let mut children = vec![];
 
                 for p in params.iter_mut() {
@@ -1027,9 +992,7 @@ impl AstNode {
                 children
             }
 
-            StructField {
-                type_annotation, ..
-            } => vec![type_annotation.as_mut()],
+            StructField { type_annotation, .. } => vec![type_annotation.as_mut()],
 
             StructLiteral { fields, .. } => fields.values_mut().collect(),
 
@@ -1122,9 +1085,7 @@ impl AstNode {
                 children
             }
 
-            TraitConstant {
-                type_annotation, ..
-            } => vec![type_annotation.as_mut()],
+            TraitConstant { type_annotation, .. } => vec![type_annotation.as_mut()],
 
             TraitType(_) => vec![],
 
@@ -1147,10 +1108,7 @@ impl AstNode {
 
             FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
 
-            FunctionCall {
-                function,
-                arguments,
-            } => {
+            FunctionCall { function, arguments } => {
                 let mut children = vec![];
                 children.push(function.as_mut());
 

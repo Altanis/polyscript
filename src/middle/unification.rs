@@ -33,15 +33,9 @@ impl SemanticAnalyzer {
         errors
     }
 
-    fn process_constraint(
-        &mut self,
-        constraint: Constraint,
-        info: ConstraintInfo,
-    ) -> Result<(), BoxedError> {
+    fn process_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) -> Result<(), BoxedError> {
         match constraint {
-            Constraint::Equality(uv_symbol_id, ty) => {
-                self.unify(Type::new_base(uv_symbol_id), ty)?
-            }
+            Constraint::Equality(uv_symbol_id, ty) => self.unify(Type::new_base(uv_symbol_id), ty)?,
             Constraint::SelfValue(uv_symbol_id, ty) => {}
             Constraint::FunctionSignature(uv_symbol_id, params, return_ty) => {}
             Constraint::MemberAccess(uv_symbol_id, lhs_type, rhs_name) => {}
@@ -62,27 +56,12 @@ impl SemanticAnalyzer {
                 self.unify_variable(s, other);
                 Ok(())
             }
-            (
-                Type::Base {
-                    symbol: s1,
-                    args: a1,
-                },
-                Type::Base {
-                    symbol: s2,
-                    args: a2,
-                },
-            ) => {
+            (Type::Base { symbol: s1, args: a1 }, Type::Base { symbol: s2, args: a2 }) => {
                 // TODO: Unify similar types `s1` and `s2` without raw equality.
                 if s1 != s2 || a1.len() != a2.len() {
                     return self.type_mismatch_error(
-                        &Type::Base {
-                            symbol: s1,
-                            args: a1,
-                        },
-                        &Type::Base {
-                            symbol: s2,
-                            args: a2,
-                        },
+                        &Type::Base { symbol: s1, args: a1 },
+                        &Type::Base { symbol: s2, args: a2 },
                     );
                 }
 
@@ -93,17 +72,14 @@ impl SemanticAnalyzer {
                 Ok(())
             }
             (Type::Reference(inner1), Type::Reference(inner2)) => self.unify(*inner1, *inner2),
-            (Type::MutableReference(inner1), Type::MutableReference(inner2)) => {
-                self.unify(*inner1, *inner2)
-            }
+            (Type::MutableReference(inner1), Type::MutableReference(inner2)) => self.unify(*inner1, *inner2),
 
             (t1, t2) => self.type_mismatch_error(&t1, &t2),
         }
     }
 
     fn unify_variable(&mut self, uv_id: TypeSymbolId, ty: Type) {
-        let TypeSymbolKind::UnificationVariable(id) =
-            self.symbol_table.get_type_symbol(uv_id).unwrap().kind
+        let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.get_type_symbol(uv_id).unwrap().kind
         else {
             unreachable!();
         };

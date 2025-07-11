@@ -83,11 +83,7 @@ impl Lexer {
             }
         };
 
-        Error::from_one_error(
-            kind,
-            span,
-            (self.lines[span.end_pos.line - 1].clone(), self.line),
-        )
+        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
     }
 
     /// Peeks at the next character.
@@ -143,9 +139,7 @@ impl Lexer {
             'u' => {
                 if self.consume()? != '{' {
                     return Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence(
-                            "\\u (does not have opening brace)".to_string(),
-                        ),
+                        ErrorKind::InvalidEscapeSequence("\\u (does not have opening brace)".to_string()),
                         None,
                     ));
                 }
@@ -181,29 +175,22 @@ impl Lexer {
                 }
 
                 if hex.is_empty() {
-                    return Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence("\\u{}".to_string()),
-                        None,
-                    ));
+                    return Err(
+                        self.generate_error(ErrorKind::InvalidEscapeSequence("\\u{}".to_string()), None)
+                    );
                 }
 
                 let value = u32::from_str_radix(&hex, 16).unwrap();
                 match char::from_u32(value) {
                     Some(ch) => Ok(ch),
                     None => Err(self.generate_error(
-                        ErrorKind::InvalidEscapeSequence(format!(
-                            "\\u{{{}}} (invalid Unicode scalar)",
-                            hex
-                        )),
+                        ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid Unicode scalar)", hex)),
                         None,
                     )),
                 }
             }
 
-            other => Err(self.generate_error(
-                ErrorKind::InvalidEscapeSequence(format!("\\{}", other)),
-                None,
-            )),
+            other => Err(self.generate_error(ErrorKind::InvalidEscapeSequence(format!("\\{}", other)), None)),
         }
     }
 }
@@ -649,10 +636,8 @@ impl Lexer {
 
                     if !has_digits {
                         let invalid_char = self.peek().unwrap_or('\0');
-                        return Err(self.generate_error(
-                            ErrorKind::InvalidDigit(invalid_char.to_string()),
-                            Some(span),
-                        ));
+                        return Err(self
+                            .generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
                     }
 
                     let number_type = match base {
@@ -709,10 +694,9 @@ impl Lexer {
 
                 if !exponent_digit_found {
                     let invalid_char = self.peek().unwrap_or('\0');
-                    return Err(self.generate_error(
-                        ErrorKind::InvalidDigit(invalid_char.to_string()),
-                        Some(span),
-                    ));
+                    return Err(
+                        self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span))
+                    );
                 }
             } else {
                 break;
@@ -824,9 +808,7 @@ impl Lexer {
                 } else if c != CHAR_DELIMITER {
                     symbol_buffer.push(c);
                 } else {
-                    return Err(
-                        self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span))
-                    );
+                    return Err(self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span)));
                 }
 
                 if self.consume()? == CHAR_DELIMITER {
@@ -841,10 +823,7 @@ impl Lexer {
                 }
             }
             _ => {
-                return Err(self.generate_error(
-                    ErrorKind::UnrecognizedSymbol(symbol.to_string()),
-                    Some(span),
-                ))
+                return Err(self.generate_error(ErrorKind::UnrecognizedSymbol(symbol.to_string()), Some(span)))
             }
         }
     }

@@ -55,9 +55,7 @@ impl ErrorKind {
                 "unexpected token: found \"{}\" of type {}, expected {}",
                 symbol, found, expected
             ),
-            ErrorKind::UninitializedConstant => {
-                "constant declared but no value assigned".to_string()
-            }
+            ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
             ErrorKind::UnknownIdentifier(name) => format!("could not find \"{}\" in scope", name),
             ErrorKind::UnresolvedType(name) => format!(
                 "type for symbol \"{}\" has not been determined by this line",
@@ -80,10 +78,9 @@ impl ErrorKind {
             ErrorKind::UnimplementedTrait(tr, ty) => {
                 format!("trait {} not implemented for type {}", tr, ty)
             }
-            ErrorKind::ConflictingTraitImpl(tr, ty) => format!(
-                "conflicting trait implementations for {} on type {}",
-                tr, ty
-            ),
+            ErrorKind::ConflictingTraitImpl(tr, ty) => {
+                format!("conflicting trait implementations for {} on type {}", tr, ty)
+            }
             ErrorKind::InvalidTraitImpl(ty) => {
                 format!("not all types in trait implemented, missing: {}", ty)
             }

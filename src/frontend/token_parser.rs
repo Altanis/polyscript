@@ -57,10 +57,7 @@ impl Parser {
         Error::from_one_error(
             kind,
             span,
-            (
-                self.lines[span.end_pos.line - 1].clone(),
-                span.start_pos.line,
-            ),
+            (self.lines[span.end_pos.line - 1].clone(), span.start_pos.line),
         )
     }
 
@@ -261,26 +258,21 @@ impl Parser {
                 let (is_integer, value): (bool, f64) = {
                     if numeric_literal.starts_with("0b") || numeric_literal.starts_with("0B") {
                         let without_prefix = &numeric_literal[2..];
-                        let int_value =
-                            u64::from_str_radix(without_prefix, 2).unwrap_or_else(|_| {
-                                panic!("The lexer made an error tokenizing token {:?}.", token)
-                            });
+                        let int_value = u64::from_str_radix(without_prefix, 2).unwrap_or_else(|_| {
+                            panic!("The lexer made an error tokenizing token {:?}.", token)
+                        });
                         (true, int_value as f64)
-                    } else if numeric_literal.starts_with("0o") || numeric_literal.starts_with("0O")
-                    {
+                    } else if numeric_literal.starts_with("0o") || numeric_literal.starts_with("0O") {
                         let without_prefix = &numeric_literal[2..];
-                        let int_value =
-                            u64::from_str_radix(without_prefix, 8).unwrap_or_else(|_| {
-                                panic!("The lexer made an error tokenizing token {:?}.", token)
-                            });
+                        let int_value = u64::from_str_radix(without_prefix, 8).unwrap_or_else(|_| {
+                            panic!("The lexer made an error tokenizing token {:?}.", token)
+                        });
                         (true, int_value as f64)
-                    } else if numeric_literal.starts_with("0x") || numeric_literal.starts_with("0X")
-                    {
+                    } else if numeric_literal.starts_with("0x") || numeric_literal.starts_with("0X") {
                         let without_prefix = &numeric_literal[2..];
-                        let int_value =
-                            u64::from_str_radix(without_prefix, 16).unwrap_or_else(|_| {
-                                panic!("The lexer made an error tokenizing token {:?}.", token)
-                            });
+                        let int_value = u64::from_str_radix(without_prefix, 16).unwrap_or_else(|_| {
+                            panic!("The lexer made an error tokenizing token {:?}.", token)
+                        });
                         (true, int_value as f64)
                     } else if numeric_literal.contains('.')
                         || numeric_literal.contains('e')
@@ -539,10 +531,7 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
 
-            let var_name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let var_name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
 
             let mut type_annotation = None;
             if parser.match_token(TokenKind::Colon) {
@@ -555,10 +544,9 @@ impl Parser {
             }
 
             if !mutable && initializer.is_none() {
-                return Err(parser.generate_error(
-                    ErrorKind::UninitializedConstant,
-                    parser.previous().get_span(),
-                ));
+                return Err(
+                    parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span())
+                );
             }
 
             parser.consume(TokenKind::Semicolon)?;
@@ -591,16 +579,13 @@ impl Parser {
 
             match type_reference.get_token_kind() {
                 TokenKind::Identifier => {
-                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess)
-                    {
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
                         parser.advance();
                         let next = parser.consume(TokenKind::Identifier)?;
 
                         Ok(AstNodeKind::FieldAccess {
                             left: boxed!(AstNode {
-                                kind: AstNodeKind::Identifier(
-                                    type_reference.get_value().to_string()
-                                ),
+                                kind: AstNodeKind::Identifier(type_reference.get_value().to_string()),
                                 span: type_reference.get_span(),
                                 value_id: None,
                                 scope_id: None,
@@ -658,10 +643,7 @@ impl Parser {
                         return_type = Some(boxed!(parser.parse_type()?));
                     }
 
-                    Ok(AstNodeKind::FunctionPointer {
-                        params,
-                        return_type,
-                    })
+                    Ok(AstNodeKind::FunctionPointer { params, return_type })
                 }
                 _ => {
                     let span = type_reference.get_span();
@@ -768,14 +750,12 @@ impl Parser {
             if allow_this && is_first {
                 let current_token_kind = parser.peek().get_token_kind();
                 if current_token_kind == TokenKind::Operator(Operation::BitwiseAnd) {
-                    let next_token_is_mut =
-                        parser.tokens.get(parser.current + 1).map_or(false, |t| {
-                            t.get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
-                        });
-                    let next_token_is_this =
-                        parser.tokens.get(parser.current + 1).map_or(false, |t| {
-                            t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
-                        });
+                    let next_token_is_mut = parser.tokens.get(parser.current + 1).map_or(false, |t| {
+                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
+                    });
+                    let next_token_is_this = parser.tokens.get(parser.current + 1).map_or(false, |t| {
+                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
+                    });
                     let third_token_is_this = next_token_is_mut
                         && parser.tokens.get(parser.current + 2).map_or(false, |t| {
                             t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
@@ -784,8 +764,7 @@ impl Parser {
                     if next_token_is_this || third_token_is_this {
                         parser.advance();
 
-                        let (_, kind) = if parser.match_token(TokenKind::Keyword(KeywordKind::Mut))
-                        {
+                        let (_, kind) = if parser.match_token(TokenKind::Keyword(KeywordKind::Mut)) {
                             (Operation::MutableAddressOf, ReferenceKind::MutableReference)
                         } else {
                             (Operation::ImmutableAddressOf, ReferenceKind::Reference)
@@ -808,8 +787,7 @@ impl Parser {
                     self_kind = Some(ReferenceKind::Value);
 
                     let type_annotation =
-                        boxed!(parser
-                            .spanned_node(|_| Ok(AstNodeKind::SelfType(ReferenceKind::Value)))?);
+                        boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(ReferenceKind::Value)))?);
                     return Ok(AstNodeKind::FunctionParameter {
                         name: "this".to_string(),
                         type_annotation,
@@ -820,10 +798,7 @@ impl Parser {
             }
 
             let mutable = parser.match_token(TokenKind::Keyword(KeywordKind::Mut));
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
             let type_annotation = boxed!(parser.parse_type()?);
             let mut initializer = None;
@@ -907,22 +882,14 @@ impl Parser {
         self.consume(TokenKind::OpenBracket)?;
         loop {
             let node = self.spanned_node(|parser| {
-                let name = parser
-                    .consume(TokenKind::Identifier)?
-                    .get_value()
-                    .to_string();
+                let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
                 let mut constraints = vec![];
 
                 if parser.peek().get_token_kind() == TokenKind::Colon {
                     parser.advance();
 
                     loop {
-                        constraints.push(
-                            parser
-                                .consume(TokenKind::Identifier)?
-                                .get_value()
-                                .to_string(),
-                        );
+                        constraints.push(parser.consume(TokenKind::Identifier)?.get_value().to_string());
                         if parser.peek().get_token_kind() != TokenKind::Operator(Operation::Plus) {
                             break;
                         }
@@ -1024,9 +991,7 @@ impl Parser {
             } else {
                 let init = match parser.peek().get_token_kind() {
                     TokenKind::Keyword(KeywordKind::Let) => parser.parse_variable_declaration(true),
-                    TokenKind::Keyword(KeywordKind::Const) => {
-                        parser.parse_variable_declaration(false)
-                    }
+                    TokenKind::Keyword(KeywordKind::Const) => parser.parse_variable_declaration(false),
                     _ => parser.parse_expression_statement(),
                 }?;
                 Some(boxed!(init))
@@ -1096,10 +1061,7 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
 
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             let generic_parameters = parser.parse_generic_parameter_list()?;
             let mut fields = vec![];
 
@@ -1136,10 +1098,7 @@ impl Parser {
                 }
             };
 
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
             let type_annotation = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
@@ -1189,8 +1148,9 @@ impl Parser {
                 };
 
                 match parser.peek().get_token_kind() {
-                    TokenKind::Keyword(KeywordKind::Const) => associated_constants
-                        .push(parser.parse_associated_constant_declaration(qualifier)?),
+                    TokenKind::Keyword(KeywordKind::Const) => {
+                        associated_constants.push(parser.parse_associated_constant_declaration(qualifier)?)
+                    }
                     TokenKind::Keyword(KeywordKind::Fn) => {
                         associated_functions.push(parser.parse_associated_function(qualifier)?)
                     }
@@ -1241,10 +1201,9 @@ impl Parser {
                 _ => unreachable!(),
             };
 
-            let initializer = initializer.ok_or(parser.generate_error(
-                ErrorKind::UninitializedConstant,
-                parser.previous().get_span(),
-            ))?;
+            let initializer = initializer.ok_or(
+                parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span()),
+            )?;
 
             Ok(AstNodeKind::AssociatedConstant {
                 qualifier,
@@ -1255,10 +1214,7 @@ impl Parser {
         })
     }
 
-    fn parse_associated_function(
-        &mut self,
-        qualifier: QualifierKind,
-    ) -> Result<AstNode, BoxedError> {
+    fn parse_associated_function(&mut self, qualifier: QualifierKind) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             let (name, generic_parameters, parameters, return_type, instance) =
                 parser.parse_function_signature(false, true, true)?;
@@ -1276,16 +1232,10 @@ impl Parser {
         })
     }
 
-    fn parse_associated_type_declaration(
-        &mut self,
-        qualifier: QualifierKind,
-    ) -> Result<AstNode, BoxedError> {
+    fn parse_associated_type_declaration(&mut self, qualifier: QualifierKind) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.advance();
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Operator(Operation::Assign))?;
             let value = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
@@ -1301,10 +1251,7 @@ impl Parser {
     fn parse_enum_statement(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.advance();
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             let mut variants = IndexMap::new();
 
             parser.consume(TokenKind::OpenBrace)?;
@@ -1335,10 +1282,7 @@ impl Parser {
 
     fn parse_enum_variant(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            let variant_name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let variant_name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             Ok(AstNodeKind::EnumVariant(variant_name))
         })
     }
@@ -1347,10 +1291,7 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
 
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             let generic_parameters = parser.parse_generic_parameter_list()?;
 
             let mut signatures = vec![];
@@ -1360,9 +1301,7 @@ impl Parser {
             parser.consume(TokenKind::OpenBrace)?;
             while parser.peek().get_token_kind() != TokenKind::CloseBrace {
                 match parser.peek().get_token_kind() {
-                    TokenKind::Keyword(KeywordKind::Const) => {
-                        constants.push(parser.parse_trait_constant()?)
-                    }
+                    TokenKind::Keyword(KeywordKind::Const) => constants.push(parser.parse_trait_constant()?),
                     TokenKind::Keyword(KeywordKind::Fn) => {
                         signatures.push(parser.parse_trait_method_signature()?)
                     }
@@ -1396,10 +1335,7 @@ impl Parser {
     fn parse_trait_constant(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::Const))?;
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
             let type_annotation = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
@@ -1432,10 +1368,7 @@ impl Parser {
     fn parse_trait_type(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::Type))?;
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::TraitType(name))
@@ -1445,10 +1378,7 @@ impl Parser {
     fn parse_type_declaration(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.advance();
-            let name = parser
-                .consume(TokenKind::Identifier)?
-                .get_value()
-                .to_string();
+            let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             let generic_parameters = parser.parse_generic_parameter_list()?;
             parser.consume(TokenKind::Operator(Operation::Assign))?;
             let value = boxed!(parser.parse_type()?);

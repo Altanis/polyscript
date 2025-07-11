@@ -52,10 +52,7 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
     }
 }
 
-fn analyze_tokens(
-    lined_source: Vec<String>,
-    program: frontend::ast::AstNode,
-) -> (SemanticAnalyzer, AstNode) {
+fn analyze_tokens(lined_source: Vec<String>, program: frontend::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
     let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
     match analyzer.analyze(program) {
         Err(errs) => {
