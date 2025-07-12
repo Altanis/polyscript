@@ -834,9 +834,10 @@ pub enum Constraint {
     /// The metavariable denotes the result of an operation that
     /// is trait overloadable.
     Operation(TypeSymbolId, Type, Type, Option<Type>),
-    /// The metavariable denotes the value of a member on an
-    /// instance variable or a static field.
-    MemberAccess(TypeSymbolId, Type, String),
+    /// The metavariable denotes the value of a member on an instance variable.
+    InstanceMemberAccess(TypeSymbolId, Type, String),
+    /// The metavariable denotes a static member of a type, like an enum variant.
+    StaticMemberAccess(TypeSymbolId, TypeSymbolId, String),
 }
 
 /// Additional information about a constraint.
@@ -1214,14 +1215,22 @@ impl Constraint {
                             self.t.display_type(lhs).yellow().to_string()
                         }
                     ),
-                    MemberAccess(id, base, m) => write!(
+                    InstanceMemberAccess(id, base, m) => write!(
                         f,
                         "{}.{} {} {}",
                         self.t.display_type(base),
                         m.green(),
                         "=".blue(),
-                        ty(*id).yellow()
+                        self.t.display_type(&Type::new_base(*id)).yellow()
                     ),
+                    StaticMemberAccess(id, base_id, m) => write!(
+                        f,
+                        "{}.{} {} {}",
+                        self.t.display_type(&Type::new_base(*base_id)).bright_blue(),
+                        m.green(),
+                        "=".blue(),
+                        self.t.display_type(&Type::new_base(*id)).yellow()
+                    )
                 }
             }
         }
@@ -1244,9 +1253,16 @@ impl UnificationContext {
                 } else {
                     writeln!(f, "* {}", "Substitutions:".bold())?;
                     let mut subs: Vec<_> = self.ctx.substitutions.iter().collect();
+                    // subs.sort_by_key(|(uv, _)| *uv);
+                    // for (uv, sym) in subs {
+                    //     let lhs = format!("#uv_{}", uv).red().bold();
+                    //     let rhs = self.tbl.display_type(sym).green();
+                    //     writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
+                    // }
                     subs.sort_by_key(|(uv, _)| *uv);
-                    for (uv, sym) in subs {
-                        let lhs = format!("#uv_{}", uv).red().bold();
+                    for (uv_symbol_id, sym) in subs {
+                        let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
+                        let lhs = format!("{}", uv_name).red().bold();
                         let rhs = self.tbl.display_type(sym).green();
                         writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
                     }

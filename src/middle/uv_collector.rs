@@ -768,26 +768,29 @@ impl SemanticAnalyzer {
             .get_name()
             .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
-        let left_type = {
-            if let AstNodeKind::Identifier(left_name) = &left.kind {
-                if let Some(type_symbol) = self
-                    .symbol_table
-                    .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
-                {
-                    let static_type = Type::new_base(type_symbol.id);
-                    left.type_id = Some(static_type.clone());
+        if let AstNodeKind::Identifier(left_name) = &left.kind {
+            if let Some(type_symbol) = self
+                .symbol_table
+                .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
+            {
+                let static_type = Type::new_base(type_symbol.id);
+                left.type_id = Some(static_type);
 
-                    static_type
-                } else {
-                    self.collect_uvs(left)?
-                }
-            } else {
-                self.collect_uvs(left)?
+                self.unification_context.register_constraint(
+                    Constraint::StaticMemberAccess(uv_id, type_symbol.id, right_name),
+                    info,
+                );
+
+                return Ok(());
             }
-        };
+        }
 
-        self.unification_context
-            .register_constraint(Constraint::MemberAccess(uv_id, left_type, right_name), info);
+        let left_type = self.collect_uvs(left)?;
+
+        self.unification_context.register_constraint(
+            Constraint::InstanceMemberAccess(uv_id, left_type, right_name),
+            info,
+        );
 
         Ok(())
     }

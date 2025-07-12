@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
@@ -9,23 +11,62 @@ use crate::{
 };
 
 impl SemanticAnalyzer {
-    /// Recursively substitutes any known unification variables within a type.
-    fn substitute(&self, ty: &Type) -> Type {
+    /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
+    ///
+    /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
+    /// returns a map `{ T -> i32, U -> bool }`.
+    fn create_generic_substitution_map(
+        &self,
+        impl_generic_params: &[TypeSymbolId],
+        concrete_args: &[Type],
+    ) -> HashMap<TypeSymbolId, Type> {
+        impl_generic_params
+            .iter()
+            .zip(concrete_args.iter())
+            .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
+            .collect()
+    }
+
+    /// Applies a substitution map to a type.
+    fn apply_substitution(&self, ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
         match ty {
             Type::Base { symbol, args } => {
-                if self.is_uv(*symbol) {
-                    let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-                    if let Some(substitution) = self.unification_context.substitutions.get(&id) {
-                        return self.substitute(substitution);
+                if let Some(substituted_type) = substitutions.get(symbol) {
+                    if let Type::Base { symbol: new_symbol, args: new_args } = substituted_type {
+                        if new_args.is_empty() {
+                            let final_args = args.iter().map(|arg| self.apply_substitution(arg, substitutions)).collect();
+                            return Type::Base { symbol: *new_symbol, args: final_args };
+                        }
                     }
+                    return substituted_type.clone();
                 }
 
-                let new_args = args.iter().map(|arg| self.substitute(arg)).collect();
-                Type::Base { symbol: *symbol, args: new_args }
-            },
-            Type::Reference(inner) => Type::Reference(Box::new(self.substitute(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.substitute(inner))),
+                let substituted_args = args.iter().map(|arg| self.apply_substitution(arg, substitutions)).collect();
+                Type::Base { symbol: *symbol, args: substituted_args }
+            }
+            Type::Reference(inner) => Type::Reference(Box::new(self.apply_substitution(inner, substitutions))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.apply_substitution(inner, substitutions))),
         }
+    }
+
+    /// Recursively substitutes any known unification variables within a type.
+    fn substitute(&self, ty: &Type) -> Type {
+        // match ty {
+        //     Type::Base { symbol, args } => {
+        //         if self.is_uv(*symbol) {
+        //             let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
+        //             if let Some(substitution) = self.unification_context.substitutions.get(&id) {
+        //                 return self.substitute(substitution);
+        //             }
+        //         }
+
+        //         let new_args = args.iter().map(|arg| self.substitute(arg)).collect();
+        //         Type::Base { symbol: *symbol, args: new_args }
+        //     },
+        //     Type::Reference(inner) => Type::Reference(Box::new(self.substitute(inner))),
+        //     Type::MutableReference(inner) => Type::MutableReference(Box::new(self.substitute(inner))),
+        // }
+        self.apply_substitution(ty, &self.unification_context.substitutions)
     }
 
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
@@ -37,9 +78,14 @@ impl SemanticAnalyzer {
                     return true;
                 }
 
+                // if self.is_uv(*symbol) {
+                    //  let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
+                    //  if let Some(sub) = self.unification_context.substitutions.get(&id) {
+                        //  return self.occurs_check(uv_id, sub);
+                    //  }
+                // }
                 if self.is_uv(*symbol) {
-                     let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-                     if let Some(sub) = self.unification_context.substitutions.get(&id) {
+                     if let Some(sub) = self.unification_context.substitutions.get(symbol) {
                          return self.occurs_check(uv_id, sub);
                      }
                 }
@@ -61,12 +107,12 @@ impl SemanticAnalyzer {
             ));
         }
         
-        let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.get_type_symbol(uv_id).unwrap().kind
-        else {
-            unreachable!();
-        };
+        // let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.get_type_symbol(uv_id).unwrap().kind
+        // else {
+            // unreachable!();
+        // };
 
-        self.unification_context.substitutions.insert(id, ty);
+        self.unification_context.substitutions.insert(uv_id, ty);
         Ok(())
     }
 
@@ -126,8 +172,10 @@ impl SemanticAnalyzer {
                 self.unify_dereference(uv_symbol_id, ty, info),
             Constraint::FunctionSignature(uv_symbol_id, params, return_ty) => 
                 self.unify_function_signature(uv_symbol_id, params, return_ty, info),
-            // Constraint::MemberAccess(uv_symbol_id, lhs_type, rhs_name) =>
-                // self.unify_member_access(uv_symbol_id, lhs_type, rhs_name, info),
+            Constraint::InstanceMemberAccess(uv_symbol_id, lhs_type, rhs_name) =>
+                self.unify_instance_member_access(uv_symbol_id, lhs_type, rhs_name, info),
+            Constraint::StaticMemberAccess(uv_symbol_id, lhs_type_id, rhs_name) =>
+                self.unify_static_member_access(uv_symbol_id, lhs_type_id, rhs_name, info),
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs) 
                 // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
             _ => unreachable!()
