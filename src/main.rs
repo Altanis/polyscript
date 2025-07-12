@@ -80,7 +80,8 @@ fn test_main_script() {
 
     if PARSE_TOKENS {
         let program = parse_tokens(lined_source.clone(), tokens);
-        println!("{}", program);
+        dbg!(&program);
+        // println!("{}", program);
 
         if SEMANTIC_ANALYSIS {
             let (analyzer, program) = analyze_tokens(lined_source, program);

@@ -9,7 +9,7 @@
         "typescript": false,
         "python": true,
         "rust": false,
-        "javascript": true,
+        "javascript": false,
         "makefile": true
     }
 }

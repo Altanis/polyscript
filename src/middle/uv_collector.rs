@@ -34,12 +34,15 @@ impl SemanticAnalyzer {
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         let uv_type = self.collect_uvs(operand)?;
+
         match operator.to_trait_data() {
             Some((trait_name, _)) => {
                 self.unification_context.register_constraint(
                     Constraint::Operation(
-                        uv_type.get_base_symbol(),
+                        uv_id,
                         Type::new_base(self.trait_registry.get_default_trait(&trait_name)),
+                        uv_type,
+                        None
                     ),
                     info,
                 );
@@ -47,7 +50,7 @@ impl SemanticAnalyzer {
             None => match operator {
                 Operation::Dereference => self
                     .unification_context
-                    .register_constraint(Constraint::SelfValue(uv_id, uv_type), info),
+                    .register_constraint(Constraint::DereferenceEquality(uv_id, uv_type), info),
                 Operation::ImmutableAddressOf => self.unification_context.register_constraint(
                     Constraint::Equality(uv_id, Type::Reference(boxed!(uv_type))),
                     info,
@@ -78,11 +81,13 @@ impl SemanticAnalyzer {
             Some((trait_name, _)) => {
                 self.unification_context.register_constraint(
                     Constraint::Operation(
-                        left_type.get_base_symbol(),
+                        uv_id,
                         Type::Base {
                             symbol: self.trait_registry.get_default_trait(&trait_name),
                             args: vec![right_type.clone()],
                         },
+                        left_type,
+                        Some(right_type)
                     ),
                     info,
                 );
@@ -820,6 +825,60 @@ impl SemanticAnalyzer {
 
         Ok(())
     }
+
+    fn collect_uv_struct_field(
+        &mut self,
+        uv_id: TypeSymbolId,
+        name: &str,
+        type_annotation: &mut BoxedAstNode,
+        info: ConstraintInfo,
+    ) -> Result<(), BoxedError> {
+        self.unification_context.register_constraint(
+            Constraint::Equality(
+                uv_id,
+                Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
+            ),
+            info,
+        );
+
+        let annotation_type = self.collect_uvs(type_annotation)?;
+        self.symbol_table.find_value_symbol_in_scope_mut(name, info.scope_id).unwrap().type_id = Some(annotation_type);
+
+        Ok(())
+    }
+
+    fn collect_uv_enum_variant(
+        &mut self,
+        uv_id: TypeSymbolId,
+        info: ConstraintInfo,
+    ) -> Result<(), BoxedError> {
+        let enum_scope = self.symbol_table.get_scope(info.scope_id).unwrap();
+        let enum_parent_scope = self
+            .symbol_table
+            .get_scope(enum_scope.parent.unwrap())
+            .unwrap();
+
+        let enum_type_symbol = enum_parent_scope
+            .types
+            .values()
+            .find_map(|type_id| {
+                let symbol = self.symbol_table.get_type_symbol(*type_id).unwrap();
+                if let TypeSymbolKind::Enum((scope, _)) = symbol.kind {
+                    if scope == info.scope_id {
+                        return Some(symbol);
+                    }
+                }
+                None
+            })
+            .unwrap();
+
+        let enum_type = Type::new_base(enum_type_symbol.id);
+        
+        self.unification_context
+            .register_constraint(Constraint::Equality(uv_id, enum_type.clone()), info);
+
+        Ok(())
+    }
 }
 
 impl SemanticAnalyzer {
@@ -962,6 +1021,14 @@ impl SemanticAnalyzer {
                 expr.span,
                 info,
             )?,
+            StructField { name, type_annotation, .. } => {
+                self.collect_uv_struct_field(uv_id, name, type_annotation, info)?
+            },
+            EnumVariant(_) => {
+                self.collect_uv_enum_variant(uv_id, info)?
+            },
+            // struct field, enum variant
+            // todo: make enum variant unify with integer (enum variant must be of the type enum but unify with int)
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }

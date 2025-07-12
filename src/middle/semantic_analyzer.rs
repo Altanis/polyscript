@@ -172,7 +172,7 @@ pub struct TypeSymbol {
 }
 
 impl TypeSymbol {
-    pub fn can_assign(&self, other: &TypeSymbol) -> bool {
+    pub fn can_unify_with(&self, other: &TypeSymbol) -> bool {
         self.id == other.id
     }
 }
@@ -823,17 +823,17 @@ impl TraitRegistry {
 }
 
 /// A constraint imposed onto a metavariable.
+#[derive(Debug, Clone)]
 pub enum Constraint {
     /// The metavariable is equal to a type.
     Equality(TypeSymbolId, Type),
-    /// The metavariable is meant for `self` and is of type Self, but
-    /// its reference kind is unknown.
-    SelfValue(TypeSymbolId, Type),
+    /// The metavariable is equal to the dereferenced value of the type.
+    DereferenceEquality(TypeSymbolId, Type),
     /// The metavariable denotes a function pointer.
     FunctionSignature(TypeSymbolId, Vec<Type>, Type),
     /// The metavariable denotes the result of an operation that
     /// is trait overloadable.
-    Operation(TypeSymbolId, Type),
+    Operation(TypeSymbolId, Type, Type, Option<Type>),
     /// The metavariable denotes the value of a member on an
     /// instance variable or a static field.
     MemberAccess(TypeSymbolId, Type, String),
@@ -1175,7 +1175,7 @@ impl Constraint {
                         "=".blue(),
                         self.t.display_type(rhs).yellow()
                     ),
-                    SelfValue(id, rhs) => write!(
+                    DereferenceEquality(id, rhs) => write!(
                         f,
                         "*{} {} {}",
                         ty(*id).yellow(),
@@ -1197,12 +1197,22 @@ impl Constraint {
                             ty(*id).yellow()
                         )
                     }
-                    Operation(trait_id, ty_inst) => write!(
+                    Operation(trait_id, trait_type, lhs, rhs) => write!(
+                        // f,
+                        // "{} {} {}",
+                        // ty(*trait_id).cyan(),
+                        // "⊧".blue(),
+                        // self.t.display_type(ty_inst).yellow()
                         f,
-                        "{} {} {}",
+                        "{} {} {} {}",
                         ty(*trait_id).cyan(),
                         "⊧".blue(),
-                        self.t.display_type(ty_inst).yellow()
+                        self.t.display_type(trait_type).yellow(),
+                        if let Some(rhs) = rhs {
+                            format!("{} {}", self.t.display_type(lhs).yellow(), self.t.display_type(rhs).blue())
+                        } else {
+                            self.t.display_type(lhs).yellow().to_string()
+                        }
                     ),
                     MemberAccess(id, base, m) => write!(
                         f,

@@ -26,7 +26,7 @@ pub enum ErrorKind {
     ConflictingTraitImpl(String, String),
     InvalidTraitImpl(String),
     ConflictingInherentImpl(String),
-    InvalidDereference,
+    InvalidDereference(String),
     ExpectedScopedItem,
     FieldNotFound(String, String),
     InvalidFieldAccess(String),
@@ -35,8 +35,8 @@ pub enum ErrorKind {
     SelfOutsideImpl,
     InvalidThis(&'static str),
     ExpectedIdentifier,
-    TypeMismatch(String, String), // InvalidOperation()
-                                  // MismatchedTypes(TypeInfo, TypeInfo),
+    TypeMismatch(String, String, Option<String>),
+    NotCallable(String)
 }
 
 impl ErrorKind {
@@ -87,8 +87,8 @@ impl ErrorKind {
             ErrorKind::ConflictingInherentImpl(ty) => {
                 format!("conflicting implementations for type {}", ty)
             }
-            ErrorKind::InvalidDereference => {
-                "attempted to dereference something that wasn't a pointer".to_string()
+            ErrorKind::InvalidDereference(ty) => {
+                format!("attempted to dereference non-pointer type {}", ty)
             }
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
             ErrorKind::FieldNotFound(field, type_name) => {
@@ -106,7 +106,13 @@ impl ErrorKind {
             ErrorKind::ExpectedIdentifier => {
                 "expected an identifier for the rhs of a field access operation".to_string()
             }
-            ErrorKind::TypeMismatch(t1, t2) => format!("types {} and {} are incompatible", t1, t2),
+            ErrorKind::TypeMismatch(t1, t2, str) => {
+                format!("types {} and {} are incompatible{}", t1, t2, match str {
+                    Some(s) => format!(" {s}"),
+                    None => "".to_string()
+                })
+            },
+            ErrorKind::NotCallable(ty) => format!("{} is not callable", ty)
         }
     }
 }
