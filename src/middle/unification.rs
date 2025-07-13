@@ -4,10 +4,40 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind,
+        Constraint, ConstraintInfo, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::error::{BoxedError, Error, ErrorKind},
 };
+
+impl SemanticAnalyzer {
+    fn is_uv(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::UnificationVariable(_)
+        )
+    }
+
+    fn is_never(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::Primitive(PrimitiveKind::Never)
+        )
+    }
+
+    fn is_int(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::Primitive(PrimitiveKind::Int)
+        )
+    }
+
+    fn is_enum(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::Enum(_)
+        )
+    }
+}
 
 impl SemanticAnalyzer {
     /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
@@ -95,7 +125,12 @@ impl SemanticAnalyzer {
     }
 
     /// Unifies a metavariable with a type.
-    fn unify_variable(&mut self, uv_id: TypeSymbolId, ty: Type, info: ConstraintInfo) -> Result<(), BoxedError> {
+    fn unify_variable(
+        &mut self,
+        uv_id: TypeSymbolId,
+        ty: Type,
+        info: ConstraintInfo,
+    ) -> Result<Type, BoxedError> {
         if self.occurs_check(uv_id, &ty) {
             return Err(self.type_mismatch_error(
                 &Type::new_base(uv_id),
@@ -105,16 +140,8 @@ impl SemanticAnalyzer {
             ));
         }
 
-        self.unification_context.substitutions.insert(uv_id, ty);
-        Ok(())
-    }
-
-    /// Checks if a type is a metavariable.
-    fn is_uv(&self, symbol_id: TypeSymbolId) -> bool {
-        matches!(
-            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
-            TypeSymbolKind::UnificationVariable(_)
-        )
+        self.unification_context.substitutions.insert(uv_id, ty.clone());
+        Ok(ty)
     }
 
     /// Generates a mismatch error between types `t1` and `t2`.
@@ -138,7 +165,7 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
-    pub fn unification_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+    pub fn unification_pass(&mut self, _program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
         let mut constraints = std::mem::take(&mut self.unification_context.constraints);
 
@@ -165,7 +192,10 @@ impl SemanticAnalyzer {
 
     fn process_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) -> Result<bool, BoxedError> {
         match constraint {
-            Constraint::Equality(t1, t2) => self.unify(t1, t2, info),
+            Constraint::Equality(t1, t2) => {
+                self.unify(t1, t2, info)?;
+                Ok(true)
+            }
             Constraint::FunctionSignature(callee_ty, params, return_ty) => {
                 self.unify_function_signature(callee_ty, params, return_ty, info)
             }
@@ -181,45 +211,53 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn unify(&mut self, t1: Type, t2: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+    fn unify(&mut self, t1: Type, t2: Type, info: ConstraintInfo) -> Result<Type, BoxedError> {
         let t1 = self.substitute(&t1);
         let t2 = self.substitute(&t2);
 
-        match (t1, t2) {
-            (t1, t2) if t1 == t2 => Ok(true),
-            (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => {
-                self.unify_variable(s, other, info)?;
-                Ok(true)
+        match (t1.clone(), t2.clone()) {
+            (t1, t2) if t1 == t2 => Ok(t1),
+
+            (Type::Base { symbol: s1, .. }, t2_val) if self.is_never(s1) => Ok(t2_val),
+            (t1_val, Type::Base { symbol: s2, .. }) if self.is_never(s2) => Ok(t1_val),
+
+            (Type::Base { symbol: s1, .. }, t2 @ Type::Base { symbol: s2, .. })
+                if self.is_enum(s1) && self.is_int(s2) =>
+            {
+                Ok(t2)
             }
-            (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => {
-                self.unify_variable(s, other, info)?;
-                Ok(true)
+            (t1 @ Type::Base { symbol: s1, .. }, Type::Base { symbol: s2, .. })
+                if self.is_int(s1) && self.is_enum(s2) =>
+            {
+                Ok(t1)
             }
+
+            (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
+            (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
+
             (Type::Base { symbol: s1, args: a1 }, Type::Base { symbol: s2, args: a2 }) => {
-                let sym1 = self.symbol_table.get_type_symbol(s1).unwrap();
-                let sym2 = self.symbol_table.get_type_symbol(s2).unwrap();
-
-                if !sym1.can_unify_with(sym2) || a1.len() != a2.len() {
-                    return Err(self.type_mismatch_error(
-                        &Type::Base { symbol: s1, args: a1 },
-                        &Type::Base { symbol: s2, args: a2 },
-                        info,
-                        None,
-                    ));
+                if s1 != s2 || a1.len() != a2.len() {
+                    return Err(self.type_mismatch_error(&t1, &t2, info, None));
                 }
 
-                for (arg1, arg2) in a1.into_iter().zip(a2.into_iter()) {
-                    self.unify(arg1, arg2, info)?;
+                let mut unified_args = vec![];
+                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                    unified_args.push(self.unify(arg1.clone(), arg2.clone(), info)?);
                 }
 
-                Ok(true)
-            }
-            (Type::Reference(inner1), Type::Reference(inner2)) => self.unify(*inner1, *inner2, info),
-            (Type::MutableReference(inner1), Type::MutableReference(inner2)) => self.unify(*inner1, *inner2, info),
-
-            (Type::Reference(inner), other) | (other, Type::Reference(inner)) => {
-                Err(self.type_mismatch_error(&other, &Type::Reference(inner), info, None))
-            }
+                Ok(Type::Base {
+                    symbol: s1,
+                    args: unified_args,
+                })
+            },
+            (Type::Reference(inner1), Type::Reference(inner2)) => {
+                let unified = self.unify(*inner1, *inner2, info)?;
+                Ok(Type::Reference(Box::new(unified)))
+            },
+            (Type::MutableReference(inner1), Type::MutableReference(inner2)) => {
+                let unified = self.unify(*inner1, *inner2, info)?;
+                Ok(Type::MutableReference(Box::new(unified)))
+            },
 
             (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),
         }
@@ -234,7 +272,7 @@ impl SemanticAnalyzer {
     ) -> Result<bool, BoxedError> {
         let callee_ty = self.substitute(&callee_ty);
 
-        match callee_ty {
+        match callee_ty.clone() {
             Type::Base { symbol, .. } if self.is_uv(symbol) => Ok(false),
             Type::Base { symbol, .. } => {
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap();
@@ -261,12 +299,11 @@ impl SemanticAnalyzer {
                     let expected_return_clone = expected_return.clone();
 
                     for (arg, expected) in params.iter().zip(expected_params.clone().iter()) {
-                        if !self.unify(arg.clone(), expected.clone(), info)? {
-                            return Ok(false);
-                        }
+                        self.unify(arg.clone(), expected.clone(), info)?;
                     }
 
-                    self.unify(return_ty.clone(), expected_return_clone, info)
+                    self.unify(return_ty, expected_return_clone, info)?;
+                    Ok(true)
                 } else {
                     Err(self.create_error(
                         ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)),
@@ -316,7 +353,8 @@ impl SemanticAnalyzer {
                 let symbol_type = self.substitute(value_symbol.type_id.as_ref().unwrap());
                 match &value_symbol.kind {
                     ValueSymbolKind::Function(_) | ValueSymbolKind::Variable => {
-                        return self.unify(result_ty, symbol_type, info);
+                        self.unify(result_ty, symbol_type, info)?;
+                        return Ok(true);
                     }
                     _ => {}
                 }
@@ -326,13 +364,15 @@ impl SemanticAnalyzer {
         for imp in &inherent_impls {
             if let Some(assoc_type_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, imp.scope_id)
             {
-                return self.unify(result_ty, Type::new_base(assoc_type_symbol.id), info);
+                self.unify(result_ty, Type::new_base(assoc_type_symbol.id), info)?;
+                return Ok(true);
             }
         }
 
         if let Some(scope_id) = enum_scope_id {
             if self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).is_some() {
-                return self.unify(result_ty, lhs_type, info);
+                self.unify(result_ty, lhs_type, info)?;
+                return Ok(true);
             }
         }
 
@@ -393,7 +433,8 @@ impl SemanticAnalyzer {
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
                 let concrete_field_type =
                     SemanticAnalyzer::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
-                return self.unify(result_ty, concrete_field_type, info);
+                self.unify(result_ty, concrete_field_type, info)?;
+                return Ok(true);
             }
         }
 
@@ -420,7 +461,8 @@ impl SemanticAnalyzer {
                         substitutions.extend(impl_substitutions);
 
                         let concrete_fn_type = SemanticAnalyzer::apply_substitution(&symbol_type, &substitutions);
-                        return self.unify(result_ty, concrete_fn_type, info);
+                        self.unify(result_ty, concrete_fn_type, info)?;
+                        return Ok(true);
                     }
                 }
             }
