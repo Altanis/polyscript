@@ -95,7 +95,7 @@ impl ErrorKind {
                 format!("field \"{}\" not found in type {}", field, type_name)
             }
             ErrorKind::InvalidFieldAccess(type_name) => {
-                format!("cannot access field on type {}", type_name)
+                format!("type {} does not comprise fields", type_name)
             }
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
             ErrorKind::BadVariableDeclaration => {

@@ -3360,9 +3360,10 @@ pub enum Constraint {
     /// The metavariable denotes the result of an operation that
     /// is trait overloadable.
     Operation(TypeSymbolId, Type, Type, Option<Type>),
-    /// The metavariable denotes the value of a member on an
-    /// instance variable or a static field.
-    MemberAccess(TypeSymbolId, Type, String),
+    /// The metavariable denotes the value of a member on an instance variable.
+    InstanceMemberAccess(TypeSymbolId, Type, String),
+    /// The metavariable denotes a static member of a type, like an enum variant.
+    StaticMemberAccess(TypeSymbolId, TypeSymbolId, String),
 }
 
 /// Additional information about a constraint.
@@ -3740,14 +3741,22 @@ impl Constraint {
                             self.t.display_type(lhs).yellow().to_string()
                         }
                     ),
-                    MemberAccess(id, base, m) => write!(
+                    InstanceMemberAccess(id, base, m) => write!(
                         f,
                         "{}.{} {} {}",
                         self.t.display_type(base),
                         m.green(),
                         "=".blue(),
-                        ty(*id).yellow()
+                        self.t.display_type(&Type::new_base(*id)).yellow()
                     ),
+                    StaticMemberAccess(id, base_id, m) => write!(
+                        f,
+                        "{}.{} {} {}",
+                        self.t.display_type(&Type::new_base(*base_id)).bright_blue(),
+                        m.green(),
+                        "=".blue(),
+                        self.t.display_type(&Type::new_base(*id)).yellow()
+                    )
                 }
             }
         }
@@ -3763,6 +3772,7 @@ impl UnificationContext {
             ctx: &'a UnificationContext,
             tbl: &'a SymbolTable,
         }
+        
         impl std::fmt::Display for D<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if self.ctx.substitutions.is_empty() {
@@ -3771,8 +3781,9 @@ impl UnificationContext {
                     writeln!(f, "* {}", "Substitutions:".bold())?;
                     let mut subs: Vec<_> = self.ctx.substitutions.iter().collect();
                     subs.sort_by_key(|(uv, _)| *uv);
-                    for (uv, sym) in subs {
-                        let lhs = format!("#uv_{}", uv).red().bold();
+                    for (uv_symbol_id, sym) in subs {
+                        let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
+                        let lhs = uv_name.red().bold();
                         let rhs = self.tbl.display_type(sym).green();
                         writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
                     }
@@ -3781,6 +3792,7 @@ impl UnificationContext {
                 let unresolved: Vec<_> = (0..self.ctx.next_id)
                     .filter(|id| !self.ctx.substitutions.contains_key(id))
                     .collect();
+
                 if unresolved.is_empty() {
                     writeln!(f, "{}", "* Unresolved UVs: (none)".dimmed())?;
                 } else {
@@ -5384,26 +5396,29 @@ impl SemanticAnalyzer {
             .get_name()
             .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
-        let left_type = {
-            if let AstNodeKind::Identifier(left_name) = &left.kind {
-                if let Some(type_symbol) = self
-                    .symbol_table
-                    .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
-                {
-                    let static_type = Type::new_base(type_symbol.id);
-                    left.type_id = Some(static_type.clone());
+        if let AstNodeKind::Identifier(left_name) = &left.kind {
+            if let Some(type_symbol) = self
+                .symbol_table
+                .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
+            {
+                let static_type = Type::new_base(type_symbol.id);
+                left.type_id = Some(static_type);
 
-                    static_type
-                } else {
-                    self.collect_uvs(left)?
-                }
-            } else {
-                self.collect_uvs(left)?
+                self.unification_context.register_constraint(
+                    Constraint::StaticMemberAccess(uv_id, type_symbol.id, right_name),
+                    info,
+                );
+
+                return Ok(());
             }
-        };
+        }
 
-        self.unification_context
-            .register_constraint(Constraint::MemberAccess(uv_id, left_type, right_name), info);
+        let left_type = self.collect_uvs(left)?;
+
+        self.unification_context.register_constraint(
+            Constraint::InstanceMemberAccess(uv_id, left_type, right_name),
+            info,
+        );
 
         Ok(())
     }
@@ -5680,34 +5695,58 @@ impl SemanticAnalyzer {
 
 
 // middle/unification.rs
+use std::collections::HashMap;
+
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind
+        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
-    utils::{
-        error::{BoxedError, Error, ErrorKind}
-    },
+    utils::error::{BoxedError, Error, ErrorKind},
 };
 
 impl SemanticAnalyzer {
-    /// Recursively substitutes any known unification variables within a type.
-    fn substitute(&self, ty: &Type) -> Type {
+    /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
+    ///
+    /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
+    /// returns a map `{ T -> i32, U -> bool }`.
+    fn create_generic_substitution_map(
+        &self,
+        impl_generic_params: &[TypeSymbolId],
+        concrete_args: &[Type],
+    ) -> HashMap<TypeSymbolId, Type> {
+        impl_generic_params
+            .iter()
+            .zip(concrete_args.iter())
+            .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
+            .collect()
+    }
+
+    /// Applies a substitution map to a type.
+    fn apply_substitution(ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
         match ty {
             Type::Base { symbol, args } => {
-                if self.is_uv(*symbol) {
-                    let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-                    if let Some(substitution) = self.unification_context.substitutions.get(&id) {
-                        return self.substitute(substitution);
+                if let Some(substituted_type) = substitutions.get(symbol) {
+                    if let Type::Base { symbol: new_symbol, args: new_args } = substituted_type {
+                        if new_args.is_empty() {
+                            let final_args = args.iter().map(|arg| SemanticAnalyzer::apply_substitution(arg, substitutions)).collect();
+                            return Type::Base { symbol: *new_symbol, args: final_args };
+                        }
                     }
+                    return substituted_type.clone();
                 }
 
-                let new_args = args.iter().map(|arg| self.substitute(arg)).collect();
-                Type::Base { symbol: *symbol, args: new_args }
-            },
-            Type::Reference(inner) => Type::Reference(Box::new(self.substitute(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.substitute(inner))),
+                let substituted_args = args.iter().map(|arg| SemanticAnalyzer::apply_substitution(arg, substitutions)).collect();
+                Type::Base { symbol: *symbol, args: substituted_args }
+            }
+            Type::Reference(inner) => Type::Reference(Box::new(SemanticAnalyzer::apply_substitution(inner, substitutions))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(SemanticAnalyzer::apply_substitution(inner, substitutions))),
         }
+    }
+
+    /// Recursively substitutes any known unification variables within a type.
+    fn substitute(&self, ty: &Type) -> Type {
+        SemanticAnalyzer::apply_substitution(ty, &self.unification_context.substitutions)
     }
 
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
@@ -5720,8 +5759,7 @@ impl SemanticAnalyzer {
                 }
 
                 if self.is_uv(*symbol) {
-                     let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-                     if let Some(sub) = self.unification_context.substitutions.get(&id) {
+                     if let Some(sub) = self.unification_context.substitutions.get(symbol) {
                          return self.occurs_check(uv_id, sub);
                      }
                 }
@@ -5743,12 +5781,7 @@ impl SemanticAnalyzer {
             ));
         }
         
-        let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.get_type_symbol(uv_id).unwrap().kind
-        else {
-            unreachable!();
-        };
-
-        self.unification_context.substitutions.insert(id, ty);
+        self.unification_context.substitutions.insert(uv_id, ty);
         Ok(())
     }
 
@@ -5808,8 +5841,10 @@ impl SemanticAnalyzer {
                 self.unify_dereference(uv_symbol_id, ty, info),
             Constraint::FunctionSignature(uv_symbol_id, params, return_ty) => 
                 self.unify_function_signature(uv_symbol_id, params, return_ty, info),
-            // Constraint::MemberAccess(uv_symbol_id, lhs_type, rhs_name) =>
-                // self.unify_member_access(uv_symbol_id, lhs_type, rhs_name, info),
+            Constraint::InstanceMemberAccess(uv_symbol_id, lhs_type, rhs_name) =>
+                self.unify_instance_member_access(uv_symbol_id, lhs_type, rhs_name, info),
+            Constraint::StaticMemberAccess(uv_symbol_id, lhs_type_id, rhs_name) =>
+                self.unify_static_member_access(uv_symbol_id, lhs_type_id, rhs_name, info),
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs) 
                 // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
             _ => unreachable!()
@@ -5905,5 +5940,357 @@ impl SemanticAnalyzer {
             _ => Err(self.create_error(ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)), info.span, &[info.span]))
         }
     }
+
+    fn unify_static_member_access(
+        &mut self,
+        uv_symbol_id: TypeSymbolId,
+        lhs_type_id: TypeSymbolId,
+        rhs_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        if self.is_uv(lhs_type_id) {
+            return Ok(false);
+        }
+
+        let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
+        let lhs_type = Type::new_base(lhs_type_id);
+
+        let (inherent_impls, enum_scope_id) = match &lhs_symbol.kind {
+            TypeSymbolKind::Struct((_, impls)) => (impls.clone(), None),
+            TypeSymbolKind::Enum((scope_id, impls)) => (impls.clone(), Some(*scope_id)),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&lhs_type)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        for imp in &inherent_impls {
+            if let Some(value_symbol) = self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                let symbol_type = self.substitute(value_symbol.type_id.as_ref().unwrap());
+                match &value_symbol.kind {
+                    ValueSymbolKind::Function(_) | ValueSymbolKind::Variable => {
+                        return self.unify(Type::new_base(uv_symbol_id), symbol_type, info);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        for imp in &inherent_impls {
+            if let Some(assoc_type_symbol) = self
+                .symbol_table
+                .find_type_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                return self.unify(Type::new_base(uv_symbol_id), Type::new_base(assoc_type_symbol.id), info);
+            }
+        }
+
+        if let Some(scope_id) = enum_scope_id {
+            if self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, scope_id)
+                .is_some()
+            {
+                return self.unify(Type::new_base(uv_symbol_id), lhs_type, info);
+            }
+        }
+
+        Err(self.create_error(
+            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            info.span,
+            &[info.span],
+        ))
+    }
+
+    fn unify_instance_member_access(
+        &mut self,
+        uv_symbol_id: TypeSymbolId,
+        lhs_type: Type,
+        rhs_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        let substituted_lhs = self.substitute(&lhs_type);
+
+        let base_lhs_type = match &substituted_lhs {
+            Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+            _ => substituted_lhs.clone(),
+        };
+        
+        let (base_symbol_id, concrete_args) = match &base_lhs_type {
+            Type::Base { symbol, args } => (*symbol, args.clone()),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&substituted_lhs)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        if self.is_uv(base_symbol_id) {
+            return Ok(false);
+        }
+
+        let lhs_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap().clone();
+
+        let (struct_scope_id, inherent_impls) = match &lhs_symbol.kind {
+            TypeSymbolKind::Struct((scope_id, impls)) => (Some(*scope_id), impls.clone()),
+            TypeSymbolKind::Enum((_, impls)) => (None, impls.clone()),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&substituted_lhs)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        if let Some(scope_id) = struct_scope_id {
+            if let Some(field_symbol) = self
+                .symbol_table
+                .find_value_symbol_from_scope(scope_id, &rhs_name)
+            {
+                let substitutions = self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                let concrete_field_type = SemanticAnalyzer::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+                return self.unify(Type::new_base(uv_symbol_id), concrete_field_type, info);
+            }
+        }
+        
+        for imp in &inherent_impls {
+            // TODO: Match against specific specializations.
+            
+            if let Some(value_symbol) = self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                    let symbol_type = self.substitute(value_symbol.type_id.as_ref().unwrap());
+                    let fn_sig_id = symbol_type.get_base_symbol();
+                    let fn_sig_symbol = self.symbol_table.get_type_symbol(fn_sig_id).unwrap();
+
+                    if let TypeSymbolKind::FunctionSignature { instance: Some(_), .. } = fn_sig_symbol.kind {
+                        let mut substitutions = self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                        let impl_substitutions = self.create_generic_substitution_map(&imp.generic_params, &concrete_args); // Assuming direct mapping for simplicity
+                        substitutions.extend(impl_substitutions);
+
+                        let concrete_fn_type = SemanticAnalyzer::apply_substitution(&symbol_type, &substitutions);
+                        return self.unify(Type::new_base(uv_symbol_id), concrete_fn_type, info);
+                    }
+                }
+            }
+        }
+
+        Err(self.create_error(
+            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&substituted_lhs)),
+            info.span,
+            &[info.span],
+        ))
+    }
 }
+
+// utils/error.rs
+use colored::Colorize;
+
+use crate::boxed;
+
+use super::kind::Span;
+
+#[derive(Debug, Clone)]
+pub enum ErrorKind {
+    UnrecognizedSymbol(String),
+    UnexpectedEOF,
+    InvalidDigit(String),
+    InvalidEscapeSequence(String),
+    UnterminatedString,
+    InvalidChar(String),
+    UnterminatedChar,
+    UnexpectedToken(String, String, String),
+    UninitializedConstant,
+    UnknownIdentifier(String),
+    UnresolvedType(String),
+    AlreadyDeclared(String),
+    UnknownType,
+    InvalidImpl(Option<String>),
+    ExpectedType,
+    InvalidConstraint(String),
+    UnimplementedTrait(String, String),
+    ConflictingTraitImpl(String, String),
+    InvalidTraitImpl(String),
+    ConflictingInherentImpl(String),
+    InvalidDereference(String),
+    ExpectedScopedItem,
+    FieldNotFound(String, String),
+    InvalidFieldAccess(String),
+    IncorrectFieldAccessRhs,
+    BadVariableDeclaration,
+    SelfOutsideImpl,
+    InvalidThis(&'static str),
+    ExpectedIdentifier,
+    TypeMismatch(String, String, Option<String>),
+    NotCallable(String)
+}
+
+impl ErrorKind {
+    fn as_str(&self) -> String {
+        match self {
+            ErrorKind::UnrecognizedSymbol(symbol) => format!("unrecognized symbol {}", symbol),
+            ErrorKind::UnexpectedEOF => "unexpected <eof> while parsing".to_string(),
+            ErrorKind::InvalidDigit(digit) => format!("invalid digit {}", digit),
+            ErrorKind::InvalidEscapeSequence(sequence) => {
+                format!("invalid escape sequence {}", sequence)
+            }
+            ErrorKind::UnterminatedString => "string left unterminated".to_string(),
+            ErrorKind::InvalidChar(char) => format!("invalid char {}", char),
+            ErrorKind::UnterminatedChar => "unterminated or degenerate char".to_string(),
+            ErrorKind::UnexpectedToken(symbol, found, expected) => format!(
+                "unexpected token: found \"{}\" of type {}, expected {}",
+                symbol, found, expected
+            ),
+            ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
+            ErrorKind::UnknownIdentifier(name) => format!("could not find \"{}\" in scope", name),
+            ErrorKind::UnresolvedType(name) => format!(
+                "type for symbol \"{}\" has not been determined by this line",
+                name
+            ),
+            ErrorKind::AlreadyDeclared(variable) => format!(
+                "attempted to declare {}, but it already exists in scope",
+                variable
+            ),
+            ErrorKind::UnknownType => "could not determine type of data by this line".to_string(),
+            ErrorKind::InvalidImpl(type_ref) => format!(
+                "cannot construct impl block for {}",
+                type_ref.as_ref().map_or("an unnamed identifier", |v| v)
+            ),
+            ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
+            ErrorKind::InvalidConstraint(constraint) => format!(
+                "expected constraint to be a trait, instead found \"{}\"",
+                constraint
+            ),
+            ErrorKind::UnimplementedTrait(tr, ty) => {
+                format!("trait {} not implemented for type {}", tr, ty)
+            }
+            ErrorKind::ConflictingTraitImpl(tr, ty) => {
+                format!("conflicting trait implementations for {} on type {}", tr, ty)
+            }
+            ErrorKind::InvalidTraitImpl(ty) => {
+                format!("not all types in trait implemented, missing: {}", ty)
+            }
+            ErrorKind::ConflictingInherentImpl(ty) => {
+                format!("conflicting implementations for type {}", ty)
+            }
+            ErrorKind::InvalidDereference(ty) => {
+                format!("attempted to dereference non-pointer type {}", ty)
+            }
+            ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
+            ErrorKind::FieldNotFound(field, type_name) => {
+                format!("field \"{}\" not found in type {}", field, type_name)
+            }
+            ErrorKind::InvalidFieldAccess(type_name) => {
+                format!("type {} does not comprise fields", type_name)
+            }
+            ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
+            ErrorKind::BadVariableDeclaration => {
+                "variable declaration must be annotated with a type or value".to_string()
+            }
+            ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
+            ErrorKind::InvalidThis(place) => format!("found \"this\" {}", place),
+            ErrorKind::ExpectedIdentifier => {
+                "expected an identifier for the rhs of a field access operation".to_string()
+            }
+            ErrorKind::TypeMismatch(t1, t2, str) => {
+                format!("types {} and {} are incompatible{}", t1, t2, match str {
+                    Some(s) => format!(" {s}"),
+                    None => "".to_string()
+                })
+            },
+            ErrorKind::NotCallable(ty) => format!("{} is not callable", ty)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    kind: ErrorKind,
+    span: Span,
+    source_lines: Vec<(String, usize)>,
+}
+
+pub type BoxedError = Box<Error>;
+
+impl Error {
+    pub fn new(kind: ErrorKind) -> BoxedError {
+        boxed!(Error {
+            kind,
+            span: Span::default(),
+            source_lines: vec![]
+        })
+    }
+
+    pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> BoxedError {
+        boxed!(Error {
+            kind,
+            span,
+            source_lines: vec![source_line]
+        })
+    }
+
+    pub fn from_multiple_errors(
+        kind: ErrorKind,
+        span: Span,
+        source_lines: Vec<(String, usize)>,
+    ) -> BoxedError {
+        boxed!(Error {
+            kind,
+            span,
+            source_lines
+        })
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "[{}] {}", "error".red().bold(), self.kind.as_str())?;
+        writeln!(
+            f,
+            "as found in [insert_file_here]:{}:{}",
+            self.span.start_pos.line, self.span.start_pos.column
+        )?;
+
+        let mut used_numbers = vec![];
+        for (content, number) in self.source_lines.iter() {
+            if used_numbers.contains(number) {
+                continue;
+            } else {
+                used_numbers.push(*number);
+            }
+
+            writeln!(f, "    {}", content)?;
+
+            if *number == self.span.start_pos.line {
+                writeln!(
+                    f,
+                    "    {}^{}^",
+                    " ".repeat(self.span.start_pos.column - 1),
+                    "^".repeat(
+                        self.span
+                            .end_pos
+                            .column
+                            .saturating_sub(self.span.start_pos.column)
+                    )
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for Error {}
+
 

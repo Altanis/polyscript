@@ -1246,6 +1246,7 @@ impl UnificationContext {
             ctx: &'a UnificationContext,
             tbl: &'a SymbolTable,
         }
+        
         impl std::fmt::Display for D<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if self.ctx.substitutions.is_empty() {
@@ -1253,32 +1254,35 @@ impl UnificationContext {
                 } else {
                     writeln!(f, "* {}", "Substitutions:".bold())?;
                     let mut subs: Vec<_> = self.ctx.substitutions.iter().collect();
-                    // subs.sort_by_key(|(uv, _)| *uv);
-                    // for (uv, sym) in subs {
-                    //     let lhs = format!("#uv_{}", uv).red().bold();
-                    //     let rhs = self.tbl.display_type(sym).green();
-                    //     writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
-                    // }
                     subs.sort_by_key(|(uv, _)| *uv);
                     for (uv_symbol_id, sym) in subs {
                         let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
-                        let lhs = format!("{}", uv_name).red().bold();
+                        let lhs = uv_name.red().bold();
                         let rhs = self.tbl.display_type(sym).green();
                         writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
                     }
                 }
 
-                let unresolved: Vec<_> = (0..self.ctx.next_id)
-                    .filter(|id| !self.ctx.substitutions.contains_key(id))
+               let unresolved_uvs: Vec<&TypeSymbol> = self.tbl.type_symbols
+                    .values()
+                    .filter(|symbol| {
+                        if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
+                            !self.ctx.substitutions.contains_key(&symbol.id)
+                        } else {
+                            false
+                        }
+                    })
                     .collect();
-                if unresolved.is_empty() {
+
+                if unresolved_uvs.is_empty() {
                     writeln!(f, "{}", "* Unresolved UVs: (none)".dimmed())?;
                 } else {
-                    let list = unresolved
+                    let mut uv_names: Vec<String> = unresolved_uvs
                         .iter()
-                        .map(|id| format!("#uv_{}", id).red().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                        .map(|s| self.tbl.get_type_name(s.name_id).red().to_string())
+                        .collect();
+                    uv_names.sort();
+                    let list = uv_names.join(", ");
                     writeln!(f, "* {} {}", "Unresolved UVs:".bold(), list)?;
                 }
 

@@ -3,11 +3,9 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind
+        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
-    utils::{
-        error::{BoxedError, Error, ErrorKind}
-    },
+    utils::error::{BoxedError, Error, ErrorKind},
 };
 
 impl SemanticAnalyzer {
@@ -28,45 +26,30 @@ impl SemanticAnalyzer {
     }
 
     /// Applies a substitution map to a type.
-    fn apply_substitution(&self, ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
+    fn apply_substitution(ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
         match ty {
             Type::Base { symbol, args } => {
                 if let Some(substituted_type) = substitutions.get(symbol) {
                     if let Type::Base { symbol: new_symbol, args: new_args } = substituted_type {
                         if new_args.is_empty() {
-                            let final_args = args.iter().map(|arg| self.apply_substitution(arg, substitutions)).collect();
+                            let final_args = args.iter().map(|arg| SemanticAnalyzer::apply_substitution(arg, substitutions)).collect();
                             return Type::Base { symbol: *new_symbol, args: final_args };
                         }
                     }
                     return substituted_type.clone();
                 }
 
-                let substituted_args = args.iter().map(|arg| self.apply_substitution(arg, substitutions)).collect();
+                let substituted_args = args.iter().map(|arg| SemanticAnalyzer::apply_substitution(arg, substitutions)).collect();
                 Type::Base { symbol: *symbol, args: substituted_args }
             }
-            Type::Reference(inner) => Type::Reference(Box::new(self.apply_substitution(inner, substitutions))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.apply_substitution(inner, substitutions))),
+            Type::Reference(inner) => Type::Reference(Box::new(SemanticAnalyzer::apply_substitution(inner, substitutions))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(SemanticAnalyzer::apply_substitution(inner, substitutions))),
         }
     }
 
     /// Recursively substitutes any known unification variables within a type.
     fn substitute(&self, ty: &Type) -> Type {
-        // match ty {
-        //     Type::Base { symbol, args } => {
-        //         if self.is_uv(*symbol) {
-        //             let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-        //             if let Some(substitution) = self.unification_context.substitutions.get(&id) {
-        //                 return self.substitute(substitution);
-        //             }
-        //         }
-
-        //         let new_args = args.iter().map(|arg| self.substitute(arg)).collect();
-        //         Type::Base { symbol: *symbol, args: new_args }
-        //     },
-        //     Type::Reference(inner) => Type::Reference(Box::new(self.substitute(inner))),
-        //     Type::MutableReference(inner) => Type::MutableReference(Box::new(self.substitute(inner))),
-        // }
-        self.apply_substitution(ty, &self.unification_context.substitutions)
+        SemanticAnalyzer::apply_substitution(ty, &self.unification_context.substitutions)
     }
 
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
@@ -78,12 +61,6 @@ impl SemanticAnalyzer {
                     return true;
                 }
 
-                // if self.is_uv(*symbol) {
-                    //  let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.type_symbols[symbol].kind else { unreachable!() };
-                    //  if let Some(sub) = self.unification_context.substitutions.get(&id) {
-                        //  return self.occurs_check(uv_id, sub);
-                    //  }
-                // }
                 if self.is_uv(*symbol) {
                      if let Some(sub) = self.unification_context.substitutions.get(symbol) {
                          return self.occurs_check(uv_id, sub);
@@ -107,11 +84,6 @@ impl SemanticAnalyzer {
             ));
         }
         
-        // let TypeSymbolKind::UnificationVariable(id) = self.symbol_table.get_type_symbol(uv_id).unwrap().kind
-        // else {
-            // unreachable!();
-        // };
-
         self.unification_context.substitutions.insert(uv_id, ty);
         Ok(())
     }
@@ -270,5 +242,157 @@ impl SemanticAnalyzer {
             }
             _ => Err(self.create_error(ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)), info.span, &[info.span]))
         }
+    }
+
+    fn unify_static_member_access(
+        &mut self,
+        uv_symbol_id: TypeSymbolId,
+        lhs_type_id: TypeSymbolId,
+        rhs_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        if self.is_uv(lhs_type_id) {
+            return Ok(false);
+        }
+
+        let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
+        let lhs_type = Type::new_base(lhs_type_id);
+
+        let (inherent_impls, enum_scope_id) = match &lhs_symbol.kind {
+            TypeSymbolKind::Struct((_, impls)) => (impls.clone(), None),
+            TypeSymbolKind::Enum((scope_id, impls)) => (impls.clone(), Some(*scope_id)),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&lhs_type)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        for imp in &inherent_impls {
+            if let Some(value_symbol) = self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                let symbol_type = self.substitute(value_symbol.type_id.as_ref().unwrap());
+                match &value_symbol.kind {
+                    ValueSymbolKind::Function(_) | ValueSymbolKind::Variable => {
+                        return self.unify(Type::new_base(uv_symbol_id), symbol_type, info);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        for imp in &inherent_impls {
+            if let Some(assoc_type_symbol) = self
+                .symbol_table
+                .find_type_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                return self.unify(Type::new_base(uv_symbol_id), Type::new_base(assoc_type_symbol.id), info);
+            }
+        }
+
+        if let Some(scope_id) = enum_scope_id {
+            if self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, scope_id)
+                .is_some()
+            {
+                return self.unify(Type::new_base(uv_symbol_id), lhs_type, info);
+            }
+        }
+
+        Err(self.create_error(
+            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            info.span,
+            &[info.span],
+        ))
+    }
+
+    fn unify_instance_member_access(
+        &mut self,
+        uv_symbol_id: TypeSymbolId,
+        lhs_type: Type,
+        rhs_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        let substituted_lhs = self.substitute(&lhs_type);
+
+        let base_lhs_type = match &substituted_lhs {
+            Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+            _ => substituted_lhs.clone(),
+        };
+        
+        let (base_symbol_id, concrete_args) = match &base_lhs_type {
+            Type::Base { symbol, args } => (*symbol, args.clone()),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&substituted_lhs)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        if self.is_uv(base_symbol_id) {
+            return Ok(false);
+        }
+
+        let lhs_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap().clone();
+
+        let (struct_scope_id, inherent_impls) = match &lhs_symbol.kind {
+            TypeSymbolKind::Struct((scope_id, impls)) => (Some(*scope_id), impls.clone()),
+            TypeSymbolKind::Enum((_, impls)) => (None, impls.clone()),
+            _ => {
+                return Err(self.create_error(
+                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&substituted_lhs)),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        };
+
+        if let Some(scope_id) = struct_scope_id {
+            if let Some(field_symbol) = self
+                .symbol_table
+                .find_value_symbol_from_scope(scope_id, &rhs_name)
+            {
+                let substitutions = self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                let concrete_field_type = SemanticAnalyzer::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+                return self.unify(Type::new_base(uv_symbol_id), concrete_field_type, info);
+            }
+        }
+        
+        for imp in &inherent_impls {
+            // TODO: Match against specific specializations.
+            
+            if let Some(value_symbol) = self
+                .symbol_table
+                .find_value_symbol_in_scope(&rhs_name, imp.scope_id)
+            {
+                if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                    let symbol_type = self.substitute(value_symbol.type_id.as_ref().unwrap());
+                    let fn_sig_id = symbol_type.get_base_symbol();
+                    let fn_sig_symbol = self.symbol_table.get_type_symbol(fn_sig_id).unwrap();
+
+                    if let TypeSymbolKind::FunctionSignature { instance: Some(_), .. } = fn_sig_symbol.kind {
+                        let mut substitutions = self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                        let impl_substitutions = self.create_generic_substitution_map(&imp.generic_params, &concrete_args); // Assuming direct mapping for simplicity
+                        substitutions.extend(impl_substitutions);
+
+                        let concrete_fn_type = SemanticAnalyzer::apply_substitution(&symbol_type, &substitutions);
+                        return self.unify(Type::new_base(uv_symbol_id), concrete_fn_type, info);
+                    }
+                }
+            }
+        }
+
+        Err(self.create_error(
+            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&substituted_lhs)),
+            info.span,
+            &[info.span],
+        ))
     }
 }
