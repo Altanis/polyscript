@@ -886,6 +886,8 @@ pub struct SemanticAnalyzer {
     pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
+    // TODO: Find better place to put this.
+    pub current_return_type: Option<Type>,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
 }
@@ -906,6 +908,7 @@ impl SemanticAnalyzer {
             symbol_table,
             builtin_types,
             unification_context: UnificationContext::default(),
+            current_return_type: None,
             errors: vec![],
             lines,
         }

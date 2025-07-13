@@ -248,7 +248,7 @@ impl SemanticAnalyzer {
                     if params.len() != expected_params.len() {
                         return Err(self.type_mismatch_error(
                             &callee_ty,
-                            &callee_ty, // Placeholder, error message is what matters
+                            &callee_ty,
                             info,
                             Some(format!(
                                 "[expected {} arguments, but got {}]",

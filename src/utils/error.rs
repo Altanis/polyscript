@@ -36,7 +36,8 @@ pub enum ErrorKind {
     InvalidThis(&'static str),
     ExpectedIdentifier,
     TypeMismatch(String, String, Option<String>),
-    NotCallable(String)
+    NotCallable(String),
+    InvalidReturn
 }
 
 impl ErrorKind {
@@ -112,7 +113,8 @@ impl ErrorKind {
                     None => "".to_string()
                 })
             },
-            ErrorKind::NotCallable(ty) => format!("{} is not callable", ty)
+            ErrorKind::NotCallable(ty) => format!("{} is not callable", ty),
+            ErrorKind::InvalidReturn => "return statement found outside of function".to_string()
         }
     }
 }
