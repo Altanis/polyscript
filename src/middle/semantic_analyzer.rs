@@ -996,6 +996,7 @@ impl SymbolTable {
         Displayer { symbol, table: self }
     }
 
+    // TODO: Make display_type_symbol more robust.
     pub fn display_type_symbol<'a>(&'a self, symbol: &'a TypeSymbol) -> impl std::fmt::Display + 'a {
         struct Displayer<'a> {
             symbol: &'a TypeSymbol,
@@ -1044,16 +1045,70 @@ impl SymbolTable {
     pub fn display_type<'a>(&'a self, ty: &'a Type) -> String {
         match ty {
             Type::Base { symbol, args } => {
-                let base_name = self.get_type_name(self.type_symbols[symbol].name_id);
-                if args.is_empty() {
-                    base_name.to_string()
-                } else {
-                    let arg_str = args
-                        .iter()
-                        .map(|arg| self.display_type(arg))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("{}<{}>", base_name, arg_str)
+                let type_symbol = &self.type_symbols[symbol];
+                match &type_symbol.kind {
+                    TypeSymbolKind::FunctionSignature {
+                        params,
+                        return_type,
+                        ..
+                    } => {
+                        let generic_params_str = if !type_symbol.generic_parameters.is_empty() {
+                            let params_list = type_symbol
+                                .generic_parameters
+                                .iter()
+                                .map(|p_id| {
+                                    self.get_type_name(self.get_type_symbol(*p_id).unwrap().name_id)
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("<{}>", params_list)
+                        } else {
+                            "".to_string()
+                        };
+
+                        let params_str = params
+                            .iter()
+                            .map(|p_ty| self.display_type(p_ty))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        let is_null_return = if let Type::Base {
+                            symbol: ret_symbol, ..
+                        } = &return_type
+                        {
+                            if let Some(symbol) = self.get_type_symbol(*ret_symbol) {
+                                matches!(symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Null))
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        if is_null_return {
+                            format!("fn{}({})", generic_params_str, params_str)
+                        } else {
+                            format!(
+                                "fn{}({}) -> {}",
+                                generic_params_str,
+                                params_str,
+                                self.display_type(return_type)
+                            )
+                        }
+                    }
+                    _ => {
+                        let base_name = self.get_type_name(type_symbol.name_id);
+                        if args.is_empty() {
+                            base_name.to_string()
+                        } else {
+                            let arg_str = args
+                                .iter()
+                                .map(|arg| self.display_type(arg))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("{}<{}>", base_name, arg_str)
+                        }
+                    }
                 }
             }
             Type::Reference(inner) => format!("&{}", self.display_type(inner)),
