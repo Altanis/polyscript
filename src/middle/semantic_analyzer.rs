@@ -1,3 +1,4 @@
+// middle/semantic_analyzer.rs
 use crate::{
     frontend::ast::AstNode,
     utils::{error::*, kind::*},
@@ -825,19 +826,17 @@ impl TraitRegistry {
 /// A constraint imposed onto a metavariable.
 #[derive(Debug, Clone)]
 pub enum Constraint {
-    /// The metavariable is equal to a type.
-    Equality(TypeSymbolId, Type),
-    /// The metavariable is equal to the dereferenced value of the type.
-    DereferenceEquality(TypeSymbolId, Type),
-    /// The metavariable denotes a function pointer.
-    FunctionSignature(TypeSymbolId, Vec<Type>, Type),
-    /// The metavariable denotes the result of an operation that
+    /// Two types are equal.
+    Equality(Type, Type),
+    /// A type denotes a function pointer.
+    FunctionSignature(Type, Vec<Type>, Type),
+    /// A type denotes the result of an operation that
     /// is trait overloadable.
-    Operation(TypeSymbolId, Type, Type, Option<Type>),
-    /// The metavariable denotes the value of a member on an instance variable.
-    InstanceMemberAccess(TypeSymbolId, Type, String),
-    /// The metavariable denotes a static member of a type, like an enum variant.
-    StaticMemberAccess(TypeSymbolId, TypeSymbolId, String),
+    Operation(Type, Type, Type, Option<Type>),
+    /// A type denotes the value of a member on an instance variable.
+    InstanceMemberAccess(Type, Type, String),
+    /// A type denotes a static member of a type, like an enum variant.
+    StaticMemberAccess(Type, Type, String),
 }
 
 /// Additional information about a constraint.
@@ -1167,70 +1166,59 @@ impl Constraint {
         impl std::fmt::Display for C<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 use Constraint::*;
-                let ty = |id| self.t.display_type(&Type::new_base(id));
                 match self.c {
-                    Equality(id, rhs) => write!(
+                    Equality(lhs, rhs) => write!(
                         f,
                         "{} {} {}",
-                        ty(*id).yellow(),
+                        self.t.display_type(lhs).yellow(),
                         "=".blue(),
                         self.t.display_type(rhs).yellow()
                     ),
-                    DereferenceEquality(id, rhs) => write!(
-                        f,
-                        "*{} {} {}",
-                        ty(*id).yellow(),
-                        "=".blue(),
-                        self.t.display_type(rhs).yellow()
-                    ),
-                    FunctionSignature(id, ps, r) => {
-                        let ps = ps
+                    FunctionSignature(callee, ps, r) => {
+                        let ps_str = ps
                             .iter()
                             .map(|p| self.t.display_type(p))
                             .collect::<Vec<_>>()
                             .join(", ");
                         write!(
                             f,
-                            "fn({}) -> {} {} {}",
-                            ps,
-                            self.t.display_type(r),
+                            "{} {} fn({}) -> {}",
+                            self.t.display_type(callee).yellow(),
                             "=".blue(),
-                            ty(*id).yellow()
+                            ps_str,
+                            self.t.display_type(r)
                         )
                     }
-                    Operation(trait_id, trait_type, lhs, rhs) => write!(
-                        // f,
-                        // "{} {} {}",
-                        // ty(*trait_id).cyan(),
-                        // "⊧".blue(),
-                        // self.t.display_type(ty_inst).yellow()
-                        f,
-                        "{} {} {} {}",
-                        ty(*trait_id).cyan(),
-                        "⊧".blue(),
-                        self.t.display_type(trait_type).yellow(),
-                        if let Some(rhs) = rhs {
-                            format!("{} {}", self.t.display_type(lhs).yellow(), self.t.display_type(rhs).blue())
+                    Operation(result, trait_ty, lhs, rhs) => {
+                        let op_str = if let Some(r) = rhs {
+                            format!("op({}, {})", self.t.display_type(lhs), self.t.display_type(r))
                         } else {
-                            self.t.display_type(lhs).yellow().to_string()
-                        }
-                    ),
-                    InstanceMemberAccess(id, base, m) => write!(
+                            format!("op({})", self.t.display_type(lhs))
+                        };
+
+                        write!(
+                            f,
+                            "{} = {} where {}: {}",
+                            self.t.display_type(result).yellow(),
+                            op_str,
+                            self.t.display_type(lhs),
+                            self.t.display_type(trait_ty).cyan()
+                        )
+                    }
+                    InstanceMemberAccess(result, base, m) => write!(
                         f,
-                        "{}.{} {} {}",
+                        "{} = {}.{}",
+                        self.t.display_type(result).yellow(),
                         self.t.display_type(base),
-                        m.green(),
-                        "=".blue(),
-                        self.t.display_type(&Type::new_base(*id)).yellow()
+                        m.green()
                     ),
-                    StaticMemberAccess(id, base_id, m) => write!(
+                    StaticMemberAccess(result, base, m) => write!(
                         f,
-                        "{}.{} {} {}",
-                        self.t.display_type(&Type::new_base(*base_id)).bright_blue(),
-                        m.green(),
-                        "=".blue(),
-                        self.t.display_type(&Type::new_base(*id)).yellow()
-                    )
+                        "{} = {}::{}",
+                        self.t.display_type(result).yellow(),
+                        self.t.display_type(base).bright_blue(),
+                        m.green()
+                    ),
                 }
             }
         }

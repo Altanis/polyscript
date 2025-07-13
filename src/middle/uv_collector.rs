@@ -1,3 +1,4 @@
+// middle/uv_collector.rs
 use crate::{
     boxed,
     frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
@@ -34,29 +35,31 @@ impl SemanticAnalyzer {
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         let uv_type = self.collect_uvs(operand)?;
+        let result_uv = Type::new_base(uv_id);
 
         match operator.to_trait_data() {
             Some((trait_name, _)) => {
                 self.unification_context.register_constraint(
                     Constraint::Operation(
-                        uv_id,
+                        result_uv,
                         Type::new_base(self.trait_registry.get_default_trait(&trait_name)),
                         uv_type,
-                        None
+                        None,
                     ),
                     info,
                 );
             }
             None => match operator {
-                Operation::Dereference => self
-                    .unification_context
-                    .register_constraint(Constraint::DereferenceEquality(uv_id, uv_type), info),
+                Operation::Dereference => self.unification_context.register_constraint(
+                    Constraint::Equality(uv_type, Type::Reference(Box::new(result_uv))),
+                    info,
+                ),
                 Operation::ImmutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(uv_id, Type::Reference(boxed!(uv_type))),
+                    Constraint::Equality(result_uv, Type::Reference(boxed!(uv_type))),
                     info,
                 ),
                 Operation::MutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(uv_id, Type::MutableReference(boxed!(uv_type))),
+                    Constraint::Equality(result_uv, Type::MutableReference(boxed!(uv_type))),
                     info,
                 ),
                 _ => unreachable!(),
@@ -76,32 +79,31 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         let left_type = self.collect_uvs(left)?;
         let right_type = self.collect_uvs(right)?;
+        let result_uv = Type::new_base(uv_id);
 
         match operator.to_trait_data() {
             Some((trait_name, _)) => {
                 self.unification_context.register_constraint(
                     Constraint::Operation(
-                        uv_id,
+                        result_uv,
                         Type::Base {
                             symbol: self.trait_registry.get_default_trait(&trait_name),
                             args: vec![right_type.clone()],
                         },
                         left_type,
-                        Some(right_type)
+                        Some(right_type),
                     ),
                     info,
                 );
             }
             None => match operator {
                 Operation::Assign => {
-                    self.unification_context.register_constraint(
-                        Constraint::Equality(left_type.get_base_symbol(), right_type.clone()),
-                        info,
-                    );
+                    self.unification_context
+                        .register_constraint(Constraint::Equality(left_type, right_type), info);
 
                     self.unification_context.register_constraint(
                         Constraint::Equality(
-                            uv_id,
+                            result_uv,
                             Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
                         ),
                         info,
@@ -125,16 +127,14 @@ impl SemanticAnalyzer {
         let right_type = self.collect_uvs(right)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
 
-        self.unification_context.register_constraint(
-            Constraint::Equality(left_type.get_base_symbol(), bool_type.clone()),
-            info,
-        );
-        self.unification_context.register_constraint(
-            Constraint::Equality(right_type.get_base_symbol(), bool_type.clone()),
-            info,
-        );
         self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, bool_type), info);
+            .register_constraint(Constraint::Equality(left_type, bool_type.clone()), info);
+        self.unification_context
+            .register_constraint(Constraint::Equality(right_type, bool_type.clone()), info);
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), bool_type),
+            info,
+        );
 
         Ok(())
     }
@@ -157,7 +157,7 @@ impl SemanticAnalyzer {
 
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -177,19 +177,15 @@ impl SemanticAnalyzer {
             let annot_type = self.collect_uvs(annot)?;
 
             if let Some(init_type) = init_type {
-                self.unification_context.register_constraint(
-                    Constraint::Equality(annot_type.get_base_symbol(), init_type),
-                    info,
-                );
+                self.unification_context
+                    .register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
             }
 
-            self.unification_context.register_constraint(
-                Constraint::Equality(symbol_uv.get_base_symbol(), annot_type),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
         } else if let Some(init_type) = init_type {
             self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv.get_base_symbol(), init_type), info);
+                .register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
         } else {
             return Err(self.create_error(ErrorKind::BadVariableDeclaration, span, &[span]));
         }
@@ -215,8 +211,10 @@ impl SemanticAnalyzer {
         }
 
         if let Some(last_type) = last_type {
-            self.unification_context
-                .register_constraint(Constraint::Equality(uv_id, last_type), info);
+            self.unification_context.register_constraint(
+                Constraint::Equality(Type::new_base(uv_id), last_type),
+                info,
+            );
         }
         Ok(())
     }
@@ -232,20 +230,16 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         let cond_type = self.collect_uvs(condition)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
-        self.unification_context.register_constraint(
-            Constraint::Equality(cond_type.get_base_symbol(), bool_type.clone()),
-            info,
-        );
+        self.unification_context
+            .register_constraint(Constraint::Equality(cond_type, bool_type.clone()), info);
 
         let then_type = self.collect_uvs(then_branch)?;
         let mut branch_types = vec![then_type.clone()];
 
         for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
             let elif_cond_type = self.collect_uvs(elif_cond)?;
-            self.unification_context.register_constraint(
-                Constraint::Equality(elif_cond_type.get_base_symbol(), bool_type.clone()),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(elif_cond_type, bool_type.clone()), info);
             let elif_type = self.collect_uvs(elif_branch)?;
             branch_types.push(elif_type);
         }
@@ -256,8 +250,10 @@ impl SemanticAnalyzer {
         }
 
         for branch_type in &branch_types {
-            self.unification_context
-                .register_constraint(Constraint::Equality(uv_id, branch_type.clone()), info);
+            self.unification_context.register_constraint(
+                Constraint::Equality(Type::new_base(uv_id), branch_type.clone()),
+                info,
+            );
         }
 
         Ok(())
@@ -273,13 +269,13 @@ impl SemanticAnalyzer {
         let cond_type = self.collect_uvs(condition)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
         self.unification_context
-            .register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type), info);
+            .register_constraint(Constraint::Equality(cond_type, bool_type), info);
 
         self.collect_uvs(body)?;
 
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -305,7 +301,7 @@ impl SemanticAnalyzer {
             let cond_type = self.collect_uvs(cond)?;
             let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
             self.unification_context
-                .register_constraint(Constraint::Equality(cond_type.get_base_symbol(), bool_type), info);
+                .register_constraint(Constraint::Equality(cond_type, bool_type), info);
         }
 
         if let Some(inc) = increment {
@@ -316,7 +312,7 @@ impl SemanticAnalyzer {
 
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -337,7 +333,7 @@ impl SemanticAnalyzer {
 
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -353,9 +349,10 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        let result_uv = Type::new_base(uv_id);
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                result_uv.clone(),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -391,10 +388,8 @@ impl SemanticAnalyzer {
 
         if let Some(body_node) = body {
             let body_type = self.collect_uvs(body_node)?;
-            self.unification_context.register_constraint(
-                Constraint::Equality(body_type.get_base_symbol(), return_type.clone()),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(body_type, return_type.clone()), info);
         }
 
         let fn_sig_type_id = self.symbol_table.add_type_symbol(
@@ -412,7 +407,7 @@ impl SemanticAnalyzer {
         let fn_sig_type = Type::new_base(fn_sig_type_id);
 
         self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, fn_sig_type.clone()), info);
+            .register_constraint(Constraint::Equality(result_uv, fn_sig_type.clone()), info);
 
         Ok(())
     }
@@ -426,7 +421,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -446,7 +441,7 @@ impl SemanticAnalyzer {
         if let Some(init_node) = initializer {
             let init_type = self.collect_uvs(init_node)?;
             self.unification_context.register_constraint(
-                Constraint::Equality(init_type.get_base_symbol(), annotation_type.clone()),
+                Constraint::Equality(init_type, annotation_type.clone()),
                 info,
             );
         }
@@ -456,7 +451,7 @@ impl SemanticAnalyzer {
             .generate_uv_type(&mut self.symbol_table, span);
 
         self.unification_context.register_constraint(
-            Constraint::Equality(symbol_uv.get_base_symbol(), annotation_type.clone()),
+            Constraint::Equality(symbol_uv.clone(), annotation_type.clone()),
             info,
         );
 
@@ -499,8 +494,10 @@ impl SemanticAnalyzer {
             Some(span),
         )?;
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, Type::new_base(fn_ptr_sig_id)), info);
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), Type::new_base(fn_ptr_sig_id)),
+            info,
+        );
 
         Ok(())
     }
@@ -517,8 +514,10 @@ impl SemanticAnalyzer {
             return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
         };
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, Type::new_base(symbol.id)), info);
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), Type::new_base(symbol.id)),
+            info,
+        );
 
         Ok(())
     }
@@ -532,7 +531,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -552,10 +551,8 @@ impl SemanticAnalyzer {
         if let Some(annot) = type_annotation {
             let annot_type = self.collect_uvs(annot)?;
 
-            self.unification_context.register_constraint(
-                Constraint::Equality(annot_type.get_base_symbol(), init_type.clone()),
-                info,
-            );
+            self.unification_context
+                .register_constraint(Constraint::Equality(annot_type, init_type.clone()), info);
         }
 
         let symbol_uv = self
@@ -563,7 +560,7 @@ impl SemanticAnalyzer {
             .generate_uv_type(&mut self.symbol_table, span);
 
         self.unification_context
-            .register_constraint(Constraint::Equality(symbol_uv.get_base_symbol(), init_type), info);
+            .register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
 
         self.symbol_table
             .get_value_symbol_mut(node.value_id.unwrap())
@@ -604,8 +601,10 @@ impl SemanticAnalyzer {
             ReferenceKind::MutableReference => Type::MutableReference(boxed!(base_symbol)),
         };
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, constraint), info);
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), constraint),
+            info,
+        );
 
         Ok(())
     }
@@ -619,7 +618,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
@@ -637,10 +636,8 @@ impl SemanticAnalyzer {
             .unification_context
             .generate_uv_type(&mut self.symbol_table, span);
 
-        self.unification_context.register_constraint(
-            Constraint::Equality(symbol_uv.get_base_symbol(), initializer_type),
-            info,
-        );
+        self.unification_context
+            .register_constraint(Constraint::Equality(symbol_uv.clone(), initializer_type), info);
 
         let type_symbol = self
             .symbol_table
@@ -712,7 +709,7 @@ impl SemanticAnalyzer {
 
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 match receiver_kind {
                     ReferenceKind::Value => self_type.clone(),
                     ReferenceKind::Reference => Type::Reference(Box::new(self_type.clone())),
@@ -741,7 +738,7 @@ impl SemanticAnalyzer {
         if let TypeSymbolKind::TypeAlias((_, Some(concrete_type))) = &self_symbol.kind {
             self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
+                    Type::new_base(uv_id),
                     match reference_kind {
                         ReferenceKind::Value => concrete_type.clone(),
                         ReferenceKind::Reference => Type::Reference(boxed!(concrete_type.clone())),
@@ -774,10 +771,10 @@ impl SemanticAnalyzer {
                 .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
             {
                 let static_type = Type::new_base(type_symbol.id);
-                left.type_id = Some(static_type);
+                left.type_id = Some(static_type.clone());
 
                 self.unification_context.register_constraint(
-                    Constraint::StaticMemberAccess(uv_id, type_symbol.id, right_name),
+                    Constraint::StaticMemberAccess(Type::new_base(uv_id), static_type, right_name),
                     info,
                 );
 
@@ -788,7 +785,7 @@ impl SemanticAnalyzer {
         let left_type = self.collect_uvs(left)?;
 
         self.unification_context.register_constraint(
-            Constraint::InstanceMemberAccess(uv_id, left_type, right_name),
+            Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
             info,
         );
 
@@ -815,16 +812,14 @@ impl SemanticAnalyzer {
             .generate_uv_type(&mut self.symbol_table, span);
 
         self.unification_context.register_constraint(
-            Constraint::FunctionSignature(
-                function_type.get_base_symbol(),
-                argument_types,
-                return_uv_type.clone(),
-            ),
+            Constraint::FunctionSignature(function_type, argument_types, return_uv_type.clone()),
             info,
         );
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, return_uv_type), info);
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), return_uv_type),
+            info,
+        );
 
         Ok(())
     }
@@ -838,14 +833,17 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
             Constraint::Equality(
-                uv_id,
+                Type::new_base(uv_id),
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
             ),
             info,
         );
 
         let annotation_type = self.collect_uvs(type_annotation)?;
-        self.symbol_table.find_value_symbol_in_scope_mut(name, info.scope_id).unwrap().type_id = Some(annotation_type);
+        self.symbol_table
+            .find_value_symbol_in_scope_mut(name, info.scope_id)
+            .unwrap()
+            .type_id = Some(annotation_type);
 
         Ok(())
     }
@@ -876,9 +874,11 @@ impl SemanticAnalyzer {
             .unwrap();
 
         let enum_type = Type::new_base(enum_type_symbol.id);
-        
-        self.unification_context
-            .register_constraint(Constraint::Equality(uv_id, enum_type.clone()), info);
+
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), enum_type.clone()),
+            info,
+        );
 
         Ok(())
     }
@@ -916,44 +916,44 @@ impl SemanticAnalyzer {
 
         match &mut expr.kind {
             IntegerLiteral(_) => self.unification_context.register_constraint(
-                Constraint::Equality(uv_id, Type::new_base(self.get_primitive_type(PrimitiveKind::Int))),
+                Constraint::Equality(
+                    uv.clone(),
+                    Type::new_base(self.get_primitive_type(PrimitiveKind::Int)),
+                ),
                 info,
             ),
             FloatLiteral(_) => self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
+                    uv.clone(),
                     Type::new_base(self.get_primitive_type(PrimitiveKind::Float)),
                 ),
                 info,
             ),
             BooleanLiteral(_) => self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
+                    uv.clone(),
                     Type::new_base(self.get_primitive_type(PrimitiveKind::Bool)),
                 ),
                 info,
             ),
             StringLiteral(_) => self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
+                    uv.clone(),
                     Type::new_base(self.get_primitive_type(PrimitiveKind::String)),
                 ),
                 info,
             ),
             CharLiteral(_) => self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
+                    uv.clone(),
                     Type::new_base(self.get_primitive_type(PrimitiveKind::Char)),
                 ),
                 info,
             ),
             Identifier(string) => self.unification_context.register_constraint(
                 Constraint::Equality(
-                    uv_id,
-                    Type::new_base(
-                        self.get_type_of_identifier(expr.scope_id.unwrap(), string, expr.span)?
-                            .get_base_symbol(),
-                    ),
+                    uv.clone(),
+                    self.get_type_of_identifier(expr.scope_id.unwrap(), string, expr.span)?,
                 ),
                 info,
             ),
@@ -1026,17 +1026,15 @@ impl SemanticAnalyzer {
             )?,
             StructField { name, type_annotation, .. } => {
                 self.collect_uv_struct_field(uv_id, name, type_annotation, info)?
-            },
-            EnumVariant(_) => {
-                self.collect_uv_enum_variant(uv_id, info)?
-            },
+            }
+            EnumVariant(_) => self.collect_uv_enum_variant(uv_id, info)?,
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }
             | ImplDeclaration { .. } => {
                 self.unification_context.register_constraint(
                     Constraint::Equality(
-                        uv_id,
+                        uv.clone(),
                         Type::new_base(self.get_primitive_type(PrimitiveKind::Null)),
                     ),
                     info,
