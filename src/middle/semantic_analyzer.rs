@@ -66,7 +66,8 @@ pub enum PrimitiveKind {
     Bool,
     String,
     Char,
-    Null,
+    Void,
+    Never
 }
 
 impl PrimitiveKind {
@@ -77,7 +78,8 @@ impl PrimitiveKind {
             PrimitiveKind::Bool => BOOL_TYPE,
             PrimitiveKind::String => STRING_TYPE,
             PrimitiveKind::Char => CHAR_TYPE,
-            PrimitiveKind::Null => NULL_TYPE,
+            PrimitiveKind::Void => VOID_TYPE,
+            PrimitiveKind::Never => NEVER_TYPE
         }
     }
 }
@@ -1080,7 +1082,7 @@ impl SymbolTable {
                         } = &return_type
                         {
                             if let Some(symbol) = self.get_type_symbol(*ret_symbol) {
-                                matches!(symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Null))
+                                matches!(symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void))
                             } else {
                                 false
                             }

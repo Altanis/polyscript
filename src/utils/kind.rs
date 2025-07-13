@@ -25,7 +25,8 @@ pub const FLOAT_TYPE: &str = "float";
 pub const BOOL_TYPE: &str = "bool";
 pub const STRING_TYPE: &str = "string";
 pub const CHAR_TYPE: &str = "char";
-pub const NULL_TYPE: &str = "null"; // NOTE: Programs may not use this type.
+pub const VOID_TYPE: &str = "void"; // NOTE: Programs may not use this type.
+pub const NEVER_TYPE: &str = "never"; // NOTE: Programs may not use this type.
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";

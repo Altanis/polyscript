@@ -303,7 +303,7 @@ impl SemanticAnalyzer {
                     name,
                     TypeSymbolKind::FunctionSignature {
                         params: vec![],
-                        return_type: Type::new_base(self.builtin_types[PrimitiveKind::Null as usize]),
+                        return_type: Type::new_base(self.builtin_types[PrimitiveKind::Void as usize]),
                         instance: *instance,
                     },
                     sig_generic_param_ids,
