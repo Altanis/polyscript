@@ -1030,8 +1030,6 @@ impl SemanticAnalyzer {
             EnumVariant(_) => {
                 self.collect_uv_enum_variant(uv_id, info)?
             },
-            // struct field, enum variant
-            // todo: make enum variant unify with integer (enum variant must be of the type enum but unify with int)
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }

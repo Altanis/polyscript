@@ -3789,18 +3789,26 @@ impl UnificationContext {
                     }
                 }
 
-                let unresolved: Vec<_> = (0..self.ctx.next_id)
-                    .filter(|id| !self.ctx.substitutions.contains_key(id))
+               let unresolved_uvs: Vec<&TypeSymbol> = self.tbl.type_symbols
+                    .values()
+                    .filter(|symbol| {
+                        if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
+                            !self.ctx.substitutions.contains_key(&symbol.id)
+                        } else {
+                            false
+                        }
+                    })
                     .collect();
 
-                if unresolved.is_empty() {
+                if unresolved_uvs.is_empty() {
                     writeln!(f, "{}", "* Unresolved UVs: (none)".dimmed())?;
                 } else {
-                    let list = unresolved
+                    let mut uv_names: Vec<String> = unresolved_uvs
                         .iter()
-                        .map(|id| format!("#uv_{}", id).red().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                        .map(|s| self.tbl.get_type_name(s.name_id).red().to_string())
+                        .collect();
+                    uv_names.sort();
+                    let list = uv_names.join(", ");
                     writeln!(f, "* {} {}", "Unresolved UVs:".bold(), list)?;
                 }
 
@@ -5658,8 +5666,6 @@ impl SemanticAnalyzer {
             EnumVariant(_) => {
                 self.collect_uv_enum_variant(uv_id, info)?
             },
-            // struct field, enum variant
-            // todo: make enum variant unify with integer (enum variant must be of the type enum but unify with int)
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }
