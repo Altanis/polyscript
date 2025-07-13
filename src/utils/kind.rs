@@ -18,8 +18,6 @@ pub const GREATER_THAN_TOKEN: char = '>';
 pub const LESS_THAN_TOKEN: char = '<';
 pub const FIELD_ACCESS_TOKEN: char = '.';
 
-pub const COMMENT_TOKEN: char = '#';
-
 pub const INT_TYPE: &str = "int";
 pub const FLOAT_TYPE: &str = "float";
 pub const BOOL_TYPE: &str = "bool";

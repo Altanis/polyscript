@@ -1,4 +1,4 @@
-## todo
+#// todo
 - [x] variable declaration
 - [x] function declaration
 - [x] blocks
@@ -28,13 +28,13 @@ NOTE: stdlib should contain:
 
 NOTE: Trailing commas are NOT allowed.
 NOTE: ```rs
-let x: int; # this declaration is sound
-# func(x); # this is an ERROR. x is not defined yet, only forward declared.
+let x: int; // this declaration is sound
+// func(x); // this is an ERROR. x is not defined yet, only forward declared.
 if (true) {
     x = 5;
 } else {
     x = 4;
 }
 
-func(x); # x is now verifiably defined
+func(x); // x is now verifiably defined
 ```
