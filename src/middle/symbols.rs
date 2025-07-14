@@ -647,7 +647,7 @@ impl SemanticAnalyzer {
                 parameters,
                 body,
                 instance,
-                ..
+                return_type
             } = &mut func_node.kind
             {
                 let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
@@ -663,6 +663,7 @@ impl SemanticAnalyzer {
 
                 self.collect_function_parameters(parameters)?;
                 self.symbol_collector_check_node(body.as_mut().unwrap())?;
+                self.collect_optional_node(return_type)?;
                 self.symbol_table.exit_scope();
 
                 func_node.value_id = Some(self.symbol_table.add_value_symbol(

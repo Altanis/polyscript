@@ -5638,7 +5638,7 @@ impl SemanticAnalyzer {
 
         let info = ConstraintInfo {
             span: expr.span,
-            scope_id: expr.scope_id.expect("scope_id should exist on every node."),
+            scope_id: expr.scope_id.unwrap_or_else(|| panic!("scope_id should exist on node, especially this one: {} \n{:?}", expr, expr)),
         };
 
         match &mut expr.kind {
@@ -5786,15 +5786,6 @@ impl SemanticAnalyzer {
         }
 
         expr.type_id = Some(uv.clone());
-
-        if !matches!(&expr.kind, Function { .. } | FunctionParameter { .. }) {
-            if let Some(value_id) = expr.value_id {
-                self.symbol_table
-                    .get_value_symbol_mut(value_id)
-                    .unwrap()
-                    .type_id = Some(uv.clone());
-            }
-        }
 
         Ok(uv)
     }

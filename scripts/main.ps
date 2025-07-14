@@ -1,5 +1,16 @@
-// test
-fn main() {
-    let x = 5; // testing
-    123;
+let x: float = 5.0;
+let y: &float = &x;
+
+struct Vector2D {
+    public x: float;
+    public y: float;
+}
+
+impl Vector2D {
+    fn default(): Self {
+        return Vector2D {
+            x: 0.0,
+            y: 0.0
+        };
+    }
 }

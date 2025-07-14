@@ -175,8 +175,20 @@ pub struct TypeSymbol {
 }
 
 impl TypeSymbol {
-    pub fn can_unify_with(&self, other: &TypeSymbol) -> bool {
-        self.id == other.id
+    pub fn unify(&self, other: &TypeSymbol) -> Option<TypeSymbolId> {
+        if self.id == other.id {
+            return Some(self.id);
+        }
+
+        match (&self.kind, &other.kind) {
+            (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
+            (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
+
+            (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Enum(_)) => Some(self.id),
+            (TypeSymbolKind::Enum(_), TypeSymbolKind::Primitive(PrimitiveKind::Int)) => Some(other.id),
+
+            _ => None
+        }
     }
 }
 

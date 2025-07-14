@@ -17,25 +17,12 @@ impl SemanticAnalyzer {
         )
     }
 
-    fn is_never(&self, symbol_id: TypeSymbolId) -> bool {
-        matches!(
-            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
-            TypeSymbolKind::Primitive(PrimitiveKind::Never)
-        )
-    }
-
-    fn is_int(&self, symbol_id: TypeSymbolId) -> bool {
-        matches!(
-            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
-            TypeSymbolKind::Primitive(PrimitiveKind::Int)
-        )
-    }
-
-    fn is_enum(&self, symbol_id: TypeSymbolId) -> bool {
-        matches!(
-            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
-            TypeSymbolKind::Enum(_)
-        )
+    fn is_type_alias(&self, symbol_id: TypeSymbolId) -> Option<Type> {
+        if let TypeSymbolKind::TypeAlias((_, ty)) = &self.symbol_table.get_type_symbol(symbol_id).unwrap().kind {
+            ty.clone()
+        } else {
+            None
+        }
     }
 }
 
@@ -218,25 +205,24 @@ impl SemanticAnalyzer {
         match (t1.clone(), t2.clone()) {
             (t1, t2) if t1 == t2 => Ok(t1),
 
-            (Type::Base { symbol: s1, .. }, t2_val) if self.is_never(s1) => Ok(t2_val),
-            (t1_val, Type::Base { symbol: s2, .. }) if self.is_never(s2) => Ok(t1_val),
-
-            (Type::Base { symbol: s1, .. }, t2 @ Type::Base { symbol: s2, .. })
-                if self.is_enum(s1) && self.is_int(s2) =>
-            {
-                Ok(t2)
-            }
-            (t1 @ Type::Base { symbol: s1, .. }, Type::Base { symbol: s2, .. })
-                if self.is_int(s1) && self.is_enum(s2) =>
-            {
-                Ok(t1)
-            }
+            (Type::Base { symbol: s1, .. }, t2 @ Type::Base { .. }) 
+                if let Some(inner) = self.is_type_alias(s1)
+            => self.unify(inner, t2, info),
+            (t1 @ Type::Base { .. }, Type::Base { symbol: s2, .. }) 
+                if let Some(inner) = self.is_type_alias(s2)
+            => self.unify(t1, inner, info),
 
             (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
             (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
 
             (Type::Base { symbol: s1, args: a1 }, Type::Base { symbol: s2, args: a2 }) => {
-                if s1 != s2 || a1.len() != a2.len() {
+                let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap();
+                let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap();
+
+                let resultant_symbol = type_sym_s1.unify(type_sym_s2)
+                    .ok_or(self.type_mismatch_error(&t1, &t2, info, None))?;
+
+                if a1.len() != a2.len() {
                     return Err(self.type_mismatch_error(&t1, &t2, info, None));
                 }
 
@@ -246,7 +232,7 @@ impl SemanticAnalyzer {
                 }
 
                 Ok(Type::Base {
-                    symbol: s1,
+                    symbol: resultant_symbol,
                     args: unified_args,
                 })
             },
