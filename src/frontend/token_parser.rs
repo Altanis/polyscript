@@ -1086,15 +1086,8 @@ impl Parser {
                 TokenKind::Keyword(KeywordKind::Public) => QualifierKind::Public,
                 TokenKind::Keyword(KeywordKind::Private) => QualifierKind::Private,
                 _ => {
-                    let span = qualifier_token.get_span();
-                    return Err(parser.generate_error(
-                        ErrorKind::UnexpectedToken(
-                            qualifier_token.get_value().to_string(),
-                            format!("{}", qualifier_token.get_token_kind()),
-                            "a public or private qualifier".to_string(),
-                        ),
-                        span,
-                    ));
+                    parser.back();
+                    QualifierKind::Public
                 }
             };
 

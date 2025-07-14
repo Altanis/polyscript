@@ -2,8 +2,8 @@ let x: float = 5.0;
 let y: &float = &x;
 
 struct Vector2D {
-    public x: float;
-    public y: float;
+    x: float;
+    y: float;
 }
 
 impl Vector2D {
@@ -13,4 +13,13 @@ impl Vector2D {
             y: 0.0
         };
     }
+
+    fn take_this(this) {}
+    fn take_ref_this(&this) {}
+    fn take_mut_ref_this(&mut this) {}
 }
+
+let v1 = Vector2D.default();
+v1.take_this();
+v1.take_ref_this();
+v1.take_mut_ref_this();
