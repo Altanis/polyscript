@@ -842,6 +842,8 @@ impl TraitRegistry {
 pub enum Constraint {
     /// Two types are equal.
     Equality(Type, Type),
+    /// A type denotes a function call on an instance.
+    MethodCall(Type, Type, Vec<Type>, Type),
     /// A type denotes a function pointer.
     FunctionSignature(Type, Vec<Type>, Type),
     /// A type denotes the result of an operation that
@@ -1246,6 +1248,21 @@ impl Constraint {
                         "=".blue(),
                         self.t.display_type(rhs).yellow()
                     ),
+                    MethodCall(instance, callee, ps, r) => {
+                        let ps_str = ps
+                            .iter()
+                            .map(|p| self.t.display_type(p))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        write!(
+                            f,
+                            "({}).call({}) -> {} where callee is {}",
+                            self.t.display_type(instance).yellow(),
+                            ps_str,
+                            self.t.display_type(r),
+                            self.t.display_type(callee).cyan()
+                        )
+                    },
                     FunctionSignature(callee, ps, r) => {
                         let ps_str = ps
                             .iter()

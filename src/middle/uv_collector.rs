@@ -687,6 +687,7 @@ impl SemanticAnalyzer {
             .symbol_table
             .get_type_symbol_mut(node.type_id.as_mut().unwrap().get_base_symbol())
             .unwrap();
+
         let TypeSymbolKind::TypeAlias((_, alias)) = &mut type_symbol.kind else {
             unreachable!();
         };
@@ -855,10 +856,40 @@ impl SemanticAnalyzer {
             .unification_context
             .generate_uv_type(&mut self.symbol_table, span);
 
-        self.unification_context.register_constraint(
-            Constraint::FunctionSignature(function_type, argument_types, return_uv_type.clone()),
-            info,
-        );
+        let mut is_method_call = false;
+        if let AstNodeKind::FieldAccess { left, .. } = &mut function_node.kind {
+            if let AstNodeKind::Identifier(left_name) = &left.kind {
+                if self
+                    .symbol_table
+                    .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
+                    .is_none()
+                {
+                    is_method_call = true;
+
+                    let instance_type = left
+                        .type_id
+                        .clone()
+                        .expect("instance in method call should have a type");
+
+                    self.unification_context.register_constraint(
+                        Constraint::MethodCall(
+                            instance_type,
+                            function_type.clone(),
+                            argument_types.clone(),
+                            return_uv_type.clone(),
+                        ),
+                        info,
+                    );
+                }
+            }
+        }
+
+        if !is_method_call {
+            self.unification_context.register_constraint(
+                Constraint::FunctionSignature(function_type, argument_types, return_uv_type.clone()),
+                info,
+            );
+        }
 
         self.unification_context.register_constraint(
             Constraint::Equality(Type::new_base(uv_id), return_uv_type),
@@ -1068,6 +1099,7 @@ impl SemanticAnalyzer {
                 expr.span,
                 info,
             )?,
+            AssociatedType { .. } | TypeDeclaration { .. } => self.collect_uv_type_declaration(uv_id, expr, expr.span, info)?,
             StructField { name, type_annotation, .. } => {
                 self.collect_uv_struct_field(uv_id, name, type_annotation, info)?
             }

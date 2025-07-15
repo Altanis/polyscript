@@ -329,7 +329,7 @@ impl Operation {
                 | MutableAddressOf => None,
             },
 
-            Null => None,
+            Void | Never => None,
         }
     }
 }

@@ -37,34 +37,32 @@ pub enum ErrorKind {
     ExpectedIdentifier,
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
+    ArityMismatch(usize, usize),
     InvalidReturn
 }
 
 impl ErrorKind {
     fn as_str(&self) -> String {
         match self {
-            ErrorKind::UnrecognizedSymbol(symbol) => format!("unrecognized symbol {}", symbol),
+            ErrorKind::UnrecognizedSymbol(symbol) => format!("unrecognized symbol {symbol}"),
             ErrorKind::UnexpectedEOF => "unexpected <eof> while parsing".to_string(),
-            ErrorKind::InvalidDigit(digit) => format!("invalid digit {}", digit),
+            ErrorKind::InvalidDigit(digit) => format!("invalid digit {digit}"),
             ErrorKind::InvalidEscapeSequence(sequence) => {
-                format!("invalid escape sequence {}", sequence)
+                format!("invalid escape sequence {sequence}")
             }
             ErrorKind::UnterminatedString => "string left unterminated".to_string(),
-            ErrorKind::InvalidChar(char) => format!("invalid char {}", char),
+            ErrorKind::InvalidChar(char) => format!("invalid char {char}"),
             ErrorKind::UnterminatedChar => "unterminated or degenerate char".to_string(),
             ErrorKind::UnexpectedToken(symbol, found, expected) => format!(
-                "unexpected token: found \"{}\" of type {}, expected {}",
-                symbol, found, expected
+                "unexpected token: found \"{symbol}\" of type {found}, expected {expected}"
             ),
             ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
-            ErrorKind::UnknownIdentifier(name) => format!("could not find \"{}\" in scope", name),
+            ErrorKind::UnknownIdentifier(name) => format!("could not find \"{name}\" in scope"),
             ErrorKind::UnresolvedType(name) => format!(
-                "type for symbol \"{}\" has not been determined by this line",
-                name
+                "type for symbol \"{name}\" has not been determined by this line"
             ),
             ErrorKind::AlreadyDeclared(variable) => format!(
-                "attempted to declare {}, but it already exists in scope",
-                variable
+                "attempted to declare {variable}, but it already exists in scope"
             ),
             ErrorKind::UnknownType => "could not determine type of data by this line".to_string(),
             ErrorKind::InvalidImpl(type_ref) => format!(
@@ -73,47 +71,47 @@ impl ErrorKind {
             ),
             ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
             ErrorKind::InvalidConstraint(constraint) => format!(
-                "expected constraint to be a trait, instead found \"{}\"",
-                constraint
+                "expected constraint to be a trait, instead found \"{constraint}\""
             ),
             ErrorKind::UnimplementedTrait(tr, ty) => {
-                format!("trait {} not implemented for type {}", tr, ty)
+                format!("trait {tr} not implemented for type {ty}")
             }
             ErrorKind::ConflictingTraitImpl(tr, ty) => {
-                format!("conflicting trait implementations for {} on type {}", tr, ty)
+                format!("conflicting trait implementations for {tr} on type {ty}")
             }
             ErrorKind::InvalidTraitImpl(ty) => {
-                format!("not all types in trait implemented, missing: {}", ty)
+                format!("not all types in trait implemented, missing: {ty}")
             }
             ErrorKind::ConflictingInherentImpl(ty) => {
-                format!("conflicting implementations for type {}", ty)
+                format!("conflicting implementations for type {ty}")
             }
             ErrorKind::InvalidDereference(ty) => {
-                format!("attempted to dereference non-pointer type {}", ty)
+                format!("attempted to dereference non-pointer type {ty}")
             }
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
             ErrorKind::FieldNotFound(field, type_name) => {
-                format!("field \"{}\" not found in type {}", field, type_name)
+                format!("field \"{field}\" not found in type {type_name}")
             }
             ErrorKind::InvalidFieldAccess(type_name) => {
-                format!("type {} does not comprise fields", type_name)
+                format!("type {type_name} does not comprise fields")
             }
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
             ErrorKind::BadVariableDeclaration => {
                 "variable declaration must be annotated with a type or value".to_string()
             }
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
-            ErrorKind::InvalidThis(place) => format!("found \"this\" {}", place),
+            ErrorKind::InvalidThis(place) => format!("found \"this\" {place}"),
             ErrorKind::ExpectedIdentifier => {
                 "expected an identifier for the rhs of a field access operation".to_string()
             }
             ErrorKind::TypeMismatch(t1, t2, str) => {
-                format!("types {} and {} are incompatible{}", t1, t2, match str {
-                    Some(s) => format!(" {s}"),
+                format!("types {t1} and {t2} are incompatible{}", match str {
+                    Some(s) => format!(" [{s}]"),
                     None => "".to_string()
                 })
             },
-            ErrorKind::NotCallable(ty) => format!("{} is not callable", ty),
+            ErrorKind::NotCallable(ty) => format!("{ty} is not callable"),
+            ErrorKind::ArityMismatch(expected, given) => format!("expected {expected} arguments, got {given} arguments"),
             ErrorKind::InvalidReturn => "return statement found outside of function".to_string()
         }
     }

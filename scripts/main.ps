@@ -1,25 +1,3 @@
-let x: float = 5.0;
-let y: &float = &x;
-
-struct Vector2D {
-    x: float;
-    y: float;
+fn x() {
+    
 }
-
-impl Vector2D {
-    fn default(): Self {
-        return Vector2D {
-            x: 0.0,
-            y: 0.0
-        };
-    }
-
-    fn take_this(this) {}
-    fn take_ref_this(&this) {}
-    fn take_mut_ref_this(&mut this) {}
-}
-
-let v1 = Vector2D.default();
-v1.take_this();
-v1.take_ref_this();
-v1.take_mut_ref_this();

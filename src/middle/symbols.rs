@@ -680,7 +680,7 @@ impl SemanticAnalyzer {
         for const_node in associated_constants {
             const_node.scope_id = Some(self.symbol_table.get_current_scope_id());
 
-            if let AstNodeKind::AssociatedConstant { qualifier, name, .. } = &const_node.kind {
+            if let AstNodeKind::AssociatedConstant { qualifier, name, type_annotation, initializer } = &mut const_node.kind {
                 let const_id = self.symbol_table.add_value_symbol(
                     name,
                     ValueSymbolKind::Variable,
@@ -690,13 +690,16 @@ impl SemanticAnalyzer {
                     Some(const_node.span),
                 )?;
                 const_node.value_id = Some(const_id);
+
+                self.collect_optional_node(type_annotation)?;
+                self.symbol_collector_check_node(initializer)?;
             }
         }
 
         for type_node in associated_types {
             type_node.scope_id = Some(self.symbol_table.get_current_scope_id());
 
-            if let AstNodeKind::AssociatedType { name, qualifier, .. } = &type_node.kind {
+            if let AstNodeKind::AssociatedType { name, qualifier, value } = &mut type_node.kind {
                 let type_id = self.symbol_table.add_type_symbol(
                     name,
                     TypeSymbolKind::TypeAlias((None, None)),
@@ -705,6 +708,8 @@ impl SemanticAnalyzer {
                     Some(type_node.span),
                 )?;
                 type_node.type_id = Some(Type::new_base(type_id));
+
+                self.symbol_collector_check_node(value)?;
             }
         }
 
