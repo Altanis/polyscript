@@ -4,12 +4,22 @@ struct Vector3D[T, U] {
     z: float;
 }
 
-let v: Vector3D[float, float] = Vector3D {
-    x: 0.0,
-    y: 0.0,
-    z: 0.0
+impl Vector3D[int, float] {
+    // todo make Self = Vector3D[int, float]
+    fn default(): Vector3D[int, float] {
+        return Vector3D { x: 0, y: 0.0, z: 0.0 };
+    }
+}
+
+impl[T] Vector3D[T] {
+    fn dot(&this, other: &Self): int {
+        return 0;
+    }
+}
+
+let v1: Vector3D[int, float] = Vector3D.default();
+let v2: Vector3D[char, string] = Vector3D {
+    x: '0', y: "0", z: 1.0
 };
 
-// todo: make unification handle generic shit to resolve <U, V> => <float, float>
-// rn generics cant unify with other types
-// also make sure inconsistent constraints dont get resolved, i.e. T = float = int.
+let resultant: int = v1.operation(v2);

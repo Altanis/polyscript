@@ -434,21 +434,7 @@ impl SemanticAnalyzer {
         self.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
-            let body_type = self.collect_uvs(body_node)?;
-
-            let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
-                stmts.last().map_or(body_node.span, |s| s.span)
-            } else {
-                body_node.span
-            };
-
-            self.unification_context.register_constraint(
-                Constraint::Equality(body_type, return_type_val.clone()),
-                ConstraintInfo {
-                    span,
-                    scope_id: body_node.scope_id.unwrap(),
-                },
-            );
+            self.collect_uvs(body_node)?;
         }
 
         self.current_return_type = old_return_type;

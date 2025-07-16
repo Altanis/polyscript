@@ -699,9 +699,14 @@ impl SemanticAnalyzer {
             let (implementing_type_id, type_specialization) =
                 self.resolve_type_ref_from_ast(type_reference)?;
 
+            let self_type = Type::Base {
+                symbol: implementing_type_id,
+                args: impl_generic_param_ids.iter().map(|id| Type::new_base(*id)).collect()
+            };
+
             self.symbol_table.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(implementing_type_id)))),
+                TypeSymbolKind::TypeAlias((None, Some(self_type))),
                 vec![],
                 QualifierKind::Public,
                 None,
