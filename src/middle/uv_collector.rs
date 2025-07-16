@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+
+use indexmap::IndexMap;
+
 // middle/uv_collector.rs
 use crate::{
     boxed,
@@ -573,6 +577,7 @@ impl SemanticAnalyzer {
         uv_id: TypeSymbolId,
         scope_id: ScopeId,
         name: &str,
+        fields: &mut IndexMap<String, AstNode>,
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
@@ -580,10 +585,62 @@ impl SemanticAnalyzer {
             return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
         };
 
+        let struct_scope_id = {
+            if let TypeSymbolKind::Struct((struct_scope_id, _)) = &symbol.kind { *struct_scope_id } else { unreachable!() }
+        };
+
+        let literal_field_names: HashSet<String> = fields.keys().cloned().collect();
+        let declared_field_names: HashSet<String> = self.symbol_table.get_scope(struct_scope_id).unwrap()
+            .values.values()
+            .map(|id| self.symbol_table.get_value_name(self.symbol_table.get_value_symbol(*id).unwrap().name_id).to_string())
+            .collect();
+        
+        let missing_fields: Vec<String> = declared_field_names
+            .difference(&literal_field_names)
+            .cloned().collect();
+
+        let extra_fields: Vec<String> = literal_field_names
+            .difference(&declared_field_names)
+            .cloned().collect();
+
+        if !missing_fields.is_empty() || !extra_fields.is_empty() {
+            return Err(self.create_error(
+                ErrorKind::MismatchedStructFields {
+                    struct_name: name.to_string(),
+                    missing_fields,
+                    extra_fields,
+                },
+                span,
+                &[span],
+            ));
+        }
+
+        let struct_type = Type::Base {
+            symbol: symbol.id,
+            args: symbol.generic_parameters.iter().map(|&type_id| Type::new_base(type_id)).collect()
+        };
+
         self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), Type::new_base(symbol.id)),
+            Constraint::Equality(Type::new_base(uv_id), struct_type),
             info,
         );
+
+        for (field_name, field_expr) in fields.iter_mut() {
+            let expr_uv = self.collect_uvs(field_expr)?;
+            let field_type = self.symbol_table
+                .find_value_symbol_from_scope(struct_scope_id, field_name)
+                .ok_or_else(|| self.create_error(
+                    ErrorKind::InvalidField(name.to_string(), field_name.to_string()), 
+                    field_expr.span,
+                    &[field_expr.span, span]
+                ))?
+                .type_id.clone().unwrap();
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(expr_uv, field_type),
+                info
+            );
+        }
 
         Ok(())
     }
@@ -1096,8 +1153,8 @@ impl SemanticAnalyzer {
                 self.collect_uv_function_pointer(uv_id, params, return_type, expr.span, info)?
             }
             FunctionParameter { .. } => self.collect_uv_function_parameter(uv_id, expr, expr.span, info)?,
-            StructLiteral { name, .. } => {
-                self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, expr.span, info)?
+            StructLiteral { name, fields } => {
+                self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, fields, expr.span, info)?
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
             SelfValue => self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?,

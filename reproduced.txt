@@ -1742,7 +1742,8 @@ impl Parser {
                 TokenKind::Keyword(KeywordKind::Int)
                 | TokenKind::Keyword(KeywordKind::Float)
                 | TokenKind::Keyword(KeywordKind::String)
-                | TokenKind::Keyword(KeywordKind::Bool) => {
+                | TokenKind::Keyword(KeywordKind::Bool)
+                | TokenKind::Keyword(KeywordKind::Char) => {
                     let generic_types = parser.parse_generic_types_list()?;
 
                     Ok(AstNodeKind::TypeReference {
@@ -3471,7 +3472,7 @@ impl SemanticAnalyzer {
          * 3: Attributes symbols with unification variables (unresolved type symbols).
          * 4: Collects constraints on unification symbols.
          * 5: Resolves unification variables via a unification algorithm.
-         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop).
+         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
          */
 
         pass!(self, symbol_collector_pass, &mut program);
@@ -4674,9 +4675,11 @@ impl SemanticAnalyzer {
 
     fn resolve_type_ref_from_ast(
         &self,
-        node: &AstNode,
+        node: &mut AstNode,
     ) -> Result<(TypeSymbolId, Vec<TypeSymbolId>), BoxedError> {
-        let (name, arg_nodes) = match &node.kind {
+        node.scope_id = Some(self.symbol_table.get_current_scope_id());
+
+        let (name, arg_nodes) = match &mut node.kind {
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,
@@ -4926,6 +4929,14 @@ impl SemanticAnalyzer {
                 Constraint::Equality(Type::new_base(uv_id), last_type),
                 info,
             );
+        } else {
+            self.unification_context.register_constraint(
+                Constraint::Equality(
+                    Type::new_base(uv_id),
+                    Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                ),
+                info,
+            );
         }
 
         Ok(())
@@ -5133,7 +5144,21 @@ impl SemanticAnalyzer {
         self.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
-            self.collect_uvs(body_node)?;
+            let body_type = self.collect_uvs(body_node)?;
+
+            let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
+                stmts.last().map_or(body_node.span, |s| s.span)
+            } else {
+                body_node.span
+            };
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(body_type, return_type_val.clone()),
+                ConstraintInfo {
+                    span,
+                    scope_id: body_node.scope_id.unwrap(),
+                },
+            );
         }
 
         self.current_return_type = old_return_type;
@@ -6323,7 +6348,7 @@ impl SemanticAnalyzer {
         }
 
         Err(self.create_error(
-            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
             info.span,
             &[info.span],
         ))
@@ -6377,16 +6402,16 @@ impl SemanticAnalyzer {
             {
                 let substitutions =
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                    
                 let concrete_field_type =
                     Self::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+
                 self.unify(result_ty, concrete_field_type, info)?;
                 return Ok(true);
             }
         }
 
         for imp in &inherent_impls {
-            // TODO: Match against specific specializations.
-
             if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id)
             {
                 if let ValueSymbolKind::Function(_) = value_symbol.kind {
@@ -6402,8 +6427,10 @@ impl SemanticAnalyzer {
                             &lhs_symbol.generic_parameters,
                             &concrete_args,
                         );
+
                         let impl_substitutions =
-                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args); // Assuming direct mapping for simplicity
+                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args);
+
                         substitutions.extend(impl_substitutions);
 
                         let concrete_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
@@ -6415,7 +6442,7 @@ impl SemanticAnalyzer {
         }
 
         Err(self.create_error(
-            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
             info.span,
             &[info.span],
         ))
@@ -6453,7 +6480,7 @@ pub enum ErrorKind {
     ConflictingInherentImpl(String),
     InvalidDereference(String),
     ExpectedScopedItem,
-    FieldNotFound(String, String),
+    MemberNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
     BadVariableDeclaration,
@@ -6514,8 +6541,8 @@ impl ErrorKind {
                 format!("attempted to dereference non-pointer type {ty}")
             }
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
-            ErrorKind::FieldNotFound(field, type_name) => {
-                format!("field \"{field}\" not found in type {type_name}")
+            ErrorKind::MemberNotFound(field, type_name) => {
+                format!("member \"{field}\" not found in type {type_name}")
             }
             ErrorKind::InvalidFieldAccess(type_name) => {
                 format!("type {type_name} does not comprise fields")

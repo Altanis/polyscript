@@ -1,3 +1,37 @@
+struct Vector3D[T, U] {
+    x: T;
+    y: U;
+    z: float;
+}
+
+impl Vector3D[int, float] {
+    fn default(): Self {
+        return Vector3D { x: 0, y: 0.0, z: 1.0 };
+    }
+}
+
+impl[T] Vector3D[T] {
+    fn dot(&this, other: &Self): int {
+        return 0;
+    }
+}
+
+let v1: Vector3D[int, float] = Vector3D.default();
+let v2: Vector3D[char, string, float] = Vector3D {
+    x: '0', y: "0", z: 1.0
+};
+
+// should error:
+// let v2: Vector3D[char, char, char] = Vector3D { x: 0, y: 0, z: 0 };
+
+let resultant: int = v1.operation(v2);
+
+
+
+
+
+
+
 let x = 1;
 if (x == 1) {
     let x = "4";

@@ -6,7 +6,7 @@ use crate::{
     },
     utils::{
         error::*,
-        kind::{QualifierKind, Span},
+        kind::{QualifierKind, ReferenceKind, Span},
     },
 };
 use indexmap::IndexMap;
@@ -494,6 +494,135 @@ impl SemanticAnalyzer {
         }
 
         Ok(())
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn struct_field_type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.struct_field_type_collector_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn struct_field_type_collector_check_node(&mut self, statement: &mut AstNode) -> Result<(), BoxedError> {
+        match &mut statement.kind {
+            AstNodeKind::StructDeclaration { fields, .. } => self.struct_field_type_collector_handle_fields(fields),
+            _ => {
+                for node in statement.children_mut() {
+                    self.struct_field_type_collector_check_node(node)?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    fn struct_field_type_collector_handle_fields(&mut self, fields: &mut [AstNode]) -> Result<(), BoxedError> {
+        for field_node in fields.iter_mut() {
+            let AstNodeKind::StructField { type_annotation, .. } = &mut field_node.kind else {
+                continue;
+            };
+
+            let resolved_type = self.get_type_from_ast(type_annotation)?;
+
+            let field_symbol = self
+                .symbol_table
+                .get_value_symbol_mut(field_node.value_id.unwrap())
+                .unwrap();
+
+            field_symbol.type_id = Some(resolved_type.clone());
+            field_node.type_id = Some(resolved_type);
+        }
+
+        Ok(())
+    }
+
+    fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
+        match &mut node.kind {
+            AstNodeKind::TypeReference {
+                type_name,
+                generic_types,
+                reference_kind,
+            } => {
+                let args = generic_types
+                    .iter_mut()
+                    .map(|arg_node| self.get_type_from_ast(arg_node))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let base_symbol = self
+                    .symbol_table
+                    .find_type_symbol_from_scope(node.scope_id.unwrap(), type_name)
+                    .ok_or_else(|| {
+                        self.create_error(
+                            ErrorKind::UnknownIdentifier(type_name.clone()),
+                            node.span,
+                            &[node.span],
+                        )
+                    })?;
+
+                let base_type = Type::Base {
+                    symbol: base_symbol.id,
+                    args,
+                };
+
+                Ok(match reference_kind {
+                    ReferenceKind::Value => base_type,
+                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
+                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+                })
+            },
+            AstNodeKind::FunctionPointer { params, return_type } => {
+                let param_types = params
+                    .iter_mut()
+                    .map(|p| self.get_type_from_ast(p))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let return_type_val = if let Some(rt_node) = return_type {
+                    self.get_type_from_ast(rt_node)?
+                } else {
+                    Type::new_base(self.builtin_types[PrimitiveKind::Void as usize])
+                };
+
+                let fn_ptr_id = self.symbol_table.add_type_symbol(
+                    &format!("#fn_ptr_{:?}", node.span.start),
+                    TypeSymbolKind::FunctionSignature {
+                        params: param_types,
+                        return_type: return_type_val,
+                        instance: None,
+                    },
+                    vec![],
+                    QualifierKind::Private,
+                    Some(node.span),
+                )?;
+
+                Ok(Type::new_base(fn_ptr_id))
+            },
+            AstNodeKind::SelfType(reference_kind) => {
+                let self_symbol = self.symbol_table.find_type_symbol_from_scope(node.scope_id.unwrap(), "Self")
+                    .ok_or_else(|| {
+                        self.create_error(ErrorKind::SelfOutsideImpl, node.span, &[node.span])
+                    })?;
+
+                let base_type = Type::new_base(self_symbol.id);
+
+                Ok(match reference_kind {
+                    ReferenceKind::Value => base_type,
+                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
+                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+                })
+            }
+            _ => Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span])),
+        }
     }
 }
 

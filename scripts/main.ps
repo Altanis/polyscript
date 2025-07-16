@@ -1,23 +1,11 @@
-struct Vector2D[T] {
+struct Vector3D[T, U] {
     x: T;
-    y: T;
+    y: U;
+    z: float;
 }
 
-impl Vector2D[int] {
-    fn default(): Self {
-        return Vector2D { x: 0, y: 0 };
-    }
-}
-
-impl[T] Vector2D[T] {
-    fn dot(&this, other: &Self): int {
-        return 0;
-    }
-}
-
-let v1: Vector2D[int] = Vector2D.default();
-let v2: Vector2D[char] = Vector2D {
-    x: '0', y: '0'
+let v: Vector3D[float, float] = Vector3D {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0
 };
-
-let resultant: int = v1.operation(v2);

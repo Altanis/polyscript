@@ -38,7 +38,13 @@ pub enum ErrorKind {
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
     ArityMismatch(usize, usize),
-    InvalidReturn
+    InvalidReturn,
+    InvalidField(String, String),
+    MismatchedStructFields {
+        struct_name: String,
+        missing_fields: Vec<String>,
+        extra_fields: Vec<String>,
+    },
 }
 
 impl ErrorKind {
@@ -112,7 +118,28 @@ impl ErrorKind {
             },
             ErrorKind::NotCallable(ty) => format!("{ty} is not callable"),
             ErrorKind::ArityMismatch(expected, given) => format!("expected {expected} arguments, got {given} arguments"),
-            ErrorKind::InvalidReturn => "return statement found outside of function".to_string()
+            ErrorKind::InvalidReturn => "return statement found outside of function".to_string(),
+            ErrorKind::InvalidField(struct_name, field_name) => format!("struct {struct_name} does not have field {field_name}"),
+            ErrorKind::MismatchedStructFields {
+                struct_name,
+                missing_fields,
+                extra_fields,
+            } => {
+                let mut message = format!("mismatched fields for struct `{}`", struct_name);
+                if !missing_fields.is_empty() {
+                    message.push_str(&format!(
+                        "\n  - missing fields: {}",
+                        missing_fields.join(", ")
+                    ));
+                }
+                if !extra_fields.is_empty() {
+                    message.push_str(&format!(
+                        "\n  - extra fields: {}",
+                        extra_fields.join(", ")
+                    ));
+                }
+                message
+            }
         }
     }
 }

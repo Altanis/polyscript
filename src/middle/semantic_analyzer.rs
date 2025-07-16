@@ -948,18 +948,20 @@ impl SemanticAnalyzer {
         /* PASSES
          * 0: Collects all declared symbols (variables, functions, structs, traits, etc.) into value and type bins.
          * 1: Associates generic parameters with their trait constraints.
-         * 2: Appends inherent impl scopes to structs/enums and registers trait implementations.
-         * 3: Attributes symbols with unification variables (unresolved type symbols).
-         * 4: Collects constraints on unification symbols.
-         * 5: Resolves unification variables via a unification algorithm.
-         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
+         * 2: Associates struct fields in declarations with their types.
+         * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
+         * 4: Attributes symbols with unification variables (unresolved type symbols).
+         * 5: Collects constraints on unification symbols.
+         * 6: Resolves unification variables via a unification algorithm.
+         * 7: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
          */
 
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
+        pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
-        pass!(self, unification_pass, &mut program);
+        // pass!(self, unification_pass, &mut program);
 
         Ok(program)
     }
