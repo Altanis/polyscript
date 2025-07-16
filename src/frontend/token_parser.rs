@@ -613,7 +613,8 @@ impl Parser {
                 TokenKind::Keyword(KeywordKind::Int)
                 | TokenKind::Keyword(KeywordKind::Float)
                 | TokenKind::Keyword(KeywordKind::String)
-                | TokenKind::Keyword(KeywordKind::Bool) => {
+                | TokenKind::Keyword(KeywordKind::Bool)
+                | TokenKind::Keyword(KeywordKind::Char) => {
                     let generic_types = parser.parse_generic_types_list()?;
 
                     Ok(AstNodeKind::TypeReference {

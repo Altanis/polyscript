@@ -469,7 +469,7 @@ impl SemanticAnalyzer {
         }
 
         Err(self.create_error(
-            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
             info.span,
             &[info.span],
         ))
@@ -523,16 +523,16 @@ impl SemanticAnalyzer {
             {
                 let substitutions =
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
+                    
                 let concrete_field_type =
                     Self::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+
                 self.unify(result_ty, concrete_field_type, info)?;
                 return Ok(true);
             }
         }
 
         for imp in &inherent_impls {
-            // TODO: Match against specific specializations.
-
             if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id)
             {
                 if let ValueSymbolKind::Function(_) = value_symbol.kind {
@@ -548,8 +548,10 @@ impl SemanticAnalyzer {
                             &lhs_symbol.generic_parameters,
                             &concrete_args,
                         );
+
                         let impl_substitutions =
-                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args); // Assuming direct mapping for simplicity
+                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args);
+
                         substitutions.extend(impl_substitutions);
 
                         let concrete_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
@@ -561,7 +563,7 @@ impl SemanticAnalyzer {
         }
 
         Err(self.create_error(
-            ErrorKind::FieldNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
+            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
             info.span,
             &[info.span],
         ))

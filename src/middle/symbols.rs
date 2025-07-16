@@ -734,9 +734,11 @@ impl SemanticAnalyzer {
 
     fn resolve_type_ref_from_ast(
         &self,
-        node: &AstNode,
+        node: &mut AstNode,
     ) -> Result<(TypeSymbolId, Vec<TypeSymbolId>), BoxedError> {
-        let (name, arg_nodes) = match &node.kind {
+        node.scope_id = Some(self.symbol_table.get_current_scope_id());
+
+        let (name, arg_nodes) = match &mut node.kind {
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,

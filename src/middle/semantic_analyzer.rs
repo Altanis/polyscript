@@ -952,7 +952,7 @@ impl SemanticAnalyzer {
          * 3: Attributes symbols with unification variables (unresolved type symbols).
          * 4: Collects constraints on unification symbols.
          * 5: Resolves unification variables via a unification algorithm.
-         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop).
+         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
          */
 
         pass!(self, symbol_collector_pass, &mut program);

@@ -28,7 +28,7 @@ pub enum ErrorKind {
     ConflictingInherentImpl(String),
     InvalidDereference(String),
     ExpectedScopedItem,
-    FieldNotFound(String, String),
+    MemberNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
     BadVariableDeclaration,
@@ -89,8 +89,8 @@ impl ErrorKind {
                 format!("attempted to dereference non-pointer type {ty}")
             }
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
-            ErrorKind::FieldNotFound(field, type_name) => {
-                format!("field \"{field}\" not found in type {type_name}")
+            ErrorKind::MemberNotFound(field, type_name) => {
+                format!("member \"{field}\" not found in type {type_name}")
             }
             ErrorKind::InvalidFieldAccess(type_name) => {
                 format!("type {type_name} does not comprise fields")
