@@ -498,7 +498,7 @@ pub const SYNC_TOKENS: [TokenKind; 16] = [
     TokenKind::Keyword(KeywordKind::Private),
 ];
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
@@ -510,7 +510,7 @@ impl Default for Position {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

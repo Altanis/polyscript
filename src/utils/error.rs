@@ -4,7 +4,7 @@ use crate::boxed;
 
 use super::kind::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
     UnrecognizedSymbol(String),
     UnexpectedEOF,
@@ -144,7 +144,7 @@ impl ErrorKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
     span: Span,

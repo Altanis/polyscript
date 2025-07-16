@@ -843,14 +843,36 @@ impl Lexer {
 
     pub fn tokenize(&mut self) -> Result<(), BoxedError> {
         while let Some(&char) = self.source.get(self.index) {
-            if char.is_whitespace() {
-            } else if char == '/' && self.source.get(self.index + 1) == Some(&'/') {
-                while let Ok(c) = self.peek() {
-                    if c == '\n' {
-                        break;
-                    } else {
+            if char.is_whitespace() {}
+            else if char == '/' && matches!(self.peek(), Ok('/' | '*')) {
+                match self.peek() {
+                    Ok('/') => {
+                        while matches!(self.peek(), Ok(c) if c != '\n') {
+                            self.next_index();
+                        }
+                    },
+                    Ok('*') => {
                         self.next_index();
-                    }
+
+                        'comment_loop: loop {
+                            match self.peek() {
+                                Ok('*') => {
+                                    self.next_index();
+                                    if self.peek() == Ok('/') {
+                                        self.next_index();
+                                        break 'comment_loop;
+                                    }
+                                }
+                                Ok(_) => {
+                                    self.next_index();
+                                }
+                                Err(_) => {
+                                    break 'comment_loop;
+                                }
+                            }
+                        }
+                    },
+                    _ => unreachable!(),
                 }
             } else if char.is_operation() {
                 let token = self.parse_operator()?;
