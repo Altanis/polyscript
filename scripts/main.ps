@@ -9,3 +9,7 @@ let v: Vector3D[float, float] = Vector3D {
     y: 0.0,
     z: 0.0
 };
+
+// todo: make unification handle generic shit to resolve <U, V> => <float, float>
+// rn generics cant unify with other types
+// also make sure inconsistent constraints dont get resolved, i.e. T = float = int.

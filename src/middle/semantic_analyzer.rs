@@ -961,7 +961,7 @@ impl SemanticAnalyzer {
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
-        // pass!(self, unification_pass, &mut program);
+        pass!(self, unification_pass, &mut program);
 
         Ok(program)
     }

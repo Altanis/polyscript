@@ -615,9 +615,20 @@ impl SemanticAnalyzer {
             ));
         }
 
+        let symbol_id = symbol.id;
+        let generic_params = symbol.generic_parameters.clone();
+
+        let generic_uvs: IndexMap<TypeSymbolId, Type> = generic_params
+            .iter()
+            .map(|&param_id| {
+                let uv_type = self.unification_context.generate_uv_type(&mut self.symbol_table, span);
+                (param_id, uv_type)
+            })
+            .collect();
+
         let struct_type = Type::Base {
-            symbol: symbol.id,
-            args: symbol.generic_parameters.iter().map(|&type_id| Type::new_base(type_id)).collect()
+            symbol: symbol_id,
+            args: generic_uvs.values().cloned().collect()
         };
 
         self.unification_context.register_constraint(
@@ -627,6 +638,7 @@ impl SemanticAnalyzer {
 
         for (field_name, field_expr) in fields.iter_mut() {
             let expr_uv = self.collect_uvs(field_expr)?;
+
             let field_type = self.symbol_table
                 .find_value_symbol_from_scope(struct_scope_id, field_name)
                 .ok_or_else(|| self.create_error(
@@ -635,11 +647,18 @@ impl SemanticAnalyzer {
                     &[field_expr.span, span]
                 ))?
                 .type_id.clone().unwrap();
-
-            self.unification_context.register_constraint(
-                Constraint::Equality(expr_uv, field_type),
-                info
-            );
+            
+            if let Some(ty) = generic_uvs.get(&field_type.get_base_symbol()) {
+                self.unification_context.register_constraint(
+                    Constraint::Equality(expr_uv, ty.clone()),
+                    info
+                );
+            } else {
+                self.unification_context.register_constraint(
+                    Constraint::Equality(expr_uv, field_type),
+                    info
+                );
+            }
         }
 
         Ok(())
@@ -981,8 +1000,6 @@ impl SemanticAnalyzer {
     fn collect_uv_struct_field(
         &mut self,
         uv_id: TypeSymbolId,
-        name: &str,
-        type_annotation: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
@@ -992,12 +1009,6 @@ impl SemanticAnalyzer {
             ),
             info,
         );
-
-        let annotation_type = self.collect_uvs(type_annotation)?;
-        self.symbol_table
-            .find_value_symbol_in_scope_mut(name, info.scope_id)
-            .unwrap()
-            .type_id = Some(annotation_type);
 
         Ok(())
     }
@@ -1179,8 +1190,8 @@ impl SemanticAnalyzer {
                 info,
             )?,
             AssociatedType { .. } | TypeDeclaration { .. } => self.collect_uv_type_declaration(uv_id, expr, expr.span, info)?,
-            StructField { name, type_annotation, .. } => {
-                self.collect_uv_struct_field(uv_id, name, type_annotation, info)?
+            StructField { .. } => {
+                self.collect_uv_struct_field(uv_id, info)?
             }
             EnumVariant(_) => self.collect_uv_enum_variant(uv_id, info)?,
             Break | Continue => self.unification_context.register_constraint(
