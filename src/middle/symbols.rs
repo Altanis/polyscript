@@ -251,13 +251,13 @@ impl SemanticAnalyzer {
         let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
 
         let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
-        self.symbol_table.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None,
-        )?;
+        // self.symbol_table.add_type_symbol(
+        //     "Self",
+        //     TypeSymbolKind::TypeAlias((None, None)),
+        //     vec![],
+        //     QualifierKind::Public,
+        //     None,
+        // )?;
 
         for const_node in constants {
             self.symbol_collector_check_node(const_node)?;
@@ -701,7 +701,7 @@ impl SemanticAnalyzer {
 
             let self_type = Type::Base {
                 symbol: implementing_type_id,
-                args: impl_generic_param_ids.iter().map(|id| Type::new_base(*id)).collect()
+                args: type_specialization.iter().map(|id| Type::new_base(*id)).collect()
             };
 
             self.symbol_table.add_type_symbol(
@@ -727,10 +727,14 @@ impl SemanticAnalyzer {
             let (base_type_id, specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let base_type_symbol = self.symbol_table.get_type_symbol(base_type_id).unwrap();
-            let aliased_type_id = base_type_symbol.id;
+            let self_type = Type::Base {
+                symbol: base_type_symbol.id,
+                args: specialization.iter().map(|id| Type::new_base(*id)).collect()
+            };
+
             self.symbol_table.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(aliased_type_id)))),
+                TypeSymbolKind::TypeAlias((None, Some(self_type))),
                 vec![],
                 QualifierKind::Public,
                 None,

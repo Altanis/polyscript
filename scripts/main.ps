@@ -5,8 +5,7 @@ struct Vector3D[T, U] {
 }
 
 impl Vector3D[int, float] {
-    // todo make Self = Vector3D[int, float]
-    fn default(): Vector3D[int, float] {
+    fn default(): Self {
         return Vector3D { x: 0, y: 0.0, z: 0.0 };
     }
 }
