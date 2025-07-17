@@ -708,6 +708,8 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        // dbg!(type_name);
+        
         let symbol = self
             .symbol_table
             .find_type_symbol_from_scope(scope_id, type_name)
@@ -715,6 +717,7 @@ impl SemanticAnalyzer {
                 self.create_error(ErrorKind::UnknownIdentifier(type_name.to_owned()), span, &[span])
             })?
             .id;
+        // dbg!(uv_id, symbol);
 
         let args: Vec<Type> = generic_types
             .iter_mut()

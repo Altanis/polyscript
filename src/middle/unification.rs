@@ -35,51 +35,58 @@ impl SemanticAnalyzer {
     }
 
     /// Applies a substitution map to a type.
-    fn apply_substitution(ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
+    fn apply_substitution(
+        &self,
+        ty: &Type,
+        substitutions: &HashMap<TypeSymbolId, Type>
+    ) -> Type {
         match ty {
-            Type::Base { symbol, args } => {
-                if let Some(substituted_type) = substitutions.get(symbol) {
-                    if let Type::Base {
-                        symbol: new_symbol,
-                        args: new_args,
-                    } = substituted_type
-                    {
-                        if new_args.is_empty() {
-                            let final_args = args
-                                .iter()
-                                .map(|arg| Self::apply_substitution(arg, substitutions))
-                                .collect();
-                            return Type::Base {
-                                symbol: *new_symbol,
-                                args: final_args,
-                            };
-                        }
-                    }
+            Type::Base { symbol: base_symbol_id, args } => {
+                if let Some(substituted_type) = substitutions.get(base_symbol_id) {
                     return substituted_type.clone();
+                }
+
+                let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap();
+
+                if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &base_symbol.kind {
+                    let alias_generic_params = &base_symbol.generic_parameters;
+                    let concrete_alias_args = args;
+
+                    let mut local_substitutions = self.create_generic_substitution_map(
+                        alias_generic_params,
+                        concrete_alias_args
+                    );
+
+                    for (key, value) in substitutions {
+                        local_substitutions.entry(*key).or_insert_with(|| value.clone());
+                    }
+
+                    return self.apply_substitution(aliased_type, &local_substitutions);
                 }
 
                 let substituted_args = args
                     .iter()
-                    .map(|arg| Self::apply_substitution(arg, substitutions))
+                    .map(|arg| self.apply_substitution(arg, substitutions))
                     .collect();
+
                 Type::Base {
-                    symbol: *symbol,
+                    symbol: *base_symbol_id,
                     args: substituted_args,
                 }
-            }
+            },
             Type::Reference(inner) => {
-                Type::Reference(Box::new(Self::apply_substitution(inner, substitutions)))
+                Type::Reference(Box::new(self.apply_substitution(inner, substitutions)))
+            },
+            Type::MutableReference(inner) => {
+                Type::MutableReference(Box::new(self.apply_substitution(inner, substitutions)))
             }
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(
-                Self::apply_substitution(inner, substitutions),
-            )),
         }
     }
 
     /// Recursively resolves a type by applying substitutions for unification variables
     /// and expanding type aliases until a concrete type or a unification variable is reached.
     fn resolve_type(&self, ty: &Type) -> Type {
-        let mut current_ty = Self::apply_substitution(ty, &self.unification_context.substitutions);
+        let mut current_ty = self.apply_substitution(ty, &self.unification_context.substitutions);
 
         loop {
             let Type::Base { symbol, args } = &current_ty else { break; };
@@ -96,8 +103,8 @@ impl SemanticAnalyzer {
                     args
                 );
 
-                let substituted_alias = Self::apply_substitution(aliased_type, &substitutions);
-                current_ty = Self::apply_substitution(&substituted_alias, &self.unification_context.substitutions);
+                let substituted_alias = self.apply_substitution(aliased_type, &substitutions);
+                current_ty = self.apply_substitution(&substituted_alias, &self.unification_context.substitutions);
             } else {
                 break;
             }
@@ -330,8 +337,8 @@ impl SemanticAnalyzer {
                     
                     let substitutions = self.create_generic_substitution_map(&callee_symbol.generic_parameters, &args);
 
-                    let expected_params = sig_params.iter().map(|p| Self::apply_substitution(p, &substitutions)).collect::<Vec<_>>();
-                    let expected_return = Self::apply_substitution(sig_return, &substitutions);
+                    let expected_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
+                    let expected_return = self.apply_substitution(sig_return, &substitutions);
 
                     for (arg, expected) in params.iter().zip(expected_params.iter()) {
                         self.unify(arg.clone(), expected.clone(), info)?;
@@ -402,9 +409,9 @@ impl SemanticAnalyzer {
             }
 
             let substitutions = self.create_generic_substitution_map(&callee_symbol.generic_parameters, &callee_args);
-            let concrete_expected_params: Vec<Type> = expected_params.iter().map(|p| Self::apply_substitution(p, &substitutions)).collect();
-            let concrete_receiver = Self::apply_substitution(expected_receiver_ty, &substitutions);
-            let concrete_return = Self::apply_substitution(&expected_return, &substitutions);
+            let concrete_expected_params: Vec<Type> = expected_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect();
+            let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);
+            let concrete_return = self.apply_substitution(&expected_return, &substitutions);
 
             for (arg, expected) in params.iter().zip(concrete_expected_params.iter()) {
                 self.unify(arg.clone(), expected.clone(), info)?;
@@ -566,7 +573,7 @@ impl SemanticAnalyzer {
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
                     
                 let concrete_field_type =
-                    Self::apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+                    self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
 
                 self.unify(result_ty, concrete_field_type, info)?;
                 return Ok(true);
@@ -578,7 +585,7 @@ impl SemanticAnalyzer {
                 if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id) {
                     if let ValueSymbolKind::Function(_) = value_symbol.kind {
                         let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                        let specialized_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
+                        let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
 
                         self.unify(result_ty, specialized_fn_type, info)?;
                         

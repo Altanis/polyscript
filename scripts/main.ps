@@ -1,28 +1,11 @@
-struct Vector3D[T, U] {
-    x: T;
-    y: U;
-    z: float;
+struct Type[A] {
+    x: A;
 }
 
-impl[T, U] Vector3D[T, U] {
-    fn operation(&this, other: &Self): int {
-        return 0;
-    }
+impl[U] Type[U] {
+    fn test(&this, other: &Self) {}
 }
 
-impl Vector3D[int, float] {
-    fn default(): Self {
-        return Vector3D { x: 0, y: 0.0, z: 0.0 };
-    }
-}
-
-impl Vector3D[float, float] {
-    fn test(&this) {
-
-    }
-}
-
-let v1: Vector3D[int, float] = Vector3D.default();
-let v2: Vector3D[int, float] = Vector3D.default();
-
-let resultant: int = v1.operation(v2);
+let v1 = Type { x: 3 };
+let v2 = Type { x: 4 };
+v1.test(&v2);
