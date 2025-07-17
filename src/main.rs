@@ -108,21 +108,20 @@ fn assert_scripts_work() {
     }
 
     for path in paths {
-        println!("Asserting {} can be lexed and parsed...", path.display());
+        println!("Asserting {} compiles well...", path.display());
 
         let program = fs::read_to_string(&path).expect("Invalid source file.");
         let (lined_source, tokens) = generate_tokens(program);
-        let program_node = parse_tokens(lined_source, tokens);
+        let program_node = parse_tokens(lined_source.clone(), tokens);
+        // let (_, program) = analyze_tokens(lined_source, program_node);
 
-        println!("{}", program_node);
-
-        println!("Assertion complete!\n");
+        // println!("{}", program);
     }
 
     println!("All files checked.");
 }
 
 fn main() {
-    // assert_scripts_work();
-    test_main_script();
+    assert_scripts_work();
+    // test_main_script();
 }

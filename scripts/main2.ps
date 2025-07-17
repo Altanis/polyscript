@@ -9,16 +9,16 @@ if (x == 1) {
 
 type Integer = int;
 
-fn add[T: Add](a: T, b: T): T {
+fn add<T: Add>(a: T, b: T): T {
     return a + b;
 }
 
-struct Point[T] {
+struct Point<T> {
     public x: T;
     public y: T;
 }
 
-trait VectorLike[T] {
+trait VectorLike<T> {
     type Thingy;
     const EUCLIDEAN_DEFINITION: string;
 
@@ -26,15 +26,15 @@ trait VectorLike[T] {
     fn operation(&this, other: &Self, op: fn(T, T): T): Integer;
 }
 
-impl VectorLike[Integer] for Point[Integer] {
+impl VectorLike<Integer> for Point<Integer> {
     type Thingy = Integer;
     const EUCLIDEAN_DEFINITION = "";
 
-    fn new(): Point[Integer] {
+    fn new(): Point<Integer> {
         return Point { x: 0, y: 0 };
     }
 
-    fn operation(&this, other: &Point[Integer], op: fn(Integer, Integer): Integer): Integer {
+    fn operation(&this, other: &Point<Integer>, op: fn(Integer, Integer): Integer): Integer {
         return op(this.x, other.y);
     }
 }
@@ -44,7 +44,7 @@ let point_2 = Point { x: 0, y: 0 };
 
 let result = point_1.operation(&point_2, add);
 
-impl Point[Integer] {
+impl Point<Integer> {
     public fn t1(): Self {
         return Point { x: 0, y: 0 };
     }
@@ -61,12 +61,12 @@ impl Point[Integer] {
 
 
 
-struct Point[T] {
+struct Point<T> {
     public x: T;
     public y: T;
 }
 
-impl Point[int] {
+impl Point<int> {
     public fn new(): Self {
         return Self {
             x: 0,
@@ -75,7 +75,7 @@ impl Point[int] {
     }
 }
 
-impl[T] Point[T] {
+impl<T> Point<T> {
     public fn new(x: T, y: T): Self {
         return Self { x, y };
     }
@@ -90,7 +90,7 @@ trait Vector {
     fn get_y(&this): int;
 }
 
-impl Vector for Point[int] {
+impl Vector for Point<int> {
     fn get_x(&this): int {
         return this.x;
     }
@@ -100,7 +100,7 @@ impl Vector for Point[int] {
     }
 }
 
-impl Add for Point[int] {
+impl Add for Point<int> {
     type Output = Self;
 
     fn add(this, rhs: Self): Self {
@@ -119,13 +119,13 @@ impl Add for Point[int] {
 
 
 
-struct Point[T] {
+struct Point<T> {
     public x: T;
     public y: T;
 }
 
-impl Add for Point[int] {
-    type Output = Point[int];
+impl Add for Point<int> {
+    type Output = Point<int>;
 
     fn add(this, other: Self): Self.Output {
         return Point {
@@ -135,8 +135,8 @@ impl Add for Point[int] {
     }
 }
 
-impl Add for Point[float] {
-    type Output = Point[float];
+impl Add for Point<float> {
+    type Output = Point<float>;
 
     fn add(this, other: Self): Self.Output {
         return Point {
@@ -146,10 +146,10 @@ impl Add for Point[float] {
     }
 }
 
-impl Add[Point[int]] for Point[float] {
-    type Output = Point[float];
+impl Add<Point<int>> for Point<float> {
+    type Output = Point<float>;
 
-    fn add(this, other: Point[int]): Self.Output {
+    fn add(this, other: Point<int>): Self.Output {
         return Point {
             x: self.x + other.x,
             y: self.y + other.y

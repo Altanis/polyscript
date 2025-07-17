@@ -1,8 +1,8 @@
-struct Type[A] {
+struct Type<A> {
     x: A;
 }
 
-impl[U] Type[U] {
+impl<U> Type<U> {
     fn test(&this, other: &Self) {}
 }
 
@@ -14,32 +14,32 @@ v1.test(&v2);
 // error: incompatible types U = char and U = int
 // v1.test(&v3);
 
-struct Vector3D[T, U] {
+struct Vector3D<T, U> {
     x: T;
     y: U;
     z: float;
 }
 
-impl[T, U] Vector3D[T, U] {
+impl<T, U> Vector3D<T, U> {
     fn operation(&this, other: &Self): int {
         return 0;
     }
 }
 
-impl Vector3D[int, float] {
+impl Vector3D<int, float> {
     fn default(): Self {
         return Vector3D { x: 0, y: 0.0, z: 0.0 };
     }
 }
 
-impl Vector3D[float, float] {
+impl Vector3D<float, float> {
     fn test(&this) {
 
     }
 }
 
-let v4: Vector3D[int, float] = Vector3D.default();
-let v5: Vector3D[int, float] = Vector3D.default();
+let v4: Vector3D<int, float> = Vector3D.default();
+let v5: Vector3D<int, float> = Vector3D.default();
 
 let resultant: int = v4.operation(&v5);
 

@@ -876,11 +876,11 @@ impl Parser {
     fn parse_generic_parameter_list(&mut self) -> Result<Vec<AstNode>, BoxedError> {
         let mut parameters = vec![];
 
-        if self.peek().get_token_kind() != TokenKind::OpenBracket {
+        if self.peek().get_token_kind() != TokenKind::Operator(Operation::LessThan) {
             return Ok(parameters);
         }
 
-        self.consume(TokenKind::OpenBracket)?;
+        self.consume(TokenKind::Operator(Operation::LessThan))?;
         loop {
             let node = self.spanned_node(|parser| {
                 let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
@@ -910,7 +910,8 @@ impl Parser {
                 break;
             }
         }
-        self.consume(TokenKind::CloseBracket)?;
+
+        self.consume(TokenKind::Operator(Operation::GreaterThan))?;
 
         Ok(parameters)
     }
@@ -918,11 +919,11 @@ impl Parser {
     fn parse_generic_types_list(&mut self) -> Result<Vec<AstNode>, BoxedError> {
         let mut types = vec![];
 
-        if self.peek().get_token_kind() != TokenKind::OpenBracket {
+        if self.peek().get_token_kind() != TokenKind::Operator(Operation::LessThan) {
             return Ok(types);
         }
 
-        self.consume(TokenKind::OpenBracket)?;
+        self.consume(TokenKind::Operator(Operation::LessThan))?;
         loop {
             let node = self.parse_type()?;
             types.push(node);
@@ -933,7 +934,8 @@ impl Parser {
                 break;
             }
         }
-        self.consume(TokenKind::CloseBracket)?;
+
+        self.consume(TokenKind::Operator(Operation::GreaterThan))?;
 
         Ok(types)
     }

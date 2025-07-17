@@ -18,40 +18,40 @@ impl TSubbable for int {
     }
 }
 
-fn identity[T](x: T): T {
+fn identity<T>(x: T): T {
     return x;
 }
 
-fn generic_pair[A: TAddable + TSubbable, B: TAddable + TSubbable](a: A, b: B) {}
+fn generic_pair<A: TAddable + TSubbable, B: TAddable + TSubbable>(a: A, b: B) {}
 
 let identity_value = identity(5);
 generic_pair(5, "3");
 
-struct Vector2D[T: TAddable] {
+struct Vector2D<T: TAddable> {
     public x: T;
     public y: T;
 }
 
-let vector: Vector2D[int] = Vector2D { x: 3, y: 4 };
+let vector: Vector2D<int> = Vector2D { x: 3, y: 4 };
 
-impl[T: TAddable, U] Vector2D[T] {
-    public fn add(this, vector: Vector2D[T]): Vector2D[T] {
+impl<T: TAddable, U> Vector2D<T> {
+    public fn add(this, vector: Vector2D<T>): Vector2D<T> {
         return Vector2D {
             x: this.x.add(other.x),
             y: this.y.add(other.y)
         };
     }
 
-    public fn random_method[V](x: V) {}
+    public fn random_method<V>(x: V) {}
 }
 
-impl Vector2D[string] {
+impl Vector2D<string> {
     public fn merge(this): string {
         return this.x + this.y;
     }
 }
 
-let vector1: Vector2D[int] = Vector2D { x: 3, y: 3 };
+let vector1: Vector2D<int> = Vector2D { x: 3, y: 3 };
 let resultant = vector1.add(Vector2D { x: 4, y: 4 });
 vector1.random_method("hi");
 
