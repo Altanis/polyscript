@@ -122,6 +122,6 @@ fn assert_scripts_work() {
 }
 
 fn main() {
-    assert_scripts_work();
-    // test_main_script();
+    // assert_scripts_work();
+    test_main_script();
 }
