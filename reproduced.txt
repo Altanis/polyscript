@@ -3468,15 +3468,17 @@ impl SemanticAnalyzer {
         /* PASSES
          * 0: Collects all declared symbols (variables, functions, structs, traits, etc.) into value and type bins.
          * 1: Associates generic parameters with their trait constraints.
-         * 2: Appends inherent impl scopes to structs/enums and registers trait implementations.
-         * 3: Attributes symbols with unification variables (unresolved type symbols).
-         * 4: Collects constraints on unification symbols.
-         * 5: Resolves unification variables via a unification algorithm.
-         * 6: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
+         * 2: Associates struct fields in declarations with their types.
+         * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
+         * 4: Attributes symbols with unification variables (unresolved type symbols).
+         * 5: Collects constraints on unification symbols.
+         * 6: Resolves unification variables via a unification algorithm.
+         * 7: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
          */
 
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
+        pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
         pass!(self, unification_pass, &mut program);
@@ -3947,7 +3949,7 @@ use crate::{
     },
     utils::{
         error::*,
-        kind::{QualifierKind, Span},
+        kind::{QualifierKind, ReferenceKind, Span},
     },
 };
 use indexmap::IndexMap;
@@ -4192,13 +4194,13 @@ impl SemanticAnalyzer {
         let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
 
         let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
-        self.symbol_table.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None,
-        )?;
+        // self.symbol_table.add_type_symbol(
+        //     "Self",
+        //     TypeSymbolKind::TypeAlias((None, None)),
+        //     vec![],
+        //     QualifierKind::Public,
+        //     None,
+        // )?;
 
         for const_node in constants {
             self.symbol_collector_check_node(const_node)?;
@@ -4439,6 +4441,135 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    pub fn struct_field_type_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.struct_field_type_collector_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn struct_field_type_collector_check_node(&mut self, statement: &mut AstNode) -> Result<(), BoxedError> {
+        match &mut statement.kind {
+            AstNodeKind::StructDeclaration { fields, .. } => self.struct_field_type_collector_handle_fields(fields),
+            _ => {
+                for node in statement.children_mut() {
+                    self.struct_field_type_collector_check_node(node)?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    fn struct_field_type_collector_handle_fields(&mut self, fields: &mut [AstNode]) -> Result<(), BoxedError> {
+        for field_node in fields.iter_mut() {
+            let AstNodeKind::StructField { type_annotation, .. } = &mut field_node.kind else {
+                continue;
+            };
+
+            let resolved_type = self.get_type_from_ast(type_annotation)?;
+
+            let field_symbol = self
+                .symbol_table
+                .get_value_symbol_mut(field_node.value_id.unwrap())
+                .unwrap();
+
+            field_symbol.type_id = Some(resolved_type.clone());
+            field_node.type_id = Some(resolved_type);
+        }
+
+        Ok(())
+    }
+
+    fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
+        match &mut node.kind {
+            AstNodeKind::TypeReference {
+                type_name,
+                generic_types,
+                reference_kind,
+            } => {
+                let args = generic_types
+                    .iter_mut()
+                    .map(|arg_node| self.get_type_from_ast(arg_node))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let base_symbol = self
+                    .symbol_table
+                    .find_type_symbol_from_scope(node.scope_id.unwrap(), type_name)
+                    .ok_or_else(|| {
+                        self.create_error(
+                            ErrorKind::UnknownIdentifier(type_name.clone()),
+                            node.span,
+                            &[node.span],
+                        )
+                    })?;
+
+                let base_type = Type::Base {
+                    symbol: base_symbol.id,
+                    args,
+                };
+
+                Ok(match reference_kind {
+                    ReferenceKind::Value => base_type,
+                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
+                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+                })
+            },
+            AstNodeKind::FunctionPointer { params, return_type } => {
+                let param_types = params
+                    .iter_mut()
+                    .map(|p| self.get_type_from_ast(p))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let return_type_val = if let Some(rt_node) = return_type {
+                    self.get_type_from_ast(rt_node)?
+                } else {
+                    Type::new_base(self.builtin_types[PrimitiveKind::Void as usize])
+                };
+
+                let fn_ptr_id = self.symbol_table.add_type_symbol(
+                    &format!("#fn_ptr_{:?}", node.span.start),
+                    TypeSymbolKind::FunctionSignature {
+                        params: param_types,
+                        return_type: return_type_val,
+                        instance: None,
+                    },
+                    vec![],
+                    QualifierKind::Private,
+                    Some(node.span),
+                )?;
+
+                Ok(Type::new_base(fn_ptr_id))
+            },
+            AstNodeKind::SelfType(reference_kind) => {
+                let self_symbol = self.symbol_table.find_type_symbol_from_scope(node.scope_id.unwrap(), "Self")
+                    .ok_or_else(|| {
+                        self.create_error(ErrorKind::SelfOutsideImpl, node.span, &[node.span])
+                    })?;
+
+                let base_type = Type::new_base(self_symbol.id);
+
+                Ok(match reference_kind {
+                    ReferenceKind::Value => base_type,
+                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
+                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+                })
+            }
+            _ => Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span])),
+        }
+    }
+}
+
+impl SemanticAnalyzer {
     pub fn impl_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
@@ -4511,9 +4642,14 @@ impl SemanticAnalyzer {
             let (implementing_type_id, type_specialization) =
                 self.resolve_type_ref_from_ast(type_reference)?;
 
+            let self_type = Type::Base {
+                symbol: implementing_type_id,
+                args: type_specialization.iter().map(|id| Type::new_base(*id)).collect()
+            };
+
             self.symbol_table.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(implementing_type_id)))),
+                TypeSymbolKind::TypeAlias((None, Some(self_type))),
                 vec![],
                 QualifierKind::Public,
                 None,
@@ -4534,10 +4670,14 @@ impl SemanticAnalyzer {
             let (base_type_id, specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let base_type_symbol = self.symbol_table.get_type_symbol(base_type_id).unwrap();
-            let aliased_type_id = base_type_symbol.id;
+            let self_type = Type::Base {
+                symbol: base_type_symbol.id,
+                args: specialization.iter().map(|id| Type::new_base(*id)).collect()
+            };
+
             self.symbol_table.add_type_symbol(
                 "Self",
-                TypeSymbolKind::TypeAlias((None, Some(Type::new_base(aliased_type_id)))),
+                TypeSymbolKind::TypeAlias((None, Some(self_type))),
                 vec![],
                 QualifierKind::Public,
                 None,
@@ -4712,6 +4852,10 @@ impl SemanticAnalyzer {
 
 
 // middle/uv_collector.rs
+use std::collections::HashSet;
+
+use indexmap::IndexMap;
+
 // middle/uv_collector.rs
 use crate::{
     boxed,
@@ -5144,21 +5288,7 @@ impl SemanticAnalyzer {
         self.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
-            let body_type = self.collect_uvs(body_node)?;
-
-            let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
-                stmts.last().map_or(body_node.span, |s| s.span)
-            } else {
-                body_node.span
-            };
-
-            self.unification_context.register_constraint(
-                Constraint::Equality(body_type, return_type_val.clone()),
-                ConstraintInfo {
-                    span,
-                    scope_id: body_node.scope_id.unwrap(),
-                },
-            );
+            self.collect_uvs(body_node)?;
         }
 
         self.current_return_type = old_return_type;
@@ -5287,6 +5417,7 @@ impl SemanticAnalyzer {
         uv_id: TypeSymbolId,
         scope_id: ScopeId,
         name: &str,
+        fields: &mut IndexMap<String, AstNode>,
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
@@ -5294,10 +5425,81 @@ impl SemanticAnalyzer {
             return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
         };
 
+        let struct_scope_id = {
+            if let TypeSymbolKind::Struct((struct_scope_id, _)) = &symbol.kind { *struct_scope_id } else { unreachable!() }
+        };
+
+        let literal_field_names: HashSet<String> = fields.keys().cloned().collect();
+        let declared_field_names: HashSet<String> = self.symbol_table.get_scope(struct_scope_id).unwrap()
+            .values.values()
+            .map(|id| self.symbol_table.get_value_name(self.symbol_table.get_value_symbol(*id).unwrap().name_id).to_string())
+            .collect();
+        
+        let missing_fields: Vec<String> = declared_field_names
+            .difference(&literal_field_names)
+            .cloned().collect();
+
+        let extra_fields: Vec<String> = literal_field_names
+            .difference(&declared_field_names)
+            .cloned().collect();
+
+        if !missing_fields.is_empty() || !extra_fields.is_empty() {
+            return Err(self.create_error(
+                ErrorKind::MismatchedStructFields {
+                    struct_name: name.to_string(),
+                    missing_fields,
+                    extra_fields,
+                },
+                span,
+                &[span],
+            ));
+        }
+
+        let symbol_id = symbol.id;
+        let generic_params = symbol.generic_parameters.clone();
+
+        let generic_uvs: IndexMap<TypeSymbolId, Type> = generic_params
+            .iter()
+            .map(|&param_id| {
+                let uv_type = self.unification_context.generate_uv_type(&mut self.symbol_table, span);
+                (param_id, uv_type)
+            })
+            .collect();
+
+        let struct_type = Type::Base {
+            symbol: symbol_id,
+            args: generic_uvs.values().cloned().collect()
+        };
+
         self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), Type::new_base(symbol.id)),
+            Constraint::Equality(Type::new_base(uv_id), struct_type),
             info,
         );
+
+        for (field_name, field_expr) in fields.iter_mut() {
+            let expr_uv = self.collect_uvs(field_expr)?;
+
+            let field_type = self.symbol_table
+                .find_value_symbol_from_scope(struct_scope_id, field_name)
+                .ok_or_else(|| self.create_error(
+                    ErrorKind::InvalidField(name.to_string(), field_name.to_string()), 
+                    field_expr.span,
+                    &[field_expr.span, span]
+                ))?
+                .type_id.clone().unwrap();
+            
+            if let Some(ty) = generic_uvs.get(&field_type.get_base_symbol()) {
+                self.unification_context.register_constraint(
+                    Constraint::Equality(expr_uv, ty.clone()),
+                    info
+                );
+            } else {
+                self.unification_context.register_constraint(
+                    Constraint::Equality(expr_uv, field_type),
+                    info
+                );
+            }
+        }
 
         Ok(())
     }
@@ -5638,8 +5840,6 @@ impl SemanticAnalyzer {
     fn collect_uv_struct_field(
         &mut self,
         uv_id: TypeSymbolId,
-        name: &str,
-        type_annotation: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         self.unification_context.register_constraint(
@@ -5649,12 +5849,6 @@ impl SemanticAnalyzer {
             ),
             info,
         );
-
-        let annotation_type = self.collect_uvs(type_annotation)?;
-        self.symbol_table
-            .find_value_symbol_in_scope_mut(name, info.scope_id)
-            .unwrap()
-            .type_id = Some(annotation_type);
 
         Ok(())
     }
@@ -5810,8 +6004,8 @@ impl SemanticAnalyzer {
                 self.collect_uv_function_pointer(uv_id, params, return_type, expr.span, info)?
             }
             FunctionParameter { .. } => self.collect_uv_function_parameter(uv_id, expr, expr.span, info)?,
-            StructLiteral { name, .. } => {
-                self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, expr.span, info)?
+            StructLiteral { name, fields } => {
+                self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, fields, expr.span, info)?
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
             SelfValue => self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?,
@@ -5836,8 +6030,8 @@ impl SemanticAnalyzer {
                 info,
             )?,
             AssociatedType { .. } | TypeDeclaration { .. } => self.collect_uv_type_declaration(uv_id, expr, expr.span, info)?,
-            StructField { name, type_annotation, .. } => {
-                self.collect_uv_struct_field(uv_id, name, type_annotation, info)?
+            StructField { .. } => {
+                self.collect_uv_struct_field(uv_id, info)?
             }
             EnumVariant(_) => self.collect_uv_enum_variant(uv_id, info)?,
             Break | Continue => self.unification_context.register_constraint(
@@ -5882,7 +6076,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::error::{BoxedError, Error, ErrorKind},
 };
@@ -6039,6 +6233,47 @@ impl SemanticAnalyzer {
             info.span,
             &[info.span],
         )
+    }
+
+    /// Checks if an `impl` block is applicable to a given concrete instance type.
+    ///
+    /// If it is applicable, it returns a substitution map for the `impl`'s generic
+    /// parameters. If not, it returns `None`.
+    fn check_impl_applicability(
+        &self,
+        instance_type: &Type,
+        imp: &InherentImpl,
+    ) -> Option<HashMap<TypeSymbolId, Type>> {
+        let instance_args = if let Type::Base { args, .. } = instance_type {
+            args
+        } else {
+            return None; // instance type is not a base type
+        };
+
+        let impl_target_arg_ids = &imp.specialization;
+
+        if instance_args.len() != impl_target_arg_ids.len() {
+            return None; // arity mismatch
+        }
+
+        let mut substitutions = HashMap::new();
+
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+            let target_symbol = self.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+            if imp.generic_params.contains(&target_symbol.id) {
+                substitutions.insert(target_symbol.id, instance_arg.clone());
+            } else {
+                let resolved_instance_arg = self.resolve_type(instance_arg);
+                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
+
+                if resolved_instance_arg != resolved_impl_arg {
+                    return None;
+                }
+            }
+        }
+
+        Some(substitutions)
     }
 }
 
@@ -6412,29 +6647,15 @@ impl SemanticAnalyzer {
         }
 
         for imp in &inherent_impls {
-            if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id)
-            {
-                if let ValueSymbolKind::Function(_) = value_symbol.kind {
-                    let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                    let fn_sig_id = symbol_type.get_base_symbol();
-                    let fn_sig_symbol = self.symbol_table.get_type_symbol(fn_sig_id).unwrap();
+            if let Some(substitutions) = self.check_impl_applicability(&base_lhs_type, imp) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id) {
+                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
 
-                    if let TypeSymbolKind::FunctionSignature {
-                        instance: Some(_), ..
-                    } = fn_sig_symbol.kind
-                    {
-                        let mut substitutions = self.create_generic_substitution_map(
-                            &lhs_symbol.generic_parameters,
-                            &concrete_args,
-                        );
+                        let specialized_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
 
-                        let impl_substitutions =
-                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args);
-
-                        substitutions.extend(impl_substitutions);
-
-                        let concrete_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
-                        self.unify(result_ty, concrete_fn_type, info)?;
+                        self.unify(result_ty, specialized_fn_type, info)?;
+                        
                         return Ok(true);
                     }
                 }
@@ -6456,7 +6677,7 @@ use crate::boxed;
 
 use super::kind::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
     UnrecognizedSymbol(String),
     UnexpectedEOF,
@@ -6490,7 +6711,13 @@ pub enum ErrorKind {
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
     ArityMismatch(usize, usize),
-    InvalidReturn
+    InvalidReturn,
+    InvalidField(String, String),
+    MismatchedStructFields {
+        struct_name: String,
+        missing_fields: Vec<String>,
+        extra_fields: Vec<String>,
+    },
 }
 
 impl ErrorKind {
@@ -6564,12 +6791,33 @@ impl ErrorKind {
             },
             ErrorKind::NotCallable(ty) => format!("{ty} is not callable"),
             ErrorKind::ArityMismatch(expected, given) => format!("expected {expected} arguments, got {given} arguments"),
-            ErrorKind::InvalidReturn => "return statement found outside of function".to_string()
+            ErrorKind::InvalidReturn => "return statement found outside of function".to_string(),
+            ErrorKind::InvalidField(struct_name, field_name) => format!("struct {struct_name} does not have field {field_name}"),
+            ErrorKind::MismatchedStructFields {
+                struct_name,
+                missing_fields,
+                extra_fields,
+            } => {
+                let mut message = format!("mismatched fields for struct `{}`", struct_name);
+                if !missing_fields.is_empty() {
+                    message.push_str(&format!(
+                        "\n  - missing fields: {}",
+                        missing_fields.join(", ")
+                    ));
+                }
+                if !extra_fields.is_empty() {
+                    message.push_str(&format!(
+                        "\n  - extra fields: {}",
+                        extra_fields.join(", ")
+                    ));
+                }
+                message
+            }
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
     span: Span,

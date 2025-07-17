@@ -1190,7 +1190,10 @@ impl SemanticAnalyzer {
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }
-            | ImplDeclaration { .. } => {
+            | ImplDeclaration { .. }
+            | TraitConstant { .. }
+            | TraitType(_)
+            | GenericParameter { .. } => {
                 self.unification_context.register_constraint(
                     Constraint::Equality(
                         uv.clone(),
@@ -1202,12 +1205,8 @@ impl SemanticAnalyzer {
                 for child in expr.children_mut() {
                     self.collect_uvs(child)?;
                 }
-            }
-            _ => {
-                for child in expr.children_mut() {
-                    self.collect_uvs(child)?;
-                }
-            }
+            },
+            Program(_) => unreachable!()
         }
 
         expr.type_id = Some(uv.clone());

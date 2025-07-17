@@ -4,22 +4,25 @@ struct Vector3D[T, U] {
     z: float;
 }
 
+impl[T, U] Vector3D[T, U] {
+    fn operation(&this, other: &Self): int {
+        return 0;
+    }
+}
+
 impl Vector3D[int, float] {
     fn default(): Self {
         return Vector3D { x: 0, y: 0.0, z: 0.0 };
     }
 }
 
-// this is literally invalid you need to verify Vector3D is associated with its generic params.
-impl[T] Vector3D[T] {
-    fn dot(&this, other: &Self): int {
-        return 0;
+impl Vector3D[float, float] {
+    fn test(&this) {
+
     }
 }
 
 let v1: Vector3D[int, float] = Vector3D.default();
-let v2: Vector3D[char, string] = Vector3D {
-    x: '0', y: "0", z: 1.0
-};
+let v2: Vector3D[int, float] = Vector3D.default();
 
 let resultant: int = v1.operation(v2);

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::error::{BoxedError, Error, ErrorKind},
 };
@@ -160,6 +160,47 @@ impl SemanticAnalyzer {
             info.span,
             &[info.span],
         )
+    }
+
+    /// Checks if an `impl` block is applicable to a given concrete instance type.
+    ///
+    /// If it is applicable, it returns a substitution map for the `impl`'s generic
+    /// parameters. If not, it returns `None`.
+    fn check_impl_applicability(
+        &self,
+        instance_type: &Type,
+        imp: &InherentImpl,
+    ) -> Option<HashMap<TypeSymbolId, Type>> {
+        let instance_args = if let Type::Base { args, .. } = instance_type {
+            args
+        } else {
+            return None; // instance type is not a base type
+        };
+
+        let impl_target_arg_ids = &imp.specialization;
+
+        if instance_args.len() != impl_target_arg_ids.len() {
+            return None; // arity mismatch
+        }
+
+        let mut substitutions = HashMap::new();
+
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+            let target_symbol = self.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+            if imp.generic_params.contains(&target_symbol.id) {
+                substitutions.insert(target_symbol.id, instance_arg.clone());
+            } else {
+                let resolved_instance_arg = self.resolve_type(instance_arg);
+                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
+
+                if resolved_instance_arg != resolved_impl_arg {
+                    return None;
+                }
+            }
+        }
+
+        Some(substitutions)
     }
 }
 
@@ -533,29 +574,14 @@ impl SemanticAnalyzer {
         }
 
         for imp in &inherent_impls {
-            if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id)
-            {
-                if let ValueSymbolKind::Function(_) = value_symbol.kind {
-                    let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                    let fn_sig_id = symbol_type.get_base_symbol();
-                    let fn_sig_symbol = self.symbol_table.get_type_symbol(fn_sig_id).unwrap();
+            if let Some(substitutions) = self.check_impl_applicability(&base_lhs_type, imp) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id) {
+                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
+                        let specialized_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
 
-                    if let TypeSymbolKind::FunctionSignature {
-                        instance: Some(_), ..
-                    } = fn_sig_symbol.kind
-                    {
-                        let mut substitutions = self.create_generic_substitution_map(
-                            &lhs_symbol.generic_parameters,
-                            &concrete_args,
-                        );
-
-                        let impl_substitutions =
-                            self.create_generic_substitution_map(&imp.generic_params, &concrete_args);
-
-                        substitutions.extend(impl_substitutions);
-
-                        let concrete_fn_type = Self::apply_substitution(&symbol_type, &substitutions);
-                        self.unify(result_ty, concrete_fn_type, info)?;
+                        self.unify(result_ty, specialized_fn_type, info)?;
+                        
                         return Ok(true);
                     }
                 }
