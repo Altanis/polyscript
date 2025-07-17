@@ -6122,7 +6122,7 @@ impl SemanticAnalyzer {
                     return substituted_type.clone();
                 }
 
-                let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap();
+                let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap().clone();
 
                 match &base_symbol.kind {
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => {
@@ -6148,18 +6148,29 @@ impl SemanticAnalyzer {
 
                         let substituted_return_type = self.apply_substitution(return_type, substitutions, debug);
 
-                        let specialized_sig_id = self.symbol_table.add_type_symbol(
-                            &format!("#fn_sig_specialized_{}", base_symbol.id),
-                            TypeSymbolKind::FunctionSignature {
-                                params: substituted_params,
-                                return_type: substituted_return_type,
-                                instance: *instance,
-                            },
-                            vec![],
-                            QualifierKind::Private,
-                            None,
-                        ).unwrap();
+                        let mut sorted_subs: Vec<_> = substitutions.iter().collect();
+                        sorted_subs.sort_by_key(|(k, _)| *k);
 
+                        let specialization_key = sorted_subs
+                            .iter()
+                            .map(|(k, v)| format!("{}-{}", k, v))
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        
+                        let signature_name = format!("#fn_sig_specialized_{}_{}", base_symbol.id, specialization_key);
+                        
+                        let specialized_sig_id = self.symbol_table.add_type_symbol(
+                                &signature_name,
+                                TypeSymbolKind::FunctionSignature {
+                                    params: substituted_params,
+                                    return_type: substituted_return_type,
+                                    instance: *instance,
+                                },
+                                vec![],
+                                QualifierKind::Private,
+                                None
+                            ).unwrap();
+                        
                         Type::new_base(specialized_sig_id)
                     },
                     _ => {
@@ -6187,7 +6198,8 @@ impl SemanticAnalyzer {
     /// Recursively resolves a type by applying substitutions for unification variables
     /// and expanding type aliases until a concrete type or a unification variable is reached.
     fn resolve_type(&mut self, ty: &Type) -> Type {
-        let mut current_ty = self.apply_substitution(ty, &self.unification_context.substitutions, false);
+        let uc_substitutions = self.unification_context.substitutions.clone();
+        let mut current_ty = self.apply_substitution(ty, &uc_substitutions, false);
 
         loop {
             let Type::Base { symbol, args } = &current_ty else { break; };
@@ -6196,7 +6208,7 @@ impl SemanticAnalyzer {
                 break;
             }
 
-            let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
+            let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
 
             if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &type_symbol.kind {
                 let substitutions = self.create_generic_substitution_map(
@@ -6205,7 +6217,7 @@ impl SemanticAnalyzer {
                 );
 
                 let substituted_alias = self.apply_substitution(aliased_type, &substitutions, false);
-                current_ty = self.apply_substitution(&substituted_alias, &self.unification_context.substitutions, false);
+                current_ty = self.apply_substitution(&substituted_alias, &uc_substitutions, false);
             } else {
                 break;
             }
@@ -6216,7 +6228,7 @@ impl SemanticAnalyzer {
 
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
     /// https://en.wikipedia.org/wiki/Occurs_check
-    fn occurs_check(&self, uv_id: TypeSymbolId, ty: &Type) -> bool {
+    fn occurs_check(&mut self, uv_id: TypeSymbolId, ty: &Type) -> bool {
         let resolved_ty = self.resolve_type(ty);
 
         match &resolved_ty {
@@ -6420,7 +6432,7 @@ impl SemanticAnalyzer {
                 if self.is_uv(symbol) {
                     return Ok(false);
                 }
-                let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap();
+                let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
 
                 if let TypeSymbolKind::FunctionSignature {
                     params: sig_params,
@@ -6589,7 +6601,7 @@ impl SemanticAnalyzer {
         };
 
         for imp in &inherent_impls {
-            if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id) {
+            if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id).cloned() {
                 let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
                 match &value_symbol.kind {
                     ValueSymbolKind::Function(_) | ValueSymbolKind::Variable => {
@@ -6668,7 +6680,7 @@ impl SemanticAnalyzer {
         };
 
         if let Some(scope_id) = struct_scope_id {
-            if let Some(field_symbol) = self.symbol_table.find_value_symbol_from_scope(scope_id, &rhs_name)
+            if let Some(field_symbol) = self.symbol_table.find_value_symbol_from_scope(scope_id, &rhs_name).cloned()
             {
                 let substitutions =
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
@@ -6683,7 +6695,7 @@ impl SemanticAnalyzer {
 
         for imp in &inherent_impls {
             if let Some(substitutions) = self.check_impl_applicability(&base_lhs_type, imp) {
-                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id).cloned() {
                     if let ValueSymbolKind::Function(_) = value_symbol.kind {
                         let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
                         let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions, true);
