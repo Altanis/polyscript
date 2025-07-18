@@ -184,9 +184,6 @@ impl TypeSymbol {
             (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
             (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
 
-            (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Enum(_)) => Some(self.id),
-            (TypeSymbolKind::Enum(_), TypeSymbolKind::Primitive(PrimitiveKind::Int)) => Some(other.id),
-
             _ => None
         }
     }
