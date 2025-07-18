@@ -434,7 +434,21 @@ impl SemanticAnalyzer {
         self.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
-            self.collect_uvs(body_node)?;
+            let body_type = self.collect_uvs(body_node)?;
+
+            let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
+                stmts.last().map_or(body_node.span, |s| s.span)
+            } else {
+                body_node.span
+            };
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(body_type, return_type_val.clone()),
+                ConstraintInfo {
+                    span,
+                    scope_id: body_node.scope_id.unwrap(),
+                },
+            );
         }
 
         self.current_return_type = old_return_type;
@@ -1208,6 +1222,17 @@ impl SemanticAnalyzer {
                 for child in expr.children_mut() {
                     self.collect_uvs(child)?;
                 }
+            },
+            ExpressionStatement(inner_expr) => {
+                self.collect_uvs(inner_expr)?;
+
+                self.unification_context.register_constraint(
+                    Constraint::Equality(
+                        uv.clone(),
+                        Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                    ),
+                    info,
+                );
             },
             Program(_) => unreachable!()
         }

@@ -171,6 +171,9 @@ pub enum AstNodeKind {
         value: BoxedAstNode,
     },
 
+    /// An expression node with a semicolon.
+    ExpressionStatement(BoxedAstNode),
+
     // PROGRAM //
     Program(Vec<AstNode>),
 }
@@ -812,6 +815,10 @@ impl AstNode {
                 if let Some(return_type) = return_type {
                     write!(f, ": {}", return_type)?;
                 }
+            },
+            AstNodeKind::ExpressionStatement(expr) => {
+                expr.fmt_with_indent(f, indent)?;
+                write!(f, ";")?;
             }
         }
 
@@ -1121,6 +1128,7 @@ impl AstNode {
             }
 
             GenericParameter { .. } => vec![],
+            ExpressionStatement(expr) => vec![expr.as_mut()]
         }
     }
 }
@@ -1555,9 +1563,11 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<AstNode, BoxedError> {
-        let node = self.parse_expression()?;
-        self.consume(TokenKind::Semicolon)?;
-        Ok(node)
+        self.spanned_node(|parser| {
+            let expr = parser.parse_expression()?;
+            parser.consume(TokenKind::Semicolon)?;
+            Ok(AstNodeKind::ExpressionStatement(boxed!(expr)))
+        })
     }
 }
 
@@ -1642,16 +1652,29 @@ impl Parser {
     fn parse_block(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::OpenBrace)?;
-
             let mut statements = vec![];
 
-            while parser.peek().get_token_kind() != TokenKind::CloseBrace {
+            loop {
+                if parser.is_at_end() || parser.peek().get_token_kind() == TokenKind::CloseBrace {
+                    break;
+                }
+
+                let start_pos = parser.current;
+                let expr_res = parser.parse_expression();
+
+                if let Ok(expr) = expr_res {
+                    if parser.peek().get_token_kind() == TokenKind::CloseBrace {
+                        statements.push(expr);
+                        break;
+                    }
+                }
+
+                parser.current = start_pos;
                 let stmt = parser.parse_statement()?;
                 statements.push(stmt);
             }
 
             parser.consume(TokenKind::CloseBrace)?;
-
             Ok(AstNodeKind::Block(statements))
         })
     }
@@ -3483,7 +3506,7 @@ impl SemanticAnalyzer {
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
-        pass!(self, unification_pass, &mut program);
+        // pass!(self, unification_pass, &mut program);
 
         Ok(program)
     }
@@ -5067,8 +5090,11 @@ impl SemanticAnalyzer {
         let mut last_type = None;
 
         for stmt in statements.iter_mut() {
+            dbg!(&stmt);
             last_type = Some(self.collect_uvs(stmt)?);
         }
+
+        dbg!(self.symbol_table.display_type(&last_type.clone().unwrap()));
 
         if let Some(last_type) = last_type {
             self.unification_context.register_constraint(
@@ -5290,7 +5316,21 @@ impl SemanticAnalyzer {
         self.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
-            self.collect_uvs(body_node)?;
+            let body_type = self.collect_uvs(body_node)?;
+
+            let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
+                stmts.last().map_or(body_node.span, |s| s.span)
+            } else {
+                body_node.span
+            };
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(body_type, return_type_val.clone()),
+                ConstraintInfo {
+                    span,
+                    scope_id: body_node.scope_id.unwrap(),
+                },
+            );
         }
 
         self.current_return_type = old_return_type;
@@ -6064,6 +6104,17 @@ impl SemanticAnalyzer {
                 for child in expr.children_mut() {
                     self.collect_uvs(child)?;
                 }
+            },
+            ExpressionStatement(inner_expr) => {
+                self.collect_uvs(inner_expr)?;
+
+                self.unification_context.register_constraint(
+                    Constraint::Equality(
+                        uv.clone(),
+                        Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                    ),
+                    info,
+                );
             },
             Program(_) => unreachable!()
         }

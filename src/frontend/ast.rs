@@ -170,6 +170,9 @@ pub enum AstNodeKind {
         value: BoxedAstNode,
     },
 
+    /// An expression node with a semicolon.
+    ExpressionStatement(BoxedAstNode),
+
     // PROGRAM //
     Program(Vec<AstNode>),
 }
@@ -811,6 +814,10 @@ impl AstNode {
                 if let Some(return_type) = return_type {
                     write!(f, ": {}", return_type)?;
                 }
+            },
+            AstNodeKind::ExpressionStatement(expr) => {
+                expr.fmt_with_indent(f, indent)?;
+                write!(f, ";")?;
             }
         }
 
@@ -1120,6 +1127,7 @@ impl AstNode {
             }
 
             GenericParameter { .. } => vec![],
+            ExpressionStatement(expr) => vec![expr.as_mut()]
         }
     }
 }

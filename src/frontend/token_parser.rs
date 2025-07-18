@@ -426,9 +426,11 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<AstNode, BoxedError> {
-        let node = self.parse_expression()?;
-        self.consume(TokenKind::Semicolon)?;
-        Ok(node)
+        self.spanned_node(|parser| {
+            let expr = parser.parse_expression()?;
+            parser.consume(TokenKind::Semicolon)?;
+            Ok(AstNodeKind::ExpressionStatement(boxed!(expr)))
+        })
     }
 }
 
@@ -513,16 +515,29 @@ impl Parser {
     fn parse_block(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::OpenBrace)?;
-
             let mut statements = vec![];
 
-            while parser.peek().get_token_kind() != TokenKind::CloseBrace {
+            loop {
+                if parser.is_at_end() || parser.peek().get_token_kind() == TokenKind::CloseBrace {
+                    break;
+                }
+
+                let start_pos = parser.current;
+                let expr_res = parser.parse_expression();
+
+                if let Ok(expr) = expr_res {
+                    if parser.peek().get_token_kind() == TokenKind::CloseBrace {
+                        statements.push(expr);
+                        break;
+                    }
+                }
+
+                parser.current = start_pos;
                 let stmt = parser.parse_statement()?;
                 statements.push(stmt);
             }
 
             parser.consume(TokenKind::CloseBrace)?;
-
             Ok(AstNodeKind::Block(statements))
         })
     }
@@ -1032,7 +1047,9 @@ impl Parser {
             parser.advance();
 
             let expression = if parser.peek().get_token_kind() != TokenKind::Semicolon {
-                Some(boxed!(parser.parse_expression_statement()?))
+                let expr = boxed!(parser.parse_expression()?);
+                parser.consume(TokenKind::Semicolon)?;
+                Some(expr)
             } else {
                 parser.advance();
                 None
