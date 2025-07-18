@@ -401,7 +401,8 @@ impl Parser {
                 let expr = self.parse_expression()?;
                 self.consume(TokenKind::CloseParenthesis)?;
                 Ok(expr)
-            }
+            },
+            TokenKind::OpenBrace => self.parse_block(),
             TokenKind::Keyword(KeywordKind::This) => {
                 self.advance();
                 Ok(AstNode {
