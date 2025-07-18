@@ -1,3 +1,4 @@
+// frontend/token_parser.rs
 use indexmap::IndexMap;
 
 use crate::{
@@ -412,12 +413,13 @@ impl Parser {
                 })
             }
             TokenKind::Keyword(KeywordKind::Fn) => self.parse_function_expression(),
+            TokenKind::Keyword(KeywordKind::If) => self.parse_if_expression(),
             _ => {
                 return Err(self.generate_error(
                     ErrorKind::UnexpectedToken(
                         token.get_value().to_string(),
                         format!("{}", token.get_token_kind()),
-                        "a unary operator, a literal, an identifier, open parentheses, or a function expression".to_string()
+                        "a unary operator, a literal, an identifier, open parentheses, a function expression, or an if expression".to_string()
                     ),
                     span
                 ));
@@ -426,11 +428,9 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<AstNode, BoxedError> {
-        self.spanned_node(|parser| {
-            let expr = parser.parse_expression()?;
-            parser.consume(TokenKind::Semicolon)?;
-            Ok(AstNodeKind::ExpressionStatement(boxed!(expr)))
-        })
+        let node = self.parse_expression()?;
+        self.consume(TokenKind::Semicolon)?;
+        Ok(node)
     }
 }
 
@@ -497,7 +497,6 @@ impl Parser {
             KeywordKind::Let => self.parse_variable_declaration(true),
             KeywordKind::Const => self.parse_variable_declaration(false),
             KeywordKind::Fn => self.parse_function_declaration(),
-            KeywordKind::If => self.parse_selection_statements(),
             KeywordKind::While => self.parse_while_loop(),
             KeywordKind::For => self.parse_for_loop(),
             KeywordKind::Struct => self.parse_struct_declaration(),
@@ -515,29 +514,24 @@ impl Parser {
     fn parse_block(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::OpenBrace)?;
+
             let mut statements = vec![];
-
-            loop {
-                if parser.is_at_end() || parser.peek().get_token_kind() == TokenKind::CloseBrace {
-                    break;
-                }
-
-                let start_pos = parser.current;
-                let expr_res = parser.parse_expression();
-
-                if let Ok(expr) = expr_res {
+            while !parser.is_at_end() && parser.peek().get_token_kind() != TokenKind::CloseBrace {
+                let checkpoint = parser.current;
+                
+                if let Ok(expr) = parser.parse_expression() {
                     if parser.peek().get_token_kind() == TokenKind::CloseBrace {
                         statements.push(expr);
-                        break;
+                        break; 
                     }
                 }
-
-                parser.current = start_pos;
-                let stmt = parser.parse_statement()?;
-                statements.push(stmt);
+                
+                parser.current = checkpoint;
+                statements.push(parser.parse_statement()?);
             }
 
             parser.consume(TokenKind::CloseBrace)?;
+
             Ok(AstNodeKind::Block(statements))
         })
     }
@@ -955,26 +949,22 @@ impl Parser {
         Ok(types)
     }
 
-    fn parse_selection_statements(&mut self) -> Result<AstNode, BoxedError> {
+    fn parse_if_expression(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            parser.advance();
+            parser.consume(TokenKind::Keyword(KeywordKind::If))?;
             let condition = boxed!(parser.parse_expression()?);
             let then_branch = boxed!(parser.parse_block()?);
             let mut else_if_branches = vec![];
-
             let mut else_branch = None;
 
-            while parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Else) {
-                parser.advance();
-
-                if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::If) {
-                    parser.advance();
-                    let condition = boxed!(parser.parse_expression()?);
-                    let then_branch = boxed!(parser.parse_block()?);
-
-                    else_if_branches.push((condition, then_branch));
+            while parser.match_token(TokenKind::Keyword(KeywordKind::Else)) {
+                if parser.match_token(TokenKind::Keyword(KeywordKind::If)) {
+                    let else_if_condition = boxed!(parser.parse_expression()?);
+                    let else_if_branch = boxed!(parser.parse_block()?);
+                    else_if_branches.push((else_if_condition, else_if_branch));
                 } else {
                     else_branch = Some(boxed!(parser.parse_block()?));
+                    break;
                 }
             }
 

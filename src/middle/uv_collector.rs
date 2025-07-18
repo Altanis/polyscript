@@ -246,25 +246,36 @@ impl SemanticAnalyzer {
         self.unification_context
             .register_constraint(Constraint::Equality(cond_type, bool_type.clone()), info);
 
+        let result_uv = Type::new_base(uv_id);
+
         let then_type = self.collect_uvs(then_branch)?;
-        let mut branch_types = vec![then_type.clone()];
+        self.unification_context.register_constraint(
+            Constraint::Equality(result_uv.clone(), then_type),
+            info,
+        );
 
         for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
             let elif_cond_type = self.collect_uvs(elif_cond)?;
             self.unification_context
                 .register_constraint(Constraint::Equality(elif_cond_type, bool_type.clone()), info);
+
             let elif_type = self.collect_uvs(elif_branch)?;
-            branch_types.push(elif_type);
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv.clone(), elif_type),
+                info,
+            );
         }
 
         if let Some(else_node) = else_branch {
             let else_type = self.collect_uvs(else_node)?;
-            branch_types.push(else_type);
-        }
-
-        for branch_type in &branch_types {
             self.unification_context.register_constraint(
-                Constraint::Equality(Type::new_base(uv_id), branch_type.clone()),
+                Constraint::Equality(result_uv.clone(), else_type),
+                info,
+            );
+        } else {
+            let void_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Void));
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv, void_type),
                 info,
             );
         }
