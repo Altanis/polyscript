@@ -1134,6 +1134,931 @@ impl AstNode {
 }
 
 
+// frontend/lexer.rs
+use crate::utils::{error::*, kind::*};
+
+trait CharClassifier {
+    fn is_operation(self) -> bool;
+    fn valid_alphabetic_hex(self) -> bool;
+}
+
+impl CharClassifier for char {
+    fn is_operation(self) -> bool {
+        matches!(
+            self,
+            NOT_TOKEN
+                | BITWISE_NEGATE_TOKEN
+                | ADD_TOKEN
+                | SUB_TOKEN
+                | MUL_TOKEN
+                | DIV_TOKEN
+                | MOD_TOKEN
+                | BITWISE_AND_TOKEN
+                | BITWISE_OR_TOKEN
+                | BITWISE_XOR_TOKEN
+                | ASSIGNMENT_TOKEN
+                | GREATER_THAN_TOKEN
+                | LESS_THAN_TOKEN
+                | FIELD_ACCESS_TOKEN
+        )
+    }
+
+    fn valid_alphabetic_hex(self) -> bool {
+        matches!(self.to_ascii_lowercase(), 'a' | 'b' | 'c' | 'd' | 'e' | 'f')
+    }
+}
+
+pub struct Lexer {
+    /// The source program, in lines.
+    lines: Vec<String>,
+    /// The source program, as characters.
+    source: Vec<char>,
+    /// The line the lexer is reading.
+    line: usize,
+    /// The index in the line the lexer is reading.
+    column: usize,
+    /// The index in the source the lexer is reading.
+    index: usize,
+    /// The tokens collected from the source.
+    tokens: Vec<Token>,
+}
+
+impl Lexer {
+    /// Goes to the next line.
+    fn next_line(&mut self) {
+        self.line += 1;
+        self.column = 1;
+    }
+
+    /// Goes to the index, or next line if '\n' is encountered.
+    fn next_index(&mut self) {
+        if self.source[self.index] == '\n' {
+            self.next_line();
+        } else {
+            self.column += 1;
+        }
+
+        self.index += 1;
+    }
+
+    /// Generates an Error struct based on the position of the lexer.
+    fn generate_error(&self, kind: ErrorKind, span: Option<Span>) -> BoxedError {
+        let span = if let Some(span) = span {
+            span.set_end_from_values(self.index, self.line, self.column)
+        } else {
+            Span {
+                start: self.index,
+                end: self.index,
+                start_pos: Position {
+                    line: self.line,
+                    column: self.column,
+                },
+                end_pos: Position {
+                    line: self.line,
+                    column: self.column,
+                },
+            }
+        };
+
+        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
+    }
+
+    /// Peeks at the next character.
+    fn peek(&self) -> Result<char, BoxedError> {
+        self.source
+            .get(self.index + 1)
+            .ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None))
+            .copied()
+    }
+
+    /// Consumes the next character.
+    fn consume(&mut self) -> Result<char, BoxedError> {
+        self.next_index();
+        self.source
+            .get(self.index)
+            .ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None))
+            .copied()
+    }
+
+    fn parse_escape_char(&mut self) -> Result<char, BoxedError> {
+        match self.consume()? {
+            'n' => Ok('\n'),
+            't' => Ok('\t'),
+            'r' => Ok('\r'),
+            '0' => Ok('\0'),
+            '\\' => Ok('\\'),
+            '\'' => Ok('\''),
+            '\"' => Ok('\"'),
+            'b' => Ok('\x08'),
+            'f' => Ok('\x0C'),
+            'v' => Ok('\x0B'),
+
+            'x' => {
+                let mut hex = String::new();
+                for _ in 0..2 {
+                    match self.consume()? {
+                        c if c.is_ascii_hexdigit() => hex.push(c),
+                        c => {
+                            return Err(self.generate_error(
+                                ErrorKind::InvalidEscapeSequence(format!(
+                                    "\\x{} (invalid char '{}')",
+                                    hex, c
+                                )),
+                                None,
+                            ));
+                        }
+                    }
+                }
+                let value = u8::from_str_radix(&hex, 16).unwrap();
+                Ok(value as char)
+            }
+
+            'u' => {
+                if self.consume()? != '{' {
+                    return Err(self.generate_error(
+                        ErrorKind::InvalidEscapeSequence("\\u (does not have opening brace)".to_string()),
+                        None,
+                    ));
+                }
+
+                let mut hex = String::new();
+                while let Ok(c) = self.consume() {
+                    if c == '}' {
+                        break;
+                    }
+
+                    if !c.is_ascii_hexdigit() {
+                        return Err(self.generate_error(
+                            ErrorKind::InvalidEscapeSequence(format!(
+                                "\\u{{{}}} (invalid char '{}')",
+                                hex + &c.to_string(),
+                                c
+                            )),
+                            None,
+                        ));
+                    }
+
+                    hex.push(c);
+
+                    if hex.len() > 6 {
+                        return Err(self.generate_error(
+                            ErrorKind::InvalidEscapeSequence(format!(
+                                "\\u{{{}}} (too long of an escape sequence)",
+                                hex
+                            )),
+                            None,
+                        ));
+                    }
+                }
+
+                if hex.is_empty() {
+                    return Err(
+                        self.generate_error(ErrorKind::InvalidEscapeSequence("\\u{}".to_string()), None)
+                    );
+                }
+
+                let value = u32::from_str_radix(&hex, 16).unwrap();
+                match char::from_u32(value) {
+                    Some(ch) => Ok(ch),
+                    None => Err(self.generate_error(
+                        ErrorKind::InvalidEscapeSequence(format!("\\u{{{}}} (invalid Unicode scalar)", hex)),
+                        None,
+                    )),
+                }
+            }
+
+            other => Err(self.generate_error(ErrorKind::InvalidEscapeSequence(format!("\\{}", other)), None)),
+        }
+    }
+}
+
+impl Lexer {
+    /// Parses an operation.
+    fn parse_operator(&mut self) -> Result<Token, BoxedError> {
+        let mut operator = self.source[self.index].to_string();
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column,
+            },
+            end_pos: Position::default(),
+        };
+
+        match operator.chars().next().unwrap() {
+            NOT_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::NotEqual)
+                    }
+                    _ => TokenKind::Operator(Operation::Not),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            BITWISE_NEGATE_TOKEN => Ok(Token::new(
+                operator,
+                TokenKind::Operator(Operation::BitwiseNegate),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            ADD_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::PlusEq)
+                    }
+                    _ => TokenKind::Operator(Operation::Plus),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            SUB_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::MinusEq)
+                    }
+                    _ => TokenKind::Operator(Operation::Minus),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            MUL_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::MulEq)
+                    }
+                    Ok(c) if c == MUL_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::Exp)
+                    }
+                    _ => TokenKind::Operator(Operation::Mul),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            DIV_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::DivEq)
+                    }
+                    _ => TokenKind::Operator(Operation::Div),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            MOD_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::ModEq)
+                    }
+                    _ => TokenKind::Operator(Operation::Mod),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            BITWISE_AND_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == BITWISE_AND_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::And)
+                    }
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::BitwiseAndEq)
+                    }
+                    _ => TokenKind::Operator(Operation::BitwiseAnd),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            BITWISE_OR_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == BITWISE_OR_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::Or)
+                    }
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::BitwiseOrEq)
+                    }
+                    _ => TokenKind::Operator(Operation::BitwiseOr),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            BITWISE_XOR_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::BitwiseXorEq)
+                    }
+                    _ => TokenKind::Operator(Operation::BitwiseXor),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            ASSIGNMENT_TOKEN => {
+                let token_type = match self.peek() {
+                    Ok(c) if c == ASSIGNMENT_TOKEN => {
+                        operator.push(self.consume()?);
+                        TokenKind::Operator(Operation::Equivalence)
+                    }
+                    _ => TokenKind::Operator(Operation::Assign),
+                };
+                Ok(Token::new(
+                    operator,
+                    token_type,
+                    span.set_end_from_values(self.index, self.line, self.column),
+                ))
+            }
+            GREATER_THAN_TOKEN => match self.peek() {
+                Ok(c) if c == ASSIGNMENT_TOKEN => {
+                    operator.push(self.consume()?);
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::Geq),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                Ok(c) if c == GREATER_THAN_TOKEN => {
+                    operator.push(self.consume()?);
+                    if let Ok(c2) = self.peek() {
+                        if c2 == ASSIGNMENT_TOKEN {
+                            operator.push(self.consume()?);
+                            return Ok(Token::new(
+                                operator,
+                                TokenKind::Operator(Operation::RightBitShiftEq),
+                                span.set_end_from_values(self.index, self.line, self.column),
+                            ));
+                        }
+                    }
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::RightBitShift),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                _ => Ok(Token::new(
+                    operator,
+                    TokenKind::Operator(Operation::GreaterThan),
+                    span.set_end_from_values(self.index, self.line, self.column),
+                )),
+            },
+            LESS_THAN_TOKEN => match self.peek() {
+                Ok(c) if c == ASSIGNMENT_TOKEN => {
+                    operator.push(self.consume()?);
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::Leq),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                Ok(c) if c == LESS_THAN_TOKEN => {
+                    operator.push(self.consume()?);
+                    if let Ok(c2) = self.peek() {
+                        if c2 == ASSIGNMENT_TOKEN {
+                            operator.push(self.consume()?);
+                            return Ok(Token::new(
+                                operator,
+                                TokenKind::Operator(Operation::LeftBitShiftEq),
+                                span.set_end_from_values(self.index, self.line, self.column),
+                            ));
+                        }
+                    }
+                    Ok(Token::new(
+                        operator,
+                        TokenKind::Operator(Operation::LeftBitShift),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                }
+                _ => Ok(Token::new(
+                    operator,
+                    TokenKind::Operator(Operation::LessThan),
+                    span.set_end_from_values(self.index, self.line, self.column),
+                )),
+            },
+            FIELD_ACCESS_TOKEN => Ok(Token::new(
+                operator,
+                TokenKind::Operator(Operation::FieldAccess),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            _ => Err(self.generate_error(ErrorKind::UnrecognizedSymbol(operator), Some(span))),
+        }
+    }
+
+    /// Parses a word.
+    fn parse_word(&mut self) -> Result<Token, BoxedError> {
+        let mut word = self.source[self.index].to_string();
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column,
+            },
+            end_pos: Position::default(),
+        };
+
+        while let Ok(char) = self.peek()
+            && (char.is_alphanumeric() || char == '_')
+        {
+            self.next_index();
+            word.push(self.source[self.index]);
+        }
+
+        match word.as_str() {
+            INT_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Int),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FLOAT_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Float),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            BOOL_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Bool),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            STRING_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::String),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CHAR_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Char),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            LET_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Let),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CONST_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Const),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            STRUCT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Struct),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            ENUM_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Enum),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TRUE_KEYWORD | FALSE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::BooleanLiteral,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FN_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Fn),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FOR_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::For),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            WHILE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::While),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            RETURN_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Return),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            BREAK_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Break),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CONTINUE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Continue),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            IF_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::If),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            ELSE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Else),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            THIS_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::This),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            PUBLIC_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Public),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            PRIVATE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Private),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            IMPL_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Impl),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TRAIT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Trait),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            TYPE_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Type),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            MUT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Mut),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            _ => Ok(Token::new(
+                word,
+                TokenKind::Identifier,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+        }
+    }
+
+    /// Parses a number.
+    fn parse_number(&mut self) -> Result<Token, BoxedError> {
+        let mut number_str = String::new();
+        let mut has_decimal_point = false;
+        let mut has_exponent = false;
+
+        let first_char = self.source[self.index];
+        number_str.push(first_char);
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column,
+            },
+            end_pos: Position::default(),
+        };
+
+        if first_char == '0' {
+            if let Ok(next_char) = self.peek() {
+                if let Some(base) = match next_char.to_ascii_lowercase() {
+                    'b' => Some(2),
+                    'o' => Some(8),
+                    'x' => Some(16),
+                    _ => None,
+                } {
+                    number_str.push(self.consume()?);
+                    let mut has_digits = false;
+
+                    while let Ok(c) = self.peek() {
+                        if c.is_digit(base) {
+                            number_str.push(self.consume()?);
+                            has_digits = true;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if !has_digits {
+                        let invalid_char = self.peek().unwrap_or('\0');
+                        return Err(self
+                            .generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
+                    }
+
+                    let number_type = match base {
+                        2 => NumberKind::Binary,
+                        8 => NumberKind::Octal,
+                        16 => NumberKind::Hex,
+                        _ => unreachable!(),
+                    };
+
+                    return Ok(Token::new(
+                        number_str,
+                        TokenKind::NumberLiteral(number_type),
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ));
+                }
+            }
+        }
+
+        while let Ok(next_char) = self.peek() {
+            if next_char.is_ascii_digit() {
+                number_str.push(self.consume()?);
+            } else if next_char == '.' && !has_decimal_point && !has_exponent {
+                self.consume()?;
+
+                if let Ok(peek_after_dot) = self.peek() {
+                    if peek_after_dot.is_ascii_digit() {
+                        has_decimal_point = true;
+                        number_str.push('.');
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else if (next_char == 'e' || next_char == 'E') && !has_exponent {
+                has_exponent = true;
+                number_str.push(self.consume()?);
+
+                if let Ok(sign) = self.peek() {
+                    if sign == '+' || sign == '-' {
+                        number_str.push(self.consume()?);
+                    }
+                }
+
+                let mut exponent_digit_found = false;
+                while let Ok(digit) = self.peek() {
+                    if digit.is_ascii_digit() {
+                        exponent_digit_found = true;
+                        number_str.push(self.consume()?);
+                    } else {
+                        break;
+                    }
+                }
+
+                if !exponent_digit_found {
+                    let invalid_char = self.peek().unwrap_or('\0');
+                    return Err(
+                        self.generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span))
+                    );
+                }
+            } else {
+                break;
+            }
+        }
+
+        let number_type = if has_decimal_point || has_exponent {
+            NumberKind::Float
+        } else {
+            NumberKind::Decimal
+        };
+
+        Ok(Token::new(
+            number_str,
+            TokenKind::NumberLiteral(number_type),
+            span.set_end_from_values(self.index, self.line, self.column),
+        ))
+    }
+
+    fn parse_symbol(&mut self) -> Result<Token, BoxedError> {
+        let symbol = self.source[self.index];
+        let mut symbol_buffer = symbol.to_string();
+
+        let span = Span {
+            start: self.index,
+            end: 0,
+            start_pos: Position {
+                line: self.line,
+                column: self.column,
+            },
+            end_pos: Position::default(),
+        };
+
+        match symbol {
+            END_OF_LINE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Semicolon,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_PARENTHESIS => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenParenthesis,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_PARENTHESIS => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseParenthesis,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_BRACKET => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenBracket,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_BRACKET => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseBracket,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            OPEN_BRACE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::OpenBrace,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            CLOSE_BRACE => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::CloseBrace,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            COMMA => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Comma,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            COLON => Ok(Token::new(
+                symbol_buffer,
+                TokenKind::Colon,
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            STRING_DELIMITER => {
+                while let Ok(c) = self.peek() {
+                    if c == STRING_DELIMITER {
+                        self.consume()?;
+                        symbol_buffer.push(c);
+                        return Ok(Token::new(
+                            symbol_buffer,
+                            TokenKind::StringLiteral,
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
+                    }
+
+                    if c == '\\' {
+                        self.consume()?;
+                        let ch = self.parse_escape_char()?;
+                        symbol_buffer.push(ch);
+                    } else {
+                        symbol_buffer.push(self.consume()?);
+                    }
+                }
+
+                return Err(self.generate_error(ErrorKind::UnterminatedString, Some(span)));
+            }
+            CHAR_DELIMITER => {
+                let c = self.consume()?;
+
+                if c == '\\' {
+                    let ch = self.parse_escape_char()?;
+                    symbol_buffer.push(ch);
+                } else if c != CHAR_DELIMITER {
+                    symbol_buffer.push(c);
+                } else {
+                    return Err(self.generate_error(ErrorKind::InvalidChar(c.to_string()), Some(span)));
+                }
+
+                if self.consume()? == CHAR_DELIMITER {
+                    symbol_buffer.push(CHAR_DELIMITER);
+                    Ok(Token::new(
+                        symbol_buffer,
+                        TokenKind::CharLiteral,
+                        span.set_end_from_values(self.index, self.line, self.column),
+                    ))
+                } else {
+                    return Err(self.generate_error(ErrorKind::UnterminatedChar, Some(span)));
+                }
+            }
+            _ => {
+                return Err(self.generate_error(ErrorKind::UnrecognizedSymbol(symbol.to_string()), Some(span)))
+            }
+        }
+    }
+}
+
+impl Lexer {
+    pub fn new(program: String) -> Lexer {
+        Lexer {
+            lines: program.split("\n").map(|x| x.to_string()).collect(),
+            source: program.chars().collect(),
+            line: 1,
+            column: 1,
+            index: 0,
+            tokens: vec![],
+        }
+    }
+
+    pub fn tokenize(&mut self) -> Result<(), BoxedError> {
+        while let Some(&char) = self.source.get(self.index) {
+            if char.is_whitespace() {}
+            else if char == '/' && matches!(self.peek(), Ok('/' | '*')) {
+                match self.peek() {
+                    Ok('/') => {
+                        while matches!(self.peek(), Ok(c) if c != '\n') {
+                            self.next_index();
+                        }
+                    },
+                    Ok('*') => {
+                        self.next_index();
+
+                        'comment_loop: loop {
+                            match self.peek() {
+                                Ok('*') => {
+                                    self.next_index();
+                                    if self.peek() == Ok('/') {
+                                        self.next_index();
+                                        break 'comment_loop;
+                                    }
+                                }
+                                Ok(_) => {
+                                    self.next_index();
+                                }
+                                Err(_) => {
+                                    break 'comment_loop;
+                                }
+                            }
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            } else if char.is_operation() {
+                let token = self.parse_operator()?;
+                self.tokens.push(token);
+            } else if char.is_alphabetic() {
+                let token = self.parse_word()?;
+                self.tokens.push(token);
+            } else if char.is_numeric() {
+                let token = self.parse_number()?;
+                self.tokens.push(token);
+            } else {
+                let token = self.parse_symbol()?;
+                self.tokens.push(token);
+            }
+
+            self.next_index();
+        }
+
+        self.tokens.push(Token::new(
+            "".to_string(),
+            TokenKind::EndOfFile,
+            Span {
+                start: self.index - 1,
+                end: self.index - 1,
+                start_pos: Position {
+                    line: self.line,
+                    column: if self.column == 1 { 1 } else { self.column - 1 },
+                },
+                end_pos: Position {
+                    line: self.line,
+                    column: if self.column == 1 { 1 } else { self.column - 1 },
+                },
+            },
+        ));
+
+        Ok(())
+    }
+
+    pub fn get_tokens(&self) -> &Vec<Token> {
+        &self.tokens
+    }
+
+    pub fn extract(self) -> (Vec<String>, Vec<Token>) {
+        (self.lines, self.tokens)
+    }
+}
+
+
+// frontend/token_parser.rs
 // frontend/token_parser.rs
 use indexmap::IndexMap;
 
@@ -1537,7 +2462,8 @@ impl Parser {
                 let expr = self.parse_expression()?;
                 self.consume(TokenKind::CloseParenthesis)?;
                 Ok(expr)
-            }
+            },
+            TokenKind::OpenBrace => self.parse_block(),
             TokenKind::Keyword(KeywordKind::This) => {
                 self.advance();
                 Ok(AstNode {
@@ -1549,12 +2475,13 @@ impl Parser {
                 })
             }
             TokenKind::Keyword(KeywordKind::Fn) => self.parse_function_expression(),
+            TokenKind::Keyword(KeywordKind::If) => self.parse_if_expression(),
             _ => {
                 return Err(self.generate_error(
                     ErrorKind::UnexpectedToken(
                         token.get_value().to_string(),
                         format!("{}", token.get_token_kind()),
-                        "a unary operator, a literal, an identifier, open parentheses, or a function expression".to_string()
+                        "a unary operator, a literal, an identifier, open parentheses, a function expression, or an if expression".to_string()
                     ),
                     span
                 ));
@@ -1563,11 +2490,9 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<AstNode, BoxedError> {
-        self.spanned_node(|parser| {
-            let expr = parser.parse_expression()?;
-            parser.consume(TokenKind::Semicolon)?;
-            Ok(AstNodeKind::ExpressionStatement(boxed!(expr)))
-        })
+        let node = self.parse_expression()?;
+        self.consume(TokenKind::Semicolon)?;
+        Ok(node)
     }
 }
 
@@ -1634,7 +2559,6 @@ impl Parser {
             KeywordKind::Let => self.parse_variable_declaration(true),
             KeywordKind::Const => self.parse_variable_declaration(false),
             KeywordKind::Fn => self.parse_function_declaration(),
-            KeywordKind::If => self.parse_selection_statements(),
             KeywordKind::While => self.parse_while_loop(),
             KeywordKind::For => self.parse_for_loop(),
             KeywordKind::Struct => self.parse_struct_declaration(),
@@ -1652,29 +2576,24 @@ impl Parser {
     fn parse_block(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::OpenBrace)?;
+
             let mut statements = vec![];
-
-            loop {
-                if parser.is_at_end() || parser.peek().get_token_kind() == TokenKind::CloseBrace {
-                    break;
-                }
-
-                let start_pos = parser.current;
-                let expr_res = parser.parse_expression();
-
-                if let Ok(expr) = expr_res {
+            while !parser.is_at_end() && parser.peek().get_token_kind() != TokenKind::CloseBrace {
+                let checkpoint = parser.current;
+                
+                if let Ok(expr) = parser.parse_expression() {
                     if parser.peek().get_token_kind() == TokenKind::CloseBrace {
                         statements.push(expr);
-                        break;
+                        break; 
                     }
                 }
-
-                parser.current = start_pos;
-                let stmt = parser.parse_statement()?;
-                statements.push(stmt);
+                
+                parser.current = checkpoint;
+                statements.push(parser.parse_statement()?);
             }
 
             parser.consume(TokenKind::CloseBrace)?;
+
             Ok(AstNodeKind::Block(statements))
         })
     }
@@ -2092,26 +3011,22 @@ impl Parser {
         Ok(types)
     }
 
-    fn parse_selection_statements(&mut self) -> Result<AstNode, BoxedError> {
+    fn parse_if_expression(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
-            parser.advance();
+            parser.consume(TokenKind::Keyword(KeywordKind::If))?;
             let condition = boxed!(parser.parse_expression()?);
             let then_branch = boxed!(parser.parse_block()?);
             let mut else_if_branches = vec![];
-
             let mut else_branch = None;
 
-            while parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Else) {
-                parser.advance();
-
-                if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::If) {
-                    parser.advance();
-                    let condition = boxed!(parser.parse_expression()?);
-                    let then_branch = boxed!(parser.parse_block()?);
-
-                    else_if_branches.push((condition, then_branch));
+            while parser.match_token(TokenKind::Keyword(KeywordKind::Else)) {
+                if parser.match_token(TokenKind::Keyword(KeywordKind::If)) {
+                    let else_if_condition = boxed!(parser.parse_expression()?);
+                    let else_if_branch = boxed!(parser.parse_block()?);
+                    else_if_branches.push((else_if_condition, else_if_branch));
                 } else {
                     else_branch = Some(boxed!(parser.parse_block()?));
+                    break;
                 }
             }
 
@@ -2184,7 +3099,9 @@ impl Parser {
             parser.advance();
 
             let expression = if parser.peek().get_token_kind() != TokenKind::Semicolon {
-                Some(boxed!(parser.parse_expression_statement()?))
+                let expr = boxed!(parser.parse_expression()?);
+                parser.consume(TokenKind::Semicolon)?;
+                Some(expr)
             } else {
                 parser.advance();
                 None
@@ -2728,9 +3645,6 @@ impl TypeSymbol {
         match (&self.kind, &other.kind) {
             (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
             (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
-
-            (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Enum(_)) => Some(self.id),
-            (TypeSymbolKind::Enum(_), TypeSymbolKind::Primitive(PrimitiveKind::Int)) => Some(other.id),
 
             _ => None
         }
@@ -3506,7 +4420,7 @@ impl SemanticAnalyzer {
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
-        // pass!(self, unification_pass, &mut program);
+        pass!(self, unification_pass, &mut program);
 
         Ok(program)
     }
@@ -5090,11 +6004,8 @@ impl SemanticAnalyzer {
         let mut last_type = None;
 
         for stmt in statements.iter_mut() {
-            dbg!(&stmt);
             last_type = Some(self.collect_uvs(stmt)?);
         }
-
-        dbg!(self.symbol_table.display_type(&last_type.clone().unwrap()));
 
         if let Some(last_type) = last_type {
             self.unification_context.register_constraint(
@@ -5128,25 +6039,36 @@ impl SemanticAnalyzer {
         self.unification_context
             .register_constraint(Constraint::Equality(cond_type, bool_type.clone()), info);
 
+        let result_uv = Type::new_base(uv_id);
+
         let then_type = self.collect_uvs(then_branch)?;
-        let mut branch_types = vec![then_type.clone()];
+        self.unification_context.register_constraint(
+            Constraint::Equality(result_uv.clone(), then_type),
+            info,
+        );
 
         for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
             let elif_cond_type = self.collect_uvs(elif_cond)?;
             self.unification_context
                 .register_constraint(Constraint::Equality(elif_cond_type, bool_type.clone()), info);
+
             let elif_type = self.collect_uvs(elif_branch)?;
-            branch_types.push(elif_type);
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv.clone(), elif_type),
+                info,
+            );
         }
 
         if let Some(else_node) = else_branch {
             let else_type = self.collect_uvs(else_node)?;
-            branch_types.push(else_type);
-        }
-
-        for branch_type in &branch_types {
             self.unification_context.register_constraint(
-                Constraint::Equality(Type::new_base(uv_id), branch_type.clone()),
+                Constraint::Equality(result_uv.clone(), else_type),
+                info,
+            );
+        } else {
+            let void_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Void));
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv, void_type),
                 info,
             );
         }
@@ -6999,5 +7921,695 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+
+// utils/kind.rs
+use colored::*;
+use std::rc::Rc;
+
+use crate::middle::semantic_analyzer::PrimitiveKind;
+
+pub const NOT_TOKEN: char = '!';
+pub const BITWISE_NEGATE_TOKEN: char = '~';
+pub const ADD_TOKEN: char = '+';
+pub const SUB_TOKEN: char = '-';
+pub const MUL_TOKEN: char = '*';
+pub const DIV_TOKEN: char = '/';
+pub const MOD_TOKEN: char = '%';
+pub const BITWISE_AND_TOKEN: char = '&';
+pub const BITWISE_OR_TOKEN: char = '|';
+pub const BITWISE_XOR_TOKEN: char = '^';
+pub const ASSIGNMENT_TOKEN: char = '=';
+pub const GREATER_THAN_TOKEN: char = '>';
+pub const LESS_THAN_TOKEN: char = '<';
+pub const FIELD_ACCESS_TOKEN: char = '.';
+
+pub const INT_TYPE: &str = "int";
+pub const FLOAT_TYPE: &str = "float";
+pub const BOOL_TYPE: &str = "bool";
+pub const STRING_TYPE: &str = "string";
+pub const CHAR_TYPE: &str = "char";
+pub const VOID_TYPE: &str = "void"; // NOTE: Programs may not use this type.
+pub const NEVER_TYPE: &str = "never"; // NOTE: Programs may not use this type.
+
+pub const LET_KEYWORD: &str = "let";
+pub const CONST_KEYWORD: &str = "const";
+pub const ENUM_KEYWORD: &str = "enum";
+pub const STRUCT_KEYWORD: &str = "struct";
+pub const IMPL_KEYWORD: &str = "impl";
+pub const TRUE_KEYWORD: &str = "true";
+pub const FALSE_KEYWORD: &str = "false";
+pub const FN_KEYWORD: &str = "fn";
+pub const FOR_KEYWORD: &str = "for";
+pub const WHILE_KEYWORD: &str = "while";
+pub const RETURN_KEYWORD: &str = "return";
+pub const BREAK_KEYWORD: &str = "break";
+pub const CONTINUE_KEYWORD: &str = "continue";
+pub const IF_KEYWORD: &str = "if";
+pub const ELSE_KEYWORD: &str = "else";
+pub const THIS_KEYWORD: &str = "this";
+pub const PUBLIC_KEYWORD: &str = "public";
+pub const PRIVATE_KEYWORD: &str = "private";
+pub const TRAIT_KEYWORD: &str = "trait";
+pub const TYPE_KEYWORD: &str = "type";
+pub const MUT_KEYWORD: &str = "mut";
+
+pub const END_OF_LINE: char = ';';
+pub const OPEN_PARENTHESIS: char = '(';
+pub const CLOSE_PARENTHESIS: char = ')';
+pub const OPEN_BRACKET: char = '[';
+pub const CLOSE_BRACKET: char = ']';
+pub const OPEN_BRACE: char = '{';
+pub const CLOSE_BRACE: char = '}';
+pub const COMMA: char = ',';
+pub const COLON: char = ':';
+
+pub const STRING_DELIMITER: char = '"';
+pub const CHAR_DELIMITER: char = '\'';
+
+#[derive(Debug, Hash, Eq, Clone, Copy, PartialEq, strum_macros::EnumIter)]
+pub enum Operation {
+    // UNARY
+    Not, // !
+    BitwiseNegate,
+
+    // BINARY
+    Plus,
+    Minus,
+    Mul,
+    Exp,
+    Div,
+    Mod,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    RightBitShift,
+    LeftBitShift,
+    Assign,
+    PlusEq,
+    MinusEq,
+    MulEq,
+    ExpEq,
+    DivEq,
+    ModEq,
+    BitwiseAndEq,
+    BitwiseOrEq,
+    BitwiseXorEq,
+    RightBitShiftEq,
+    LeftBitShiftEq,
+
+    // CONDITIONAL
+    And,
+    Or,
+    GreaterThan,
+    Geq, // ≥
+    LessThan,
+    Leq,         // ≤
+    Equivalence, // ==
+    NotEqual,    // !=
+
+    // CALL
+    FieldAccess,
+    FunctionCall,
+
+    // POINTER OPS //
+    Dereference,
+    ImmutableAddressOf,
+    MutableAddressOf,
+}
+
+impl Operation {
+    pub fn is_unary(self) -> bool {
+        matches!(
+            self,
+            Operation::Not
+                | Operation::BitwiseNegate
+                | Operation::Plus
+                | Operation::Minus
+                | Operation::Mul
+                | Operation::BitwiseAnd
+                | Operation::Dereference
+                | Operation::ImmutableAddressOf
+                | Operation::MutableAddressOf
+        )
+    }
+
+    pub fn is_binary(self) -> bool {
+        matches!(
+            self,
+            Operation::Plus
+                | Operation::Minus
+                | Operation::Mul
+                | Operation::Exp
+                | Operation::Div
+                | Operation::Mod
+                | Operation::BitwiseAnd
+                | Operation::BitwiseOr
+                | Operation::BitwiseXor
+                | Operation::RightBitShift
+                | Operation::LeftBitShift
+                | Operation::Assign
+                | Operation::PlusEq
+                | Operation::MinusEq
+                | Operation::MulEq
+                | Operation::ExpEq
+                | Operation::DivEq
+                | Operation::ModEq
+                | Operation::BitwiseAndEq
+                | Operation::BitwiseOrEq
+                | Operation::BitwiseXorEq
+                | Operation::RightBitShiftEq
+                | Operation::LeftBitShiftEq
+        )
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        matches!(
+            self,
+            Operation::And
+                | Operation::Or
+                | Operation::GreaterThan
+                | Operation::Geq
+                | Operation::LessThan
+                | Operation::Leq
+                | Operation::Equivalence
+                | Operation::NotEqual
+        )
+    }
+
+    pub fn binding_power(&self) -> (u8, u8) {
+        match self {
+            Operation::Assign
+            | Operation::PlusEq
+            | Operation::MinusEq
+            | Operation::MulEq
+            | Operation::ExpEq
+            | Operation::DivEq
+            | Operation::ModEq
+            | Operation::BitwiseAndEq
+            | Operation::BitwiseOrEq
+            | Operation::BitwiseXorEq
+            | Operation::RightBitShiftEq
+            | Operation::LeftBitShiftEq
+            | Operation::NotEqual => (1, 2),
+
+            Operation::Or => (2, 3),
+
+            Operation::And => (3, 4),
+
+            Operation::Equivalence => (4, 5),
+
+            Operation::GreaterThan | Operation::Geq | Operation::LessThan | Operation::Leq => (5, 6),
+
+            Operation::BitwiseOr => (6, 7),
+
+            Operation::BitwiseXor => (7, 8),
+
+            Operation::BitwiseAnd => (8, 9),
+
+            Operation::Plus | Operation::Minus => (9, 10),
+
+            Operation::Mul | Operation::Div | Operation::Mod => (10, 11),
+
+            Operation::LeftBitShift | Operation::RightBitShift => (11, 12),
+
+            Operation::Exp => (12, 11),
+
+            Operation::Not | Operation::BitwiseNegate => (13, 14),
+
+            Operation::FunctionCall => (14, 0),
+            Operation::FieldAccess => (14, 15),
+
+            Operation::Dereference | Operation::ImmutableAddressOf | Operation::MutableAddressOf => (15, 16),
+        }
+    }
+
+    /// Returns the trait name and whether it is a unary or binary operation.
+    pub fn to_trait_data(&self) -> Option<(String, bool)> {
+        match self {
+            Operation::Not => Some(("Not".to_string(), false)),
+            Operation::BitwiseNegate => Some(("BitwiseNegate".to_string(), false)),
+            Operation::Plus => Some(("Add".to_string(), true)),
+            Operation::Minus => Some(("Subtract".to_string(), true)),
+            Operation::Mul => Some(("Multiply".to_string(), true)),
+            Operation::Exp => Some(("Exponentiate".to_string(), true)),
+            Operation::Div => Some(("Divide".to_string(), true)),
+            Operation::Mod => Some(("Modulo".to_string(), true)),
+            Operation::BitwiseAnd => Some(("BitwiseAnd".to_string(), true)),
+            Operation::BitwiseOr => Some(("BitwiseOr".to_string(), true)),
+            Operation::BitwiseXor => Some(("BitwiseXor".to_string(), true)),
+            Operation::RightBitShift => Some(("RightBitShift".to_string(), true)),
+            Operation::LeftBitShift => Some(("LeftBitShift".to_string(), true)),
+            Operation::PlusEq => Some(("AddAssign".to_string(), true)),
+            Operation::MinusEq => Some(("SubtractAssign".to_string(), true)),
+            Operation::MulEq => Some(("MultiplyAssign".to_string(), true)),
+            Operation::ExpEq => Some(("ExponentiateAssign".to_string(), true)),
+            Operation::DivEq => Some(("DivideAssign".to_string(), true)),
+            Operation::ModEq => Some(("ModuloAssign".to_string(), true)),
+            Operation::BitwiseAndEq => Some(("BitwiseAndAssign".to_string(), true)),
+            Operation::BitwiseOrEq => Some(("BitwiseOrAssign".to_string(), true)),
+            Operation::BitwiseXorEq => Some(("BitwiseXorAssign".to_string(), true)),
+            Operation::RightBitShiftEq => Some(("RightBitShiftAssign".to_string(), true)),
+            Operation::LeftBitShiftEq => Some(("LeftBitShiftAssign".to_string(), true)),
+            Operation::NotEqual => Some(("NotEqual".to_string(), true)),
+            Operation::And => Some(("And".to_string(), true)),
+            Operation::Or => Some(("Or".to_string(), true)),
+            Operation::GreaterThan => Some(("GreaterThan".to_string(), true)),
+            Operation::Geq => Some(("GreaterThanOrEqual".to_string(), true)),
+            Operation::LessThan => Some(("LessThan".to_string(), true)),
+            Operation::Leq => Some(("LessThanOrEqual".to_string(), true)),
+            Operation::Equivalence => Some(("Equivalence".to_string(), true)),
+            Operation::FieldAccess => None,
+            Operation::FunctionCall => None,
+            Operation::Dereference => None,
+            Operation::ImmutableAddressOf => None,
+            Operation::MutableAddressOf => None,
+            Operation::Assign => None,
+        }
+    }
+
+    /// Gives the output type for a default Operation implementation of a trait on a primitive type.
+    pub fn to_default_trait_return_type(&self, primitive: PrimitiveKind) -> Option<PrimitiveKind> {
+        use Operation::*;
+        use PrimitiveKind::*;
+
+        match primitive {
+            Int => match self {
+                Not => Some(Bool),
+                BitwiseNegate => Some(Int),
+
+                Plus | Minus | Mul | Div | Mod | Exp | BitwiseAnd | BitwiseOr | BitwiseXor
+                | RightBitShift | LeftBitShift => Some(Int),
+
+                And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
+
+                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
+                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+            },
+
+            Float => match self {
+                Not => Some(Bool),
+                BitwiseNegate => None,
+
+                Plus | Minus | Mul | Div | Mod | Exp => Some(Float),
+
+                BitwiseAnd | BitwiseOr | BitwiseXor | RightBitShift | LeftBitShift => None,
+
+                And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
+
+                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
+                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+            },
+
+            Bool => match self {
+                Not => Some(Bool),
+                And | Or | Equivalence | NotEqual | Assign => Some(Bool),
+
+                BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq
+                | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
+                | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
+                | ImmutableAddressOf | MutableAddressOf => None,
+            },
+
+            String => match self {
+                Plus => Some(String),
+                Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
+
+                PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
+                | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
+                | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
+                | MutableAddressOf => None,
+            },
+
+            Char => match self {
+                Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
+
+                Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
+                | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
+                | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
+                | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
+                | MutableAddressOf => None,
+            },
+
+            Void | Never => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Operation::Not => NOT_TOKEN.to_string(),
+            Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
+
+            Operation::Plus => ADD_TOKEN.to_string(),
+            Operation::Minus => SUB_TOKEN.to_string(),
+            Operation::Mul | Operation::Dereference => MUL_TOKEN.to_string(),
+            Operation::Exp => format!("{}{}", MUL_TOKEN, MUL_TOKEN),
+            Operation::Div => DIV_TOKEN.to_string(),
+            Operation::Mod => MOD_TOKEN.to_string(),
+
+            Operation::BitwiseAnd | Operation::ImmutableAddressOf => BITWISE_AND_TOKEN.to_string(),
+            Operation::BitwiseOr => BITWISE_OR_TOKEN.to_string(),
+            Operation::BitwiseXor => BITWISE_XOR_TOKEN.to_string(),
+            Operation::RightBitShift => format!("{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN),
+            Operation::LeftBitShift => format!("{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN),
+
+            Operation::Assign => ASSIGNMENT_TOKEN.to_string(),
+            Operation::PlusEq => format!("{}{}", ADD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MinusEq => format!("{}{}", SUB_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::MulEq => format!("{}{}", MUL_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::ExpEq => format!("{}{}{}", MUL_TOKEN, MUL_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::DivEq => format!("{}{}", DIV_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::ModEq => format!("{}{}", MOD_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseAndEq => format!("{}{}", BITWISE_AND_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseOrEq => format!("{}{}", BITWISE_OR_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::BitwiseXorEq => format!("{}{}", BITWISE_XOR_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::RightBitShiftEq => {
+                format!("{}{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN)
+            }
+            Operation::LeftBitShiftEq => {
+                format!("{}{}{}", LESS_THAN_TOKEN, LESS_THAN_TOKEN, ASSIGNMENT_TOKEN)
+            }
+            Operation::NotEqual => format!("{}{}", NOT_TOKEN, ASSIGNMENT_TOKEN),
+
+            Operation::And => format!("{}{}", BITWISE_AND_TOKEN, BITWISE_AND_TOKEN),
+            Operation::Or => format!("{}{}", BITWISE_OR_TOKEN, BITWISE_OR_TOKEN),
+            Operation::GreaterThan => GREATER_THAN_TOKEN.to_string(),
+            Operation::Geq => format!("{}{}", GREATER_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::LessThan => LESS_THAN_TOKEN.to_string(),
+            Operation::Leq => format!("{}{}", LESS_THAN_TOKEN, ASSIGNMENT_TOKEN),
+            Operation::Equivalence => format!("{}{}", ASSIGNMENT_TOKEN, ASSIGNMENT_TOKEN),
+
+            Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
+            Operation::FunctionCall => "()".to_string(),
+            Operation::MutableAddressOf => "&mut".to_string(),
+        };
+
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumberKind {
+    // INTEGERS
+    Decimal,
+    Binary,
+    Octal,
+    Hex,
+
+    // FLOATS
+    Float,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoopKind {
+    For,
+    While,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ControlFlowKind {
+    Return,
+    Break,
+    Continue,
+    Throw,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeywordKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Char,
+    If,
+    Else,
+    While,
+    For,
+    Break,
+    Continue,
+    Return,
+    Throw,
+    Fn,
+    Struct,
+    Impl,
+    Let,
+    Const,
+    Enum,
+    Public,
+    Private,
+    This,
+    Trait,
+    Type,
+    Mut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum QualifierKind {
+    Public,
+    Private,
+}
+
+impl std::fmt::Display for QualifierKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QualifierKind::Public => write!(f, "public"),
+            QualifierKind::Private => write!(f, "private"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TokenKind {
+    Identifier,
+    Operator(Operation),
+    NumberLiteral(NumberKind),
+    BooleanLiteral,
+    StringLiteral,
+    CharLiteral,
+    Keyword(KeywordKind),
+    Semicolon,
+    OpenParenthesis,
+    CloseParenthesis,
+    OpenBracket,
+    CloseBracket,
+    OpenBrace,
+    CloseBrace,
+    Comma,
+    Colon,
+    EndOfFile,
+}
+
+pub const SYNC_TOKENS: [TokenKind; 16] = [
+    TokenKind::Keyword(KeywordKind::If),
+    TokenKind::Keyword(KeywordKind::For),
+    TokenKind::Keyword(KeywordKind::While),
+    TokenKind::Keyword(KeywordKind::Return),
+    TokenKind::Keyword(KeywordKind::Break),
+    TokenKind::Keyword(KeywordKind::Continue),
+    TokenKind::Keyword(KeywordKind::Let),
+    TokenKind::Keyword(KeywordKind::Const),
+    TokenKind::Keyword(KeywordKind::Fn),
+    TokenKind::Keyword(KeywordKind::Struct),
+    TokenKind::Keyword(KeywordKind::Enum),
+    TokenKind::Keyword(KeywordKind::Impl),
+    TokenKind::Keyword(KeywordKind::Trait),
+    TokenKind::Keyword(KeywordKind::Type),
+    TokenKind::Keyword(KeywordKind::Public),
+    TokenKind::Keyword(KeywordKind::Private),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Position { line: 1, column: 1 }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub start_pos: Position,
+    pub end_pos: Position,
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}..{} | {}:{} → {}:{}",
+            self.start,
+            self.end,
+            self.start_pos.line,
+            self.start_pos.column,
+            self.end_pos.line,
+            self.end_pos.column
+        )
+    }
+}
+
+impl std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "starting line {}, starting col {} | span {}..{} | ending line {}, ending col {}",
+            self.start_pos.line,
+            self.start_pos.column,
+            self.start,
+            self.end,
+            self.end_pos.line,
+            self.end_pos.column
+        )
+    }
+}
+
+impl Span {
+    pub fn set_end_from_values(mut self, index: usize, line: usize, column: usize) -> Span {
+        self.end = index;
+        self.end_pos = Position { line, column };
+
+        self
+    }
+
+    pub fn set_end_from_span(mut self, span: Span) -> Span {
+        self.end = span.end;
+        self.end_pos = span.end_pos;
+
+        self
+    }
+
+    pub fn get_lines(&self, lines: Rc<Vec<String>>) -> Vec<(String, usize)> {
+        let mut ret: Vec<(String, usize)> = vec![];
+
+        for i in self.start_pos.line..=self.end_pos.line {
+            ret.push((lines[i - 1].clone(), i));
+        }
+
+        ret
+    }
+
+    pub fn get_all_lines(lines: Rc<Vec<String>>, spans: &[Span]) -> Vec<(String, usize)> {
+        let mut ret = vec![];
+        for span in spans.iter() {
+            ret.extend(span.get_lines(lines.clone()));
+        }
+
+        return ret;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Token {
+    /// The true value in source.
+    value: String,
+    /// The type of token.
+    token_kind: TokenKind,
+    /// Details about the token's placement in source.
+    span: Span,
+}
+
+impl Token {
+    pub fn new(value: String, token_type: TokenKind, span: Span) -> Token {
+        Token {
+            value,
+            token_kind: token_type,
+            span,
+        }
+    }
+
+    pub fn get_value(&self) -> &String {
+        &self.value
+    }
+
+    pub fn get_token_kind(&self) -> TokenKind {
+        self.token_kind
+    }
+
+    pub fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let token_type_str = match self {
+            TokenKind::Identifier => "Identifier".cyan(),
+            TokenKind::Operator(op) => format!("Operator::{:?}", op).bright_magenta(),
+            TokenKind::NumberLiteral(n) => format!("Number::{:?}", n).blue(),
+            TokenKind::BooleanLiteral => "Boolean".magenta(),
+            TokenKind::StringLiteral => "String".green(),
+            TokenKind::CharLiteral => "Character".green(),
+            TokenKind::Keyword(keyword) => match keyword {
+                KeywordKind::Int => "Keyword::Int".cyan(),
+                KeywordKind::Float => "Keyword::Float".cyan(),
+                KeywordKind::String => "Keyword::String".cyan(),
+                KeywordKind::Bool => "Keyword::Bool".cyan(),
+                KeywordKind::Char => "Keyword::Char".cyan(),
+                KeywordKind::If => "Keyword::If".yellow(),
+                KeywordKind::Else => "Keyword::Else".yellow(),
+                KeywordKind::While => "Keyword::While".yellow(),
+                KeywordKind::For => "Keyword::For".yellow(),
+                KeywordKind::Break => "Keyword::Break".red(),
+                KeywordKind::Continue => "Keyword::Continue".red(),
+                KeywordKind::Return => "Keyword::Return".red(),
+                KeywordKind::Throw => "Keyword::Throw".red(),
+                KeywordKind::Fn => "Keyword::Fn".green(),
+                KeywordKind::Struct => "Keyword::Struct".green(),
+                KeywordKind::Let => "Keyword::Let".green(),
+                KeywordKind::Const => "Keyword::Const".green(),
+                KeywordKind::Mut => "Keyword::Mut".green(),
+                KeywordKind::Enum => "Keyword::Enum".green(),
+                KeywordKind::Public => "Keyword::Public".blue(),
+                KeywordKind::Private => "Keyword::Private".blue(),
+                KeywordKind::This => "Keyword::This".blue(),
+                KeywordKind::Impl => "Keyword::Impl".purple(),
+                KeywordKind::Trait => "Keyword::Trait".purple(),
+                KeywordKind::Type => "Keyword::Type".purple(),
+            },
+            TokenKind::Semicolon => "Semicolon".dimmed(),
+            TokenKind::OpenParenthesis => "OpenParen".dimmed(),
+            TokenKind::CloseParenthesis => "CloseParen".dimmed(),
+            TokenKind::OpenBracket => "OpenBracket".dimmed(),
+            TokenKind::CloseBracket => "CloseBracket".dimmed(),
+            TokenKind::OpenBrace => "OpenCurly".dimmed(),
+            TokenKind::CloseBrace => "CloseCurly".dimmed(),
+            TokenKind::Comma => "Comma".dimmed(),
+            TokenKind::Colon => "Colon".dimmed(),
+            TokenKind::EndOfFile => "<EOF>".into(),
+        };
+
+        write!(f, "{}", token_type_str)
+    }
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} ({}) at [{}]",
+            self.value.bold(),
+            self.get_token_kind(),
+            self.span
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReferenceKind {
+    Value,
+    Reference,
+    MutableReference,
+}
 
 

@@ -1,11 +1,13 @@
 const FILES = [
-    "frontend/ast.rs", 
-    "frontend/token_parser.rs", 
+    "frontend/ast.rs",
+    "frontend/lexer.rs",
+    "frontend/token_parser.rs",
     "middle/semantic_analyzer.rs", 
-    "middle/symbols.rs", 
+    "middle/symbols.rs",
     "middle/uv_collector.rs",
     "middle/unification.rs",
-    "utils/error.rs"
+    "utils/error.rs",
+    "utils/kind.rs"
 ];
 
 const fs = require("fs");

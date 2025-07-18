@@ -47,6 +47,7 @@ pub const PRIVATE_KEYWORD: &str = "private";
 pub const TRAIT_KEYWORD: &str = "trait";
 pub const TYPE_KEYWORD: &str = "type";
 pub const MUT_KEYWORD: &str = "mut";
+pub const AS_KEYWORD: &str = "as";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -106,10 +107,13 @@ pub enum Operation {
     FieldAccess,
     FunctionCall,
 
-    // POINTER OPS //
+    // POINTER OPS
     Dereference,
     ImmutableAddressOf,
     MutableAddressOf,
+
+    // CAST
+    As
 }
 
 impl Operation {
@@ -209,6 +213,7 @@ impl Operation {
 
             Operation::Exp => (12, 11),
 
+            Operation::As => (13, 14),
             Operation::Not | Operation::BitwiseNegate => (13, 14),
 
             Operation::FunctionCall => (14, 0),
@@ -259,6 +264,7 @@ impl Operation {
             Operation::ImmutableAddressOf => None,
             Operation::MutableAddressOf => None,
             Operation::Assign => None,
+            Operation::As => None
         }
     }
 
@@ -279,7 +285,7 @@ impl Operation {
 
                 Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Float => match self {
@@ -294,7 +300,7 @@ impl Operation {
 
                 Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Bool => match self {
@@ -305,7 +311,7 @@ impl Operation {
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
                 | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             String => match self {
@@ -316,7 +322,7 @@ impl Operation {
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf => None,
+                | MutableAddressOf | As => None,
             },
 
             Char => match self {
@@ -326,7 +332,7 @@ impl Operation {
                 | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
                 | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
                 | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf => None,
+                | MutableAddressOf | As => None,
             },
 
             Void | Never => None,
@@ -382,6 +388,8 @@ impl std::fmt::Display for Operation {
             Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
             Operation::FunctionCall => "()".to_string(),
             Operation::MutableAddressOf => "&mut".to_string(),
+
+            Operation::As => AS_KEYWORD.to_string()
         };
 
         write!(f, "{}", s)
@@ -440,7 +448,7 @@ pub enum KeywordKind {
     This,
     Trait,
     Type,
-    Mut,
+    Mut
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -649,7 +657,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::This => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
-                KeywordKind::Type => "Keyword::Type".purple(),
+                KeywordKind::Type => "Keyword::Type".purple()
             },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

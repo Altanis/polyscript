@@ -588,6 +588,11 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Mut),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            AS_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Operator(Operation::As),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,

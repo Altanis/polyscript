@@ -37,6 +37,10 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+    TypeCast {
+        expr: BoxedAstNode,
+        target_type: BoxedAstNode,
+    },
 
     // A sequence of statements encapsulated by braces.
     Block(Vec<AstNode>),
@@ -339,6 +343,13 @@ impl AstNode {
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")?
+            }
+            AstNodeKind::TypeCast { expr, target_type } => {
+                write!(f, "{}(", indent_str)?;
+                expr.fmt_with_indent(f, 0)?;
+                write!(f, " {} ", "as".yellow())?;
+                target_type.fmt_with_indent(f, 0)?;
+                write!(f, ")")?;
             }
 
             AstNodeKind::Block(nodes) => {
@@ -865,7 +876,9 @@ impl AstNode {
 
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
-            }
+            },
+
+            TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
 
             Block(statements) => statements.iter_mut().collect(),
 

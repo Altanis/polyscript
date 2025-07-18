@@ -155,7 +155,20 @@ impl Parser {
 
             self.advance();
 
-            if operator == Operation::FunctionCall {
+            if operator == Operation::As {
+                let target_type = self.parse_type()?;
+                
+                lhs = AstNode {
+                    span: lhs.span.set_end_from_span(target_type.span),
+                    kind: AstNodeKind::TypeCast {
+                        expr: boxed!(lhs),
+                        target_type: boxed!(target_type),
+                    },
+                    type_id: None,
+                    value_id: None,
+                    scope_id: None,
+                };
+            } else if operator == Operation::FunctionCall {
                 let mut arguments = vec![];
                 if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
                     loop {
