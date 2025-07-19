@@ -187,6 +187,18 @@ impl TypeSymbol {
             _ => None
         }
     }
+
+    pub fn is_valid_cast(&self, other: &TypeSymbol) -> bool {
+        matches!((&self.kind, &other.kind), 
+            (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Float))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Float), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Float), TypeSymbolKind::Primitive(PrimitiveKind::Float))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Char), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Char)) 
+            | (TypeSymbolKind::Enum(_), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -850,6 +862,8 @@ pub enum Constraint {
     InstanceMemberAccess(Type, Type, String),
     /// A type denotes a static member of a type, like an enum variant.
     StaticMemberAccess(Type, Type, String),
+    /// The initial type must be validly castable to the other.
+    Cast(Type, Type)
 }
 
 /// Additional information about a constraint.
@@ -1308,6 +1322,12 @@ impl Constraint {
                         self.t.display_type(base).bright_blue(),
                         m.green()
                     ),
+                    Cast(initial, r#final) => write!(
+                        f,
+                        "{} -> {}",
+                        self.t.display_type(initial).yellow(),
+                        self.t.display_type(r#final).yellow()
+                    )
                 }
             }
         }

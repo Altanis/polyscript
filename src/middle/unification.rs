@@ -300,6 +300,7 @@ impl SemanticAnalyzer {
             },
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
             // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
             _ => unreachable!(),
         }
     }
@@ -643,5 +644,30 @@ impl SemanticAnalyzer {
             info.span,
             &[info.span],
         ))
+    }
+
+    fn unify_cast(&mut self, source: Type, target: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+        let resolved_source = self.resolve_type(&source);
+        let resolved_target = self.resolve_type(&target);
+
+        if self.is_uv(resolved_source.get_base_symbol()) || self.is_uv(resolved_target.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let source_sym = self.symbol_table.get_type_symbol(resolved_source.get_base_symbol()).unwrap();
+        let target_sym = self.symbol_table.get_type_symbol(resolved_target.get_base_symbol()).unwrap();
+
+        if source_sym.is_valid_cast(target_sym) {
+            Ok(true)
+        } else {
+            Err(self.create_error(
+                ErrorKind::InvalidCast(
+                    self.symbol_table.display_type(&resolved_source),
+                    self.symbol_table.display_type(&resolved_target),
+                ),
+                info.span,
+                &[info.span],
+            ))
+        }
     }
 }

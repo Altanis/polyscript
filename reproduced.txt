@@ -38,6 +38,10 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+    TypeCast {
+        expr: BoxedAstNode,
+        target_type: BoxedAstNode,
+    },
 
     // A sequence of statements encapsulated by braces.
     Block(Vec<AstNode>),
@@ -340,6 +344,13 @@ impl AstNode {
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0)?;
                 write!(f, ")")?
+            }
+            AstNodeKind::TypeCast { expr, target_type } => {
+                write!(f, "{}(", indent_str)?;
+                expr.fmt_with_indent(f, 0)?;
+                write!(f, " {} ", "as".yellow())?;
+                target_type.fmt_with_indent(f, 0)?;
+                write!(f, ")")?;
             }
 
             AstNodeKind::Block(nodes) => {
@@ -866,7 +877,9 @@ impl AstNode {
 
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
-            }
+            },
+
+            TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
 
             Block(statements) => statements.iter_mut().collect(),
 
@@ -1725,6 +1738,11 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Mut),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            AS_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Operator(Operation::As),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,
@@ -2216,7 +2234,20 @@ impl Parser {
 
             self.advance();
 
-            if operator == Operation::FunctionCall {
+            if operator == Operation::As {
+                let target_type = self.parse_type()?;
+                
+                lhs = AstNode {
+                    span: lhs.span.set_end_from_span(target_type.span),
+                    kind: AstNodeKind::TypeCast {
+                        expr: boxed!(lhs),
+                        target_type: boxed!(target_type),
+                    },
+                    type_id: None,
+                    value_id: None,
+                    scope_id: None,
+                };
+            } else if operator == Operation::FunctionCall {
                 let mut arguments = vec![];
                 if self.peek().get_token_kind() != TokenKind::CloseParenthesis {
                     loop {
@@ -4412,7 +4443,8 @@ impl SemanticAnalyzer {
          * 4: Attributes symbols with unification variables (unresolved type symbols).
          * 5: Collects constraints on unification symbols.
          * 6: Resolves unification variables via a unification algorithm.
-         * 7: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
+         * 7: Determines if typecasts are valid (i.e. `enum -> int` is ok, `string -> float` not ok).
+         * 8: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
          */
 
         pass!(self, symbol_collector_pass, &mut program);
@@ -5913,6 +5945,24 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    fn collect_uv_type_cast(
+        &mut self,
+        uv_id: TypeSymbolId,
+        cast_expr: &mut BoxedAstNode,
+        target_type: &mut BoxedAstNode,
+        info: ConstraintInfo
+    ) -> Result<(), BoxedError> {
+        self.collect_uvs(cast_expr)?;
+
+        let resolved_target_type = self.collect_uvs(target_type)?;
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), resolved_target_type),
+            info,
+        );
+
+        Ok(())
+    }
+
     fn collect_uv_conditional_operation(
         &mut self,
         uv_id: TypeSymbolId,
@@ -6938,6 +6988,10 @@ impl SemanticAnalyzer {
                 right,
                 operator,
             } => self.collect_uv_binary_operation(uv_id, left, right, operator, info)?,
+            TypeCast {
+                expr,
+                target_type,
+            } => self.collect_uv_type_cast(uv_id, expr, target_type, info)?,
             ConditionalOperation { left, right, .. } => {
                 self.collect_uv_conditional_operation(uv_id, left, right, info)?
             }
@@ -7744,6 +7798,7 @@ pub enum ErrorKind {
         missing_fields: Vec<String>,
         extra_fields: Vec<String>,
     },
+    InvalidCast(String, String)
 }
 
 impl ErrorKind {
@@ -7838,7 +7893,8 @@ impl ErrorKind {
                     ));
                 }
                 message
-            }
+            },
+            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`")
         }
     }
 }
@@ -7973,6 +8029,7 @@ pub const PRIVATE_KEYWORD: &str = "private";
 pub const TRAIT_KEYWORD: &str = "trait";
 pub const TYPE_KEYWORD: &str = "type";
 pub const MUT_KEYWORD: &str = "mut";
+pub const AS_KEYWORD: &str = "as";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -8032,10 +8089,13 @@ pub enum Operation {
     FieldAccess,
     FunctionCall,
 
-    // POINTER OPS //
+    // POINTER OPS
     Dereference,
     ImmutableAddressOf,
     MutableAddressOf,
+
+    // CAST
+    As
 }
 
 impl Operation {
@@ -8135,6 +8195,7 @@ impl Operation {
 
             Operation::Exp => (12, 11),
 
+            Operation::As => (13, 14),
             Operation::Not | Operation::BitwiseNegate => (13, 14),
 
             Operation::FunctionCall => (14, 0),
@@ -8185,6 +8246,7 @@ impl Operation {
             Operation::ImmutableAddressOf => None,
             Operation::MutableAddressOf => None,
             Operation::Assign => None,
+            Operation::As => None
         }
     }
 
@@ -8205,7 +8267,7 @@ impl Operation {
 
                 Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Float => match self {
@@ -8220,7 +8282,7 @@ impl Operation {
 
                 Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf => None,
+                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Bool => match self {
@@ -8231,7 +8293,7 @@ impl Operation {
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
                 | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf => None,
+                | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             String => match self {
@@ -8242,7 +8304,7 @@ impl Operation {
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf => None,
+                | MutableAddressOf | As => None,
             },
 
             Char => match self {
@@ -8252,7 +8314,7 @@ impl Operation {
                 | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
                 | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
                 | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf => None,
+                | MutableAddressOf | As => None,
             },
 
             Void | Never => None,
@@ -8308,6 +8370,8 @@ impl std::fmt::Display for Operation {
             Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
             Operation::FunctionCall => "()".to_string(),
             Operation::MutableAddressOf => "&mut".to_string(),
+
+            Operation::As => AS_KEYWORD.to_string()
         };
 
         write!(f, "{}", s)
@@ -8366,7 +8430,7 @@ pub enum KeywordKind {
     This,
     Trait,
     Type,
-    Mut,
+    Mut
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -8575,7 +8639,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::This => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
-                KeywordKind::Type => "Keyword::Type".purple(),
+                KeywordKind::Type => "Keyword::Type".purple()
             },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

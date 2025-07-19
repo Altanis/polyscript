@@ -45,6 +45,7 @@ pub enum ErrorKind {
         missing_fields: Vec<String>,
         extra_fields: Vec<String>,
     },
+    InvalidCast(String, String)
 }
 
 impl ErrorKind {
@@ -139,7 +140,8 @@ impl ErrorKind {
                     ));
                 }
                 message
-            }
+            },
+            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`")
         }
     }
 }

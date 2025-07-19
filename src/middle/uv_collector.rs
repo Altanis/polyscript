@@ -123,15 +123,20 @@ impl SemanticAnalyzer {
     fn collect_uv_type_cast(
         &mut self,
         uv_id: TypeSymbolId,
-        cast_expr: &mut BoxedAstNode,
-        target_type: &mut BoxedAstNode,
-        info: ConstraintInfo
+        expression: &mut BoxedAstNode,
+        target_type_node: &mut BoxedAstNode,
+        info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        self.collect_uvs(cast_expr)?;
+        let source_type = self.collect_uvs(expression)?;
+        let target_type = self.collect_uvs(target_type_node)?;
 
-        let resolved_target_type = self.collect_uvs(target_type)?;
         self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), resolved_target_type),
+            Constraint::Equality(Type::new_base(uv_id), target_type.clone()),
+            info,
+        );
+
+        self.unification_context.register_constraint(
+            Constraint::Cast(source_type, target_type),
             info,
         );
 
