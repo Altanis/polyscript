@@ -45,7 +45,8 @@ pub enum ErrorKind {
         missing_fields: Vec<String>,
         extra_fields: Vec<String>,
     },
-    InvalidCast(String, String)
+    InvalidCast(String, String),
+    DuplicateSymbolsInInherentImpl(String, String)
 }
 
 impl ErrorKind {
@@ -141,7 +142,10 @@ impl ErrorKind {
                 }
                 message
             },
-            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`")
+            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`"),
+            ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
+                format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
+            }
         }
     }
 }

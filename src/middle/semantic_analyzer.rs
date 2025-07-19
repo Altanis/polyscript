@@ -964,8 +964,8 @@ impl SemanticAnalyzer {
          * 4: Attributes symbols with unification variables (unresolved type symbols).
          * 5: Collects constraints on unification symbols.
          * 6: Resolves unification variables via a unification algorithm.
-         * 7: Determines if typecasts are valid (i.e. `enum -> int` is ok, `string -> float` not ok).
-         * 8: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
+         * 7: Detects duplicate symbols across inherent impls.
+         * 8: Miscellaneous grammar checks.
          */
 
         pass!(self, symbol_collector_pass, &mut program);
@@ -973,6 +973,7 @@ impl SemanticAnalyzer {
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
+        pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
 
         Ok(program)

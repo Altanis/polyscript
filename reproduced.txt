@@ -3680,6 +3680,18 @@ impl TypeSymbol {
             _ => None
         }
     }
+
+    pub fn is_valid_cast(&self, other: &TypeSymbol) -> bool {
+        matches!((&self.kind, &other.kind), 
+            (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Float))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Float), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Float), TypeSymbolKind::Primitive(PrimitiveKind::Float))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Char), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+            | (TypeSymbolKind::Primitive(PrimitiveKind::Int), TypeSymbolKind::Primitive(PrimitiveKind::Char)) 
+            | (TypeSymbolKind::Enum(_), TypeSymbolKind::Primitive(PrimitiveKind::Int))
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -4343,6 +4355,8 @@ pub enum Constraint {
     InstanceMemberAccess(Type, Type, String),
     /// A type denotes a static member of a type, like an enum variant.
     StaticMemberAccess(Type, Type, String),
+    /// The initial type must be validly castable to the other.
+    Cast(Type, Type)
 }
 
 /// Additional information about a constraint.
@@ -4801,6 +4815,12 @@ impl Constraint {
                         self.t.display_type(base).bright_blue(),
                         m.green()
                     ),
+                    Cast(initial, r#final) => write!(
+                        f,
+                        "{} -> {}",
+                        self.t.display_type(initial).yellow(),
+                        self.t.display_type(r#final).yellow()
+                    )
                 }
             }
         }
@@ -5165,13 +5185,13 @@ impl SemanticAnalyzer {
         let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
 
         let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
-        // self.symbol_table.add_type_symbol(
-        //     "Self",
-        //     TypeSymbolKind::TypeAlias((None, None)),
-        //     vec![],
-        //     QualifierKind::Public,
-        //     None,
-        // )?;
+        self.symbol_table.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        )?;
 
         for const_node in constants {
             self.symbol_collector_check_node(const_node)?;
@@ -5948,15 +5968,20 @@ impl SemanticAnalyzer {
     fn collect_uv_type_cast(
         &mut self,
         uv_id: TypeSymbolId,
-        cast_expr: &mut BoxedAstNode,
-        target_type: &mut BoxedAstNode,
-        info: ConstraintInfo
+        expression: &mut BoxedAstNode,
+        target_type_node: &mut BoxedAstNode,
+        info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        self.collect_uvs(cast_expr)?;
+        let source_type = self.collect_uvs(expression)?;
+        let target_type = self.collect_uvs(target_type_node)?;
 
-        let resolved_target_type = self.collect_uvs(target_type)?;
         self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), resolved_target_type),
+            Constraint::Equality(Type::new_base(uv_id), target_type.clone()),
+            info,
+        );
+
+        self.unification_context.register_constraint(
+            Constraint::Cast(source_type, target_type),
             info,
         );
 
@@ -7107,7 +7132,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::AstNode,
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::QualifierKind},
 };
@@ -7404,6 +7429,7 @@ impl SemanticAnalyzer {
             },
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
             // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
             _ => unreachable!(),
         }
     }
@@ -7622,6 +7648,39 @@ impl SemanticAnalyzer {
 
         let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
 
+        if self.symbol_table.get_type_name(lhs_symbol.name_id) == "Self" {
+            let mut current_scope = self.symbol_table.get_scope(info.scope_id).unwrap();
+            let mut trait_scope_id = None;
+            
+            loop {
+                if current_scope.kind == ScopeKind::Trait {
+                    trait_scope_id = Some(current_scope.id);
+                    break;
+                }
+
+                if let Some(parent_id) = current_scope.parent {
+                    current_scope = self.symbol_table.get_scope(parent_id).unwrap();
+                } else {
+                    break;
+                }
+            }
+            
+            if let Some(trait_scope_id) = trait_scope_id {
+                if lhs_symbol.scope_id == trait_scope_id {
+                    if let Some(member_symbol) = self.symbol_table.find_type_symbol_from_scope(trait_scope_id, &rhs_name) {
+                        self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
+                        return Ok(true);
+                    }
+                    
+                    if let Some(member_symbol) = self.symbol_table.find_value_symbol_from_scope(trait_scope_id, &rhs_name).cloned() {
+                        let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
+                        self.unify(result_ty, member_type, info)?;
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
         let (inherent_impls, enum_scope_id) = match &lhs_symbol.kind {
             TypeSymbolKind::Struct((_, impls)) => (impls.clone(), None),
             TypeSymbolKind::Enum((scope_id, impls)) => (impls.clone(), Some(*scope_id)),
@@ -7747,6 +7806,31 @@ impl SemanticAnalyzer {
             info.span,
             &[info.span],
         ))
+    }
+
+    fn unify_cast(&mut self, source: Type, target: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+        let resolved_source = self.resolve_type(&source);
+        let resolved_target = self.resolve_type(&target);
+
+        if self.is_uv(resolved_source.get_base_symbol()) || self.is_uv(resolved_target.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let source_sym = self.symbol_table.get_type_symbol(resolved_source.get_base_symbol()).unwrap();
+        let target_sym = self.symbol_table.get_type_symbol(resolved_target.get_base_symbol()).unwrap();
+
+        if source_sym.is_valid_cast(target_sym) {
+            Ok(true)
+        } else {
+            Err(self.create_error(
+                ErrorKind::InvalidCast(
+                    self.symbol_table.display_type(&resolved_source),
+                    self.symbol_table.display_type(&resolved_target),
+                ),
+                info.span,
+                &[info.span],
+            ))
+        }
     }
 }
 

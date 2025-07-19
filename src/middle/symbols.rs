@@ -251,13 +251,13 @@ impl SemanticAnalyzer {
         let trait_scope_id = self.symbol_table.enter_scope(ScopeKind::Trait);
 
         let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
-        // self.symbol_table.add_type_symbol(
-        //     "Self",
-        //     TypeSymbolKind::TypeAlias((None, None)),
-        //     vec![],
-        //     QualifierKind::Public,
-        //     None,
-        // )?;
+        self.symbol_table.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        )?;
 
         for const_node in constants {
             self.symbol_collector_check_node(const_node)?;

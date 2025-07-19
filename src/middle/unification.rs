@@ -1,12 +1,100 @@
 use std::collections::HashMap;
 
 use crate::{
-    frontend::ast::AstNode,
+    frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
-    utils::{error::{BoxedError, Error, ErrorKind}, kind::QualifierKind},
+    utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
+
+impl SemanticAnalyzer {
+    pub fn inherent_impl_deduplication_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                errors.append(&mut self.inherent_impl_deduplication_check_node(statement));
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+    
+    fn inherent_impl_deduplication_check_node(&mut self, statement: &mut AstNode) -> Vec<Error> {
+        match &statement.kind {
+            AstNodeKind::StructDeclaration { name, .. } 
+                => self.inherent_impl_deduplication_handle_struct(name, statement.scope_id.unwrap()),
+            AstNodeKind::EnumDeclaration { name, .. } 
+                => self.inherent_impl_deduplication_handle_enum(name, statement.scope_id.unwrap()),
+            _ => {
+                let mut errors = vec![];
+
+                for node in statement.children_mut() {
+                    errors.append(&mut self.inherent_impl_deduplication_check_node(node));
+                }
+
+                errors
+            }
+        }
+    }
+
+    fn inherent_impl_deduplication_handle_struct(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let TypeSymbolKind::Struct((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
+
+        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+    }
+
+    fn inherent_impl_deduplication_handle_enum(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let TypeSymbolKind::Enum((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
+
+        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+    }
+
+    fn inherent_impl_deduplication_find_duplicates(&self, namespace: &str, inherent_impls: &[InherentImpl]) -> Vec<Error> {
+        let mut errors = vec![];
+
+        let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
+
+        for inherent_impl in inherent_impls.iter() {
+            let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
+
+            for (&value_name_id, &value_symbol_id) in scope.values.iter() {
+                let value_name = self.symbol_table.get_value_name(value_name_id);
+                let value_span = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span.unwrap();
+
+                symbols.entry(value_name.to_string()).or_default().push(value_span);
+            }
+
+            for (&type_name_id, &type_symbol_id) in scope.types.iter() {
+                let type_name = self.symbol_table.get_type_name(type_name_id);
+                let type_span = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span;
+                
+                if let Some(type_span) = type_span { // `Self` has no span, so we ignore it.
+                    symbols.entry(type_name.to_string()).or_default().push(type_span);
+                }
+            }
+        }
+
+        for (name, spans) in symbols.iter() {
+            if spans.len() != 1 {
+                errors.push(*self.create_error(
+                    ErrorKind::DuplicateSymbolsInInherentImpl(name.to_string(), namespace.to_string()),
+                    spans[0], 
+                    &spans[0..spans.len()]
+                ))
+            }
+        }
+        
+        errors
+    }
+}
 
 impl SemanticAnalyzer {
     fn is_uv(&self, symbol_id: TypeSymbolId) -> bool {
@@ -15,9 +103,7 @@ impl SemanticAnalyzer {
             TypeSymbolKind::UnificationVariable(_)
         )
     }
-}
 
-impl SemanticAnalyzer {
     /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
     ///
     /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
@@ -518,6 +604,39 @@ impl SemanticAnalyzer {
         }
 
         let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
+
+        if self.symbol_table.get_type_name(lhs_symbol.name_id) == "Self" {
+            let mut current_scope = self.symbol_table.get_scope(info.scope_id).unwrap();
+            let mut trait_scope_id = None;
+            
+            loop {
+                if current_scope.kind == ScopeKind::Trait {
+                    trait_scope_id = Some(current_scope.id);
+                    break;
+                }
+
+                if let Some(parent_id) = current_scope.parent {
+                    current_scope = self.symbol_table.get_scope(parent_id).unwrap();
+                } else {
+                    break;
+                }
+            }
+            
+            if let Some(trait_scope_id) = trait_scope_id {
+                if lhs_symbol.scope_id == trait_scope_id {
+                    if let Some(member_symbol) = self.symbol_table.find_type_symbol_from_scope(trait_scope_id, &rhs_name) {
+                        self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
+                        return Ok(true);
+                    }
+                    
+                    if let Some(member_symbol) = self.symbol_table.find_value_symbol_from_scope(trait_scope_id, &rhs_name).cloned() {
+                        let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
+                        self.unify(result_ty, member_type, info)?;
+                        return Ok(true);
+                    }
+                }
+            }
+        }
 
         let (inherent_impls, enum_scope_id) = match &lhs_symbol.kind {
             TypeSymbolKind::Struct((_, impls)) => (impls.clone(), None),
