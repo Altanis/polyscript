@@ -1,3 +1,7 @@
+trait Rah {
+    
+}
+
 struct Point<T> {
     x: T;
 }
@@ -8,7 +12,7 @@ impl<T> Point<T> {
     type t = int;
 }
 
-impl<U> Point<U> {
+impl<U: Rah> Point<U> {
     type t = int;
 }
 

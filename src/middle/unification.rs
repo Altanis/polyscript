@@ -79,9 +79,9 @@ impl SemanticAnalyzer {
                 .iter()
                 .map(|&spec_id| {
                     if let Some(&generic_index) = generic_map.get(&spec_id) {
-                        CanonicalType::Generic(generic_index)
+                        CanonicalType::Generic(generic_index + 1)
                     } else {
-                        CanonicalType::Concrete(spec_id + 1)
+                        CanonicalType::Concrete(spec_id)
                     }
                 })
                 .collect();
