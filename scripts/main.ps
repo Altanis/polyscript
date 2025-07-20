@@ -1,9 +1,16 @@
-struct Dog {}
-
-impl Dog {
-    const X : int = 3;
-    fn x() {}
+struct Point<T> {
+    x: T;
 }
 
-let dog = Dog {};
-let x = Dog.X;
+type GridPoint = Point<int>;
+
+impl Point<int> {
+    const DIMENSIONS: int = 1;
+}
+
+impl Point<float> {
+    const DIMENSIONS: int = 1;
+}
+
+let point: GridPoint = Point { x: 3 };
+let dimensions = Point.DIMENSIONS;

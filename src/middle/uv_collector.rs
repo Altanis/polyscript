@@ -673,7 +673,7 @@ impl SemanticAnalyzer {
             let expr_uv = self.collect_uvs(field_expr)?;
 
             let field_type = self.symbol_table
-                .find_value_symbol_from_scope(struct_scope_id, field_name)
+                .find_value_symbol_in_scope(field_name, struct_scope_id)
                 .ok_or_else(|| self.create_error(
                     ErrorKind::InvalidField(name.to_string(), field_name.to_string()), 
                     field_expr.span,
@@ -879,7 +879,7 @@ impl SemanticAnalyzer {
 
         let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self
             .symbol_table
-            .find_type_symbol_from_scope(impl_scope.id, "Self")
+            .find_type_symbol_in_scope("Self", impl_scope.id)
             .ok_or_else(|| self.create_error(ErrorKind::SelfOutsideImpl, span, &[span]))?
             .kind
         else {
@@ -945,10 +945,18 @@ impl SemanticAnalyzer {
             .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
         if let AstNodeKind::Identifier(left_name) = &left.kind {
-            if let Some(type_symbol) = self
-                .symbol_table
-                .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
-            {
+            if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
+                let left_type = self.collect_uvs(left)?;
+                
+                self.unification_context.register_constraint(
+                    Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
+                    info,
+                );
+
+                return Ok(());
+            }
+
+            if let Some(type_symbol) = self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), left_name) {
                 let static_type = Type::new_base(type_symbol.id);
                 left.type_id = Some(static_type.clone());
 

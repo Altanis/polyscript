@@ -1,5 +1,5 @@
 use crate::{
-    middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId},
+    middle::semantic_analyzer::{ScopeId, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -198,38 +198,6 @@ pub struct AstNode {
 pub type BoxedAstNode = Box<AstNode>;
 
 impl AstNode {
-    pub fn get_value_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_value_symbol(id);
-        }
-
-        None
-    }
-
-    pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_value_symbol_mut(id);
-        }
-
-        None
-    }
-
-    pub fn get_type_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_type_symbol(id);
-        }
-
-        None
-    }
-
-    pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_type_symbol_mut(id);
-        }
-
-        None
-    }
-
     pub fn get_name(&self) -> Option<String> {
         match &self.kind {
             AstNodeKind::Identifier(name) => Some(name.clone()),
@@ -1031,16 +999,20 @@ impl AstNode {
 
             ImplDeclaration {
                 generic_parameters,
+                trait_node,
                 type_reference,
                 associated_constants,
                 associated_functions,
-                associated_types,
-                ..
+                associated_types
             } => {
                 let mut children = vec![];
 
                 for gp in generic_parameters.iter_mut() {
                     children.push(gp);
+                }
+
+                if let Some(tn) = trait_node.as_mut() {
+                    children.push(tn.as_mut());
                 }
 
                 children.push(type_reference.as_mut());

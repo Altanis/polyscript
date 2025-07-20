@@ -65,8 +65,8 @@ impl SemanticAnalyzer {
             TypeDeclaration {
                 name,
                 generic_parameters,
-                ..
-            } => self.collect_type_symbols(name, generic_parameters, node.span),
+                value
+            } => self.collect_type_symbols(name, generic_parameters, value, node.span),
             Block(_) => self.collect_block_symbols(node),
             _ => {
                 for child in node.children_mut() {
@@ -393,6 +393,7 @@ impl SemanticAnalyzer {
         &mut self,
         name: &str,
         generic_parameters: &mut [AstNode],
+        value: &mut BoxedAstNode,
         span: Span,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         let (scope_id, generics) = if !generic_parameters.is_empty() {
@@ -404,6 +405,8 @@ impl SemanticAnalyzer {
         } else {
             (None, vec![])
         };
+
+        self.symbol_collector_check_node(value)?;
 
         let type_id = self.symbol_table.add_type_symbol(
             name,

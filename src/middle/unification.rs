@@ -42,7 +42,7 @@ impl SemanticAnalyzer {
     }
 
     fn inherent_impl_deduplication_handle_struct(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
-        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
         let name = self.symbol_table.get_type_name(symbol.name_id);
         let TypeSymbolKind::Struct((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
 
@@ -50,7 +50,7 @@ impl SemanticAnalyzer {
     }
 
     fn inherent_impl_deduplication_handle_enum(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
-        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
         let name = self.symbol_table.get_type_name(symbol.name_id);
         let TypeSymbolKind::Enum((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
 
@@ -170,7 +170,7 @@ impl SemanticAnalyzer {
                         let signature_name = format!("#fn_sig_specialized_{}_{}", base_symbol.id, specialization_key);
                         
                         let specialized_sig_id = if let Some(symbol) =
-                            self.symbol_table.find_type_symbol_from_scope(base_symbol.scope_id, &signature_name)
+                            self.symbol_table.find_type_symbol_in_scope(&signature_name, base_symbol.scope_id)
                         {
                             symbol.id
                         } else {
@@ -661,12 +661,12 @@ impl SemanticAnalyzer {
             
             if let Some(trait_scope_id) = trait_scope_id {
                 if lhs_symbol.scope_id == trait_scope_id {
-                    if let Some(member_symbol) = self.symbol_table.find_type_symbol_from_scope(trait_scope_id, &rhs_name) {
+                    if let Some(member_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_scope_id) {
                         self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
                         return Ok(true);
                     }
                     
-                    if let Some(member_symbol) = self.symbol_table.find_value_symbol_from_scope(trait_scope_id, &rhs_name).cloned() {
+                    if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
                         let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
                         self.unify(result_ty, member_type, info)?;
                         return Ok(true);
