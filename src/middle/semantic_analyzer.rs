@@ -8,6 +8,7 @@ use std::{
     rc::Rc,
 };
 use strum::IntoEnumIterator;
+use rustc_hash::FxHashMap;
 
 pub type ScopeId = usize;
 pub type ValueNameId = usize;
@@ -18,8 +19,8 @@ pub type TypeSymbolId = usize;
 /// A lookup table that maps Strings to numbers.
 #[derive(Default, Debug)]
 pub struct NameInterner {
-    map: HashMap<String, usize>,
-    vec: Vec<String>,
+    map: FxHashMap<&'static str, usize>,
+    vec: Vec<Box<str>>,
 }
 
 impl NameInterner {
@@ -34,8 +35,14 @@ impl NameInterner {
         }
 
         let id = self.vec.len();
-        self.map.insert(s.to_string(), id);
-        self.vec.push(s.to_string());
+        let boxed = std::convert::Into::<Box<str>>::into(s);
+        let leaked = Box::leak::<'static>(boxed);
+
+        self.vec.push(unsafe {
+            Box::from_raw(leaked as *const str as *mut str) 
+        });
+
+        self.map.insert(leaked, id);
 
         id
     }
