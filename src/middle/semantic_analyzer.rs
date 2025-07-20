@@ -19,8 +19,8 @@ pub type TypeSymbolId = usize;
 /// A lookup table that maps Strings to numbers.
 #[derive(Default, Debug)]
 pub struct NameInterner {
-    map: FxHashMap<&'static str, usize>,
-    vec: Vec<Box<str>>,
+    map: FxHashMap<Rc<str>, usize>,
+    vec: Vec<Rc<str>>,
 }
 
 impl NameInterner {
@@ -35,14 +35,9 @@ impl NameInterner {
         }
 
         let id = self.vec.len();
-        let boxed = std::convert::Into::<Box<str>>::into(s);
-        let leaked = Box::leak::<'static>(boxed);
-
-        self.vec.push(unsafe {
-            Box::from_raw(leaked as *const str as *mut str) 
-        });
-
-        self.map.insert(leaked, id);
+        let rc: Rc<str> = Rc::from(s);
+        self.vec.push(rc.clone());
+        self.map.insert(rc, id);
 
         id
     }
