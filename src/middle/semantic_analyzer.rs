@@ -90,6 +90,7 @@ pub struct InherentImpl {
     pub scope_id: ScopeId,
     pub specialization: Vec<TypeSymbolId>,
     pub generic_params: Vec<TypeSymbolId>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -985,8 +986,8 @@ impl std::fmt::Display for InherentImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "InherentImpl(scope_id: {}, specialization: {:?}, generic_params: {:?})",
-            self.scope_id, self.specialization, self.generic_params
+            "InherentImpl(scope_id: {}, specialization: {:?}, generic_params: {:?}, span: {:?})",
+            self.scope_id, self.specialization, self.generic_params, self.span
         )
     }
 }

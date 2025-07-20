@@ -1,6 +1,6 @@
 // frontend/ast.rs
 use crate::{
-    middle::semantic_analyzer::{ScopeId, SymbolTable, Type, TypeSymbol, ValueSymbol, ValueSymbolId},
+    middle::semantic_analyzer::{ScopeId, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -199,38 +199,6 @@ pub struct AstNode {
 pub type BoxedAstNode = Box<AstNode>;
 
 impl AstNode {
-    pub fn get_value_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a ValueSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_value_symbol(id);
-        }
-
-        None
-    }
-
-    pub fn get_value_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut ValueSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_value_symbol_mut(id);
-        }
-
-        None
-    }
-
-    pub fn get_type_symbol<'a>(&self, symbol_table: &'a SymbolTable) -> Option<&'a TypeSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_type_symbol(id);
-        }
-
-        None
-    }
-
-    pub fn get_type_symbol_mut<'a>(&self, symbol_table: &'a mut SymbolTable) -> Option<&'a mut TypeSymbol> {
-        if let Some(id) = self.value_id {
-            return symbol_table.get_type_symbol_mut(id);
-        }
-
-        None
-    }
-
     pub fn get_name(&self) -> Option<String> {
         match &self.kind {
             AstNodeKind::Identifier(name) => Some(name.clone()),
@@ -1032,16 +1000,20 @@ impl AstNode {
 
             ImplDeclaration {
                 generic_parameters,
+                trait_node,
                 type_reference,
                 associated_constants,
                 associated_functions,
-                associated_types,
-                ..
+                associated_types
             } => {
                 let mut children = vec![];
 
                 for gp in generic_parameters.iter_mut() {
                     children.push(gp);
+                }
+
+                if let Some(tn) = trait_node.as_mut() {
+                    children.push(tn.as_mut());
                 }
 
                 children.push(type_reference.as_mut());
@@ -3500,6 +3472,7 @@ use std::{
     rc::Rc,
 };
 use strum::IntoEnumIterator;
+use rustc_hash::FxHashMap;
 
 pub type ScopeId = usize;
 pub type ValueNameId = usize;
@@ -3510,8 +3483,8 @@ pub type TypeSymbolId = usize;
 /// A lookup table that maps Strings to numbers.
 #[derive(Default, Debug)]
 pub struct NameInterner {
-    map: HashMap<String, usize>,
-    vec: Vec<String>,
+    map: FxHashMap<Rc<str>, usize>,
+    vec: Vec<Rc<str>>,
 }
 
 impl NameInterner {
@@ -3526,8 +3499,9 @@ impl NameInterner {
         }
 
         let id = self.vec.len();
-        self.map.insert(s.to_string(), id);
-        self.vec.push(s.to_string());
+        let rc: Rc<str> = Rc::from(s);
+        self.vec.push(rc.clone());
+        self.map.insert(rc, id);
 
         id
     }
@@ -4998,8 +4972,8 @@ impl SemanticAnalyzer {
             TypeDeclaration {
                 name,
                 generic_parameters,
-                ..
-            } => self.collect_type_symbols(name, generic_parameters, node.span),
+                value
+            } => self.collect_type_symbols(name, generic_parameters, value, node.span),
             Block(_) => self.collect_block_symbols(node),
             _ => {
                 for child in node.children_mut() {
@@ -5326,6 +5300,7 @@ impl SemanticAnalyzer {
         &mut self,
         name: &str,
         generic_parameters: &mut [AstNode],
+        value: &mut BoxedAstNode,
         span: Span,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         let (scope_id, generics) = if !generic_parameters.is_empty() {
@@ -5337,6 +5312,8 @@ impl SemanticAnalyzer {
         } else {
             (None, vec![])
         };
+
+        self.symbol_collector_check_node(value)?;
 
         let type_id = self.symbol_table.add_type_symbol(
             name,

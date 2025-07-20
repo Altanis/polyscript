@@ -749,6 +749,7 @@ impl SemanticAnalyzer {
                 scope_id: impl_scope_id,
                 specialization,
                 generic_params: impl_generic_param_ids,
+                span: node.span,
             };
 
             let invalid_impl_error = self.create_error(

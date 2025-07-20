@@ -8,6 +8,13 @@ use crate::{
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
 
+// https://rustc-dev-guide.rust-lang.org/solve/canonicalization.html
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+enum CanonicalType {
+    Concrete(TypeSymbolId),
+    Generic(usize),
+}
+
 impl SemanticAnalyzer {
     pub fn inherent_impl_deduplication_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
@@ -43,52 +50,96 @@ impl SemanticAnalyzer {
 
     fn inherent_impl_deduplication_handle_struct(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
         let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
-        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let name = self.symbol_table.get_type_name(symbol.name_id).to_string();
         let TypeSymbolKind::Struct((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
 
-        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+        self.inherent_impl_deduplication_find_duplicates(&name, inherent_impls)
     }
 
     fn inherent_impl_deduplication_handle_enum(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
         let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
-        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let name = self.symbol_table.get_type_name(symbol.name_id).to_string();
         let TypeSymbolKind::Enum((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
 
-        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+        self.inherent_impl_deduplication_find_duplicates(&name, inherent_impls)
     }
 
     fn inherent_impl_deduplication_find_duplicates(&self, namespace: &str, inherent_impls: &[InherentImpl]) -> Vec<Error> {
         let mut errors = vec![];
-
-        let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
+        let mut impls_by_canonical_spec: HashMap<Vec<CanonicalType>, Vec<&InherentImpl>> = HashMap::new();
 
         for inherent_impl in inherent_impls.iter() {
-            let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
-
-            for (&value_name_id, &value_symbol_id) in scope.values.iter() {
-                let value_name = self.symbol_table.get_value_name(value_name_id);
-                let value_span = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span.unwrap();
-
-                symbols.entry(value_name.to_string()).or_default().push(value_span);
-            }
-
-            for (&type_name_id, &type_symbol_id) in scope.types.iter() {
-                let type_name = self.symbol_table.get_type_name(type_name_id);
-                let type_span = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span;
-                
-                if let Some(type_span) = type_span { // `Self` has no span, so we ignore it.
-                    symbols.entry(type_name.to_string()).or_default().push(type_span);
-                }
-            }
+            let generic_map: HashMap<TypeSymbolId, usize> = inherent_impl.generic_params
+                .iter()
+                .enumerate()
+                .map(|(i, &id)| (id, i))
+                .collect();
+            
+            let canonical_spec: Vec<CanonicalType> = inherent_impl.specialization
+                .iter()
+                .map(|&spec_id| {
+                    if let Some(&generic_index) = generic_map.get(&spec_id) {
+                        CanonicalType::Generic(generic_index)
+                    } else {
+                        CanonicalType::Concrete(spec_id)
+                    }
+                })
+                .collect();
+            
+            impls_by_canonical_spec.entry(canonical_spec)
+                .or_default()
+                .push(inherent_impl);
         }
 
-        for (name, spans) in symbols.iter() {
-            if spans.len() != 1 {
-                errors.push(*self.create_error(
-                    ErrorKind::DuplicateSymbolsInInherentImpl(name.to_string(), namespace.to_string()),
-                    spans[0], 
-                    &spans[0..spans.len()]
-                ))
+        for (canonical_spec, impls) in impls_by_canonical_spec.iter() {
+            let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
+
+            for inherent_impl in impls.iter() {
+                let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
+
+                for (&value_name_id, &value_symbol_id) in scope.values.iter() {
+                    let value_name = self.symbol_table.get_value_name(value_name_id);
+                    let value_span = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span.unwrap();
+
+                    symbols.entry(value_name.to_string()).or_default().push(value_span);
+                }
+
+                for (&type_name_id, &type_symbol_id) in scope.types.iter() {
+                    let type_name = self.symbol_table.get_type_name(type_name_id);
+                    let type_span = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span;
+                    
+                    if let Some(type_span) = type_span {
+                        symbols.entry(type_name.to_string()).or_default().push(type_span);
+                    }
+                }
+            }
+
+            let spec_str = canonical_spec.iter().map(|ct| {
+                match ct {
+                    CanonicalType::Concrete(id) => {
+                        let symbol = self.symbol_table.get_type_symbol(*id).unwrap();
+                        self.symbol_table.get_type_name(symbol.name_id).to_string()
+                    },
+                    CanonicalType::Generic(i) => {
+                        format!("T{}", i)
+                    },
+                }
+            }).collect::<Vec<_>>().join(", ");
+            
+            let full_type_name = if spec_str.is_empty() {
+                namespace.to_string()
+            } else {
+                format!("{}<{}>", namespace, spec_str)
+            };
+
+            for (name, spans) in symbols.iter() {
+                if spans.len() > 1 {
+                     errors.push(*self.create_error(
+                        ErrorKind::DuplicateSymbolsInInherentImpl(name.to_string(), full_type_name.clone()),
+                        spans[0], 
+                        &spans[0..spans.len()]
+                    ))
+                }
             }
         }
         

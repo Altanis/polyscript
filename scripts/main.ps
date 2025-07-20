@@ -5,7 +5,8 @@ struct Point<T> {
 type GridPoint = Point<int>;
 
 impl Point<int> {
-    const DIMENSIONS: int = 1;
+    type dim = int;
+    fn dim() {}
 }
 
 impl Point<float> {
