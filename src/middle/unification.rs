@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -429,6 +429,169 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    /// Finds a member within an `impl` scope, checking if it matches the static/instance access type.
+    fn find_member_in_impl_scope(
+        &mut self,
+        scope_id: ScopeId,
+        member_name: &str,
+        is_static_access: bool,
+    ) -> Result<Option<Type>, BoxedError> {
+        if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
+            let symbol_type = value_symbol.type_id.as_ref().unwrap().clone();
+            
+            let is_match = match value_symbol.kind {
+                ValueSymbolKind::Function(_) => {
+                    let resolved_type = self.resolve_type(&symbol_type);
+                    if self.is_uv(resolved_type.get_base_symbol()) { 
+                        return Ok(None); 
+                    }
+    
+                    let fn_sig_symbol = self.symbol_table.get_type_symbol(resolved_type.get_base_symbol()).unwrap();
+                    if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
+                        is_static_access == instance.is_none()
+                    } else { 
+                        false 
+                    }
+                },
+                ValueSymbolKind::Variable => is_static_access,
+                _ => false
+            };
+            
+            if is_match {
+                return Ok(Some(symbol_type));
+            }
+        }
+        
+        if is_static_access {
+            if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id) {
+                return Ok(Some(Type::new_base(type_symbol.id)));
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Finds a member within a set of inherent `impl` blocks for a given type.
+    fn find_member_in_inherent_impls(
+        &mut self,
+        base_type: &Type,
+        impls: &[InherentImpl],
+        member_name: &str,
+        is_static_access: bool,
+    ) -> Result<Option<Type>, BoxedError> {
+        for imp in impls {
+            if let Some(substitutions) = self.check_impl_applicability(base_type, imp) {
+                if let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access)? {
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    return Ok(Some(concrete_member_type));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Finds a member within all applicable trait `impl` blocks for a given type.
+    fn find_member_in_trait_impls(
+        &mut self,
+        base_type: &Type,
+        member_name: &str,
+        is_static_access: bool,
+    ) -> Result<Option<Type>, BoxedError> {
+        let base_symbol_id = base_type.get_base_symbol();
+        
+        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
+            .filter_map(|impls_for_trait| impls_for_trait.get(&base_symbol_id))
+            .flatten()
+            .cloned().collect();
+    
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl) {
+                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access)? {
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    return Ok(Some(concrete_member_type));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Finds a member (field, method, etc.) for a given type.
+    fn find_member(
+        &mut self,
+        base_type: &Type,
+        member_name: &str,
+        is_static_access: bool,
+        info: ConstraintInfo,
+    ) -> Result<Option<Type>, BoxedError> {
+        let (base_symbol_id, concrete_args) = match base_type {
+            Type::Base { symbol, args } => (*symbol, args.clone()),
+            _ => return Err(self.create_error(ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(base_type)), info.span, &[info.span])),
+        };
+    
+        if self.is_uv(base_symbol_id) {
+            return Ok(None);
+        }
+    
+        let base_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap().clone();
+        
+        match &base_symbol.kind {
+            TypeSymbolKind::Struct((scope_id, impls)) => {
+                if !is_static_access {
+                    if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).cloned() {
+                        let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
+                        let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+                        return Ok(Some(concrete_field_type));
+                    }
+                }
+
+                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access)? {
+                    return Ok(Some(ty));
+                }
+            },
+            TypeSymbolKind::Enum((scope_id, impls)) => {
+                if is_static_access && self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).is_some() {
+                    return Ok(Some(base_type.clone()));
+                }
+
+                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access)? {
+                    return Ok(Some(ty));
+                }
+            },
+            TypeSymbolKind::Generic(trait_constraints) => {
+                for &trait_id in trait_constraints {
+                    let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                    let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
+        
+                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access)? {
+                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
+                        let substitutions = HashMap::from([(self_in_trait_id, base_type.clone())]);
+                        let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                        return Ok(Some(concrete_member_type));
+                    }
+                }
+            }
+            TypeSymbolKind::TraitSelf => {
+                if is_static_access {
+                    let trait_scope_id = base_symbol.scope_id;
+                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, true)? {
+                        return Ok(Some(member_type));
+                    }
+                }
+            }
+            _ => {}
+        }
+    
+        if let Some(ty) = self.find_member_in_trait_impls(base_type, member_name, is_static_access)? {
+            return Ok(Some(ty));
+        }
+    
+        Ok(None)
+    }
+}
+
+impl SemanticAnalyzer {
     pub fn unification_pass(&mut self, _program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
         let mut constraints = std::mem::take(&mut self.unification_context.constraints);
@@ -467,10 +630,10 @@ impl SemanticAnalyzer {
                 self.unify_method_call(instance_ty, callee_ty, params, return_ty, info)
             },
             Constraint::InstanceMemberAccess(result_ty, lhs_type, rhs_name) => {
-                self.unify_instance_member_access(result_ty, lhs_type, rhs_name, info)
+                self.unify_member_access(result_ty, lhs_type, rhs_name, false, info)
             },
             Constraint::StaticMemberAccess(result_ty, lhs_type, rhs_name) => {
-                self.unify_static_member_access(result_ty, lhs_type, rhs_name, info)
+                self.unify_member_access(result_ty, lhs_type, rhs_name, true, info)
             },
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
             // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
@@ -677,275 +840,42 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn unify_static_member_access(
+    /// Unifies a member access operation (static or instance).
+    fn unify_member_access(
         &mut self,
         result_ty: Type,
         lhs_type: Type,
         rhs_name: String,
+        is_static: bool,
         info: ConstraintInfo,
     ) -> Result<bool, BoxedError> {
-        let lhs_type = self.resolve_type(&lhs_type);
-        let lhs_type_id = lhs_type.get_base_symbol();
-
-        let base_lhs_type = match &lhs_type {
-            Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
-            _ => lhs_type.clone(),
+        let resolved_lhs = self.resolve_type(&lhs_type);
+    
+        let base_lhs_type = if !is_static {
+            match &resolved_lhs {
+                Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+                _ => resolved_lhs.clone(),
+            }
+        } else {
+            resolved_lhs.clone()
         };
-
-        if self.is_uv(lhs_type_id) {
+        
+        if self.is_uv(base_lhs_type.get_base_symbol()) {
             return Ok(false);
         }
-
-        let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
-
-        if lhs_symbol.kind == TypeSymbolKind::TraitSelf {
-            let trait_scope_id = lhs_symbol.scope_id;
-
-            if let Some(member_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_scope_id) {
-                self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
-                return Ok(true);
-            }
-            
-            if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
-                let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
-                self.unify(result_ty, member_type, info)?;
-                return Ok(true);
-            }
-        }
-
-        if let TypeSymbolKind::Generic(trait_constraints) = &lhs_symbol.kind {
-            for &trait_id in trait_constraints {
-                let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
-                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
-
-                if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
-                    let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
-
-                    let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
-                    let substitutions = HashMap::from([(self_in_trait_id, base_lhs_type.clone())]);
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    
-                    self.unify(result_ty, concrete_member_type, info)?;
-                    return Ok(true);
-                }
-            }
-        }
-
-        let (inherent_impls, enum_scope_id) = match &lhs_symbol.kind {
-            TypeSymbolKind::Struct((_, impls)) => (impls.clone(), None),
-            TypeSymbolKind::Enum((scope_id, impls)) => (impls.clone(), Some(*scope_id)),
-            _ => {
-                return Err(self.create_error(
-                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&lhs_type)),
-                    info.span,
-                    &[info.span],
-                ));
-            }
-        };
-
-        for imp in &inherent_impls {
-            if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id).cloned() {
-                let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                match &value_symbol.kind {
-                    ValueSymbolKind::Function(_) | ValueSymbolKind::Variable => {
-                        self.unify(result_ty, symbol_type, info)?;
-                        return Ok(true);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        for imp in &inherent_impls {
-            if let Some(assoc_type_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, imp.scope_id)
-            {
-                let aliased_type = self.resolve_type(&Type::new_base(assoc_type_symbol.id));
-                self.unify(result_ty, aliased_type, info)?;
-                return Ok(true);
-            }
-        }
-
-        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
-            .filter_map(|impls_for_trait| impls_for_trait.get(&lhs_symbol.id))
-            .flatten()
-            .cloned().collect();
-
-        for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(&lhs_type, &trait_impl) {
-                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
-                    let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-
-                    let specialized_type = self.apply_substitution(&symbol_type, &substitutions);
-
-                    self.unify(result_ty.clone(), specialized_type, info)?;
-
-                    return Ok(true);
-                }
-
-                if let Some(assoc_type_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
-                    let resolved_assoc_type = self.resolve_type(&Type::new_base(assoc_type_symbol.id));
-                    let specialized_type = self.apply_substitution(&resolved_assoc_type, &substitutions);
-
-                    self.unify(result_ty.clone(), specialized_type, info)?;
-
-                    return Ok(true);
-                }
-            }
-        }
-
-        if let Some(scope_id) = enum_scope_id {
-            if self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).is_some() {
-                self.unify(result_ty, lhs_type, info)?;
-                return Ok(true);
-            }
-        }
-
-        Err(self.create_error(
-            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
-            info.span,
-            &[info.span],
-        ))
-    }
-
-    fn unify_instance_member_access(
-        &mut self,
-        result_ty: Type,
-        lhs_type: Type,
-        rhs_name: String,
-        info: ConstraintInfo,
-    ) -> Result<bool, BoxedError> {
-        let lhs_type = self.resolve_type(&lhs_type);
-
-        let base_lhs_type = match &lhs_type {
-            Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
-            _ => lhs_type.clone(),
-        };
-
-        let (base_symbol_id, concrete_args) = match &base_lhs_type {
-            Type::Base { symbol, args } => (*symbol, args.clone()),
-            _ => {
-                return Err(self.create_error(
-                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&lhs_type)),
-                    info.span,
-                    &[info.span],
-                ));
-            }
-        };
-
-        if self.is_uv(base_symbol_id) {
-            return Ok(false);
-        }
-
-        let lhs_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap().clone();
-
-        if let TypeSymbolKind::Generic(trait_constraints) = &lhs_symbol.kind {
-            for &trait_id in trait_constraints {
-                let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
-                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
-
-                if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
-                    let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
-
-                    let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
-                    let substitutions = HashMap::from([(self_in_trait_id, base_lhs_type.clone())]);
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    
-                    self.unify(result_ty, concrete_member_type, info)?;
-                    return Ok(true);
-                }
-            }
-        }
-
-        let (struct_scope_id, inherent_impls) = match &lhs_symbol.kind {
-            TypeSymbolKind::Struct((scope_id, impls)) => (Some(*scope_id), impls.clone()),
-            TypeSymbolKind::Enum((_, impls)) => (None, impls.clone()),
-            _ => {
-                return Err(self.create_error(
-                    ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(&lhs_type)),
-                    info.span,
-                    &[info.span],
-                ));
-            }
-        };
-
-        if let Some(scope_id) = struct_scope_id {
-            if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).cloned()
-            {
-                let substitutions =
-                    self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
-                    
-                let concrete_field_type =
-                    self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
-
-                self.unify(result_ty, concrete_field_type, info)?;
-                return Ok(true);
-            }
-        }
-
-        for imp in &inherent_impls {
-            if let Some(substitutions) = self.check_impl_applicability(&base_lhs_type, imp) {
-                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id).cloned() {
-                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
-                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-
-                        if self.is_uv(symbol_type.get_base_symbol()) {
-                            return Ok(false);
-                        }
         
-                        let symbol_type_id = symbol_type.get_base_symbol();
-                        let fn_sig_symbol = self.symbol_table.get_type_symbol(symbol_type_id).unwrap();
-        
-                        if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
-                            if instance.is_some() {
-                                let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
-        
-                                self.unify(result_ty, specialized_fn_type, info)?;
-                                
-                                return Ok(true);
-                            }
-                        }
-                    }
-                }
-            }
+        let member_ty_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;
+    
+        if let Some(member_ty) = member_ty_opt {
+            self.unify(result_ty, member_ty, info)?;
+            Ok(true)
+        } else {
+            Err(self.create_error(
+                ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&base_lhs_type)),
+                info.span,
+                &[info.span],
+            ))
         }
-
-        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
-            .filter_map(|impls_for_trait| impls_for_trait.get(&base_symbol_id))
-            .flatten()
-            .cloned().collect();
-
-        for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(&base_lhs_type, &trait_impl) {
-                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
-                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
-                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-
-                        if self.is_uv(symbol_type.get_base_symbol()) {
-                            return Ok(false);
-                        }
-
-                        let symbol_type_id = symbol_type.get_base_symbol();
-                        let fn_sig_symbol = self.symbol_table.get_type_symbol(symbol_type_id).unwrap();
-
-                        if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
-                            if instance.is_some() {
-                                let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
-        
-                                self.unify(result_ty.clone(), specialized_fn_type, info)?;
-        
-                                return Ok(true);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(self.create_error(
-            ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&lhs_type)),
-            info.span,
-            &[info.span],
-        ))
     }
 
     fn unify_cast(&mut self, source: Type, target: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
