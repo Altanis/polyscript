@@ -795,7 +795,7 @@ impl SemanticAnalyzer {
         };
 
         if let Some(scope_id) = struct_scope_id {
-            if let Some(field_symbol) = self.symbol_table.find_value_symbol_from_scope(scope_id, &rhs_name).cloned()
+            if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).cloned()
             {
                 let substitutions =
                     self.create_generic_substitution_map(&lhs_symbol.generic_parameters, &concrete_args);
@@ -813,11 +813,23 @@ impl SemanticAnalyzer {
                 if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, imp.scope_id).cloned() {
                     if let ValueSymbolKind::Function(_) = value_symbol.kind {
                         let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                        let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
 
-                        self.unify(result_ty, specialized_fn_type, info)?;
-                        
-                        return Ok(true);
+                        if self.is_uv(symbol_type.get_base_symbol()) {
+                            return Ok(false);
+                        }
+        
+                        let symbol_type_id = symbol_type.get_base_symbol();
+                        let fn_sig_symbol = self.symbol_table.get_type_symbol(symbol_type_id).unwrap();
+        
+                        if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
+                            if instance.is_some() {
+                                let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
+        
+                                self.unify(result_ty, specialized_fn_type, info)?;
+                                
+                                return Ok(true);
+                            }
+                        }
                     }
                 }
             }
@@ -833,11 +845,23 @@ impl SemanticAnalyzer {
                 if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
                     if let ValueSymbolKind::Function(_) = value_symbol.kind {
                         let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
-                        let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
 
-                        self.unify(result_ty.clone(), specialized_fn_type, info)?;
+                        if self.is_uv(symbol_type.get_base_symbol()) {
+                            return Ok(false);
+                        }
 
-                        return Ok(true);
+                        let symbol_type_id = symbol_type.get_base_symbol();
+                        let fn_sig_symbol = self.symbol_table.get_type_symbol(symbol_type_id).unwrap();
+
+                        if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
+                            if instance.is_some() {
+                                let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
+        
+                                self.unify(result_ty.clone(), specialized_fn_type, info)?;
+        
+                                return Ok(true);
+                            }
+                        }
                     }
                 }
             }

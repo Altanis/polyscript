@@ -1,28 +1,9 @@
-trait Animal {
-    type SpeechEmission;
-
-    fn speak(&this): Self.SpeechEmission;
-}
-
 struct Dog {}
-struct Cat {}
 
-impl Animal for Dog {
-    type SpeechEmission = char;
-    fn speak(&this): Self.SpeechEmission {
-        return 'b';
-    }
-}
-
-impl Animal for Cat {
-    type SpeechEmission = string;
-    fn speak(&this): Self.SpeechEmission {
-        return "meow";
-    }
+impl Dog {
+    const X : int = 3;
+    fn x() {}
 }
 
 let dog = Dog {};
-let cat = Cat {};
-
-let emission1: Dog.SpeechEmission = dog.speak();
-//let emission2: Cat.SpeechEmission = <Cat as Animal>.speak(&cat);
+let x = Dog.X;
