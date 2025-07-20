@@ -914,21 +914,18 @@ impl SemanticAnalyzer {
             .find_type_symbol_from_scope(scope_id, "Self")
             .ok_or_else(|| self.create_error(ErrorKind::SelfOutsideImpl, span, &[span]))?;
 
-        if let TypeSymbolKind::TypeAlias((_, Some(concrete_type))) = &self_symbol.kind {
-            self.unification_context.register_constraint(
-                Constraint::Equality(
-                    Type::new_base(uv_id),
-                    match reference_kind {
-                        ReferenceKind::Value => concrete_type.clone(),
-                        ReferenceKind::Reference => Type::Reference(boxed!(concrete_type.clone())),
-                        ReferenceKind::MutableReference => {
-                            Type::MutableReference(boxed!(concrete_type.clone()))
-                        }
-                    },
-                ),
-                info,
-            );
-        }
+        let base_type = Type::new_base(self_symbol.id);
+
+        let final_type = match reference_kind {
+            ReferenceKind::Value => base_type,
+            ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
+            ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+        };
+
+        self.unification_context.register_constraint(
+            Constraint::Equality(Type::new_base(uv_id), final_type),
+            info,
+        );
 
         Ok(())
     }

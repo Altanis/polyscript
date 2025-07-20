@@ -687,41 +687,46 @@ impl SemanticAnalyzer {
         let lhs_type = self.resolve_type(&lhs_type);
         let lhs_type_id = lhs_type.get_base_symbol();
 
+        let base_lhs_type = match &lhs_type {
+            Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+            _ => lhs_type.clone(),
+        };
+
         if self.is_uv(lhs_type_id) {
             return Ok(false);
         }
 
         let lhs_symbol = self.symbol_table.get_type_symbol(lhs_type_id).unwrap().clone();
 
-        if self.symbol_table.get_type_name(lhs_symbol.name_id) == "Self" {
-            let mut current_scope = self.symbol_table.get_scope(info.scope_id).unwrap();
-            let mut trait_scope_id = None;
-            
-            loop {
-                if current_scope.kind == ScopeKind::Trait {
-                    trait_scope_id = Some(current_scope.id);
-                    break;
-                }
+        if lhs_symbol.kind == TypeSymbolKind::TraitSelf {
+            let trait_scope_id = lhs_symbol.scope_id;
 
-                if let Some(parent_id) = current_scope.parent {
-                    current_scope = self.symbol_table.get_scope(parent_id).unwrap();
-                } else {
-                    break;
-                }
+            if let Some(member_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_scope_id) {
+                self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
+                return Ok(true);
             }
             
-            if let Some(trait_scope_id) = trait_scope_id {
-                if lhs_symbol.scope_id == trait_scope_id {
-                    if let Some(member_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_scope_id) {
-                        self.unify(result_ty, Type::new_base(member_symbol.id), info)?;
-                        return Ok(true);
-                    }
+            if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
+                let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
+                self.unify(result_ty, member_type, info)?;
+                return Ok(true);
+            }
+        }
+
+        if let TypeSymbolKind::Generic(trait_constraints) = &lhs_symbol.kind {
+            for &trait_id in trait_constraints {
+                let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
+
+                if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
+                    let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
+
+                    let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
+                    let substitutions = HashMap::from([(self_in_trait_id, base_lhs_type.clone())]);
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                     
-                    if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
-                        let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
-                        self.unify(result_ty, member_type, info)?;
-                        return Ok(true);
-                    }
+                    self.unify(result_ty, concrete_member_type, info)?;
+                    return Ok(true);
                 }
             }
         }
@@ -832,6 +837,24 @@ impl SemanticAnalyzer {
         }
 
         let lhs_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap().clone();
+
+        if let TypeSymbolKind::Generic(trait_constraints) = &lhs_symbol.kind {
+            for &trait_id in trait_constraints {
+                let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
+
+                if let Some(member_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_scope_id).cloned() {
+                    let member_type = self.resolve_type(member_symbol.type_id.as_ref().unwrap());
+
+                    let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
+                    let substitutions = HashMap::from([(self_in_trait_id, base_lhs_type.clone())]);
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    
+                    self.unify(result_ty, concrete_member_type, info)?;
+                    return Ok(true);
+                }
+            }
+        }
 
         let (struct_scope_id, inherent_impls) = match &lhs_symbol.kind {
             TypeSymbolKind::Struct((scope_id, impls)) => (Some(*scope_id), impls.clone()),

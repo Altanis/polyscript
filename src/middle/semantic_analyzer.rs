@@ -85,7 +85,7 @@ impl PrimitiveKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InherentImpl {
     pub scope_id: ScopeId,
     pub specialization: Vec<TypeSymbolId>,
@@ -101,12 +101,13 @@ pub struct TraitImpl {
     pub type_specialization: Vec<TypeSymbolId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeSymbolKind {
     Primitive(PrimitiveKind),
     Enum((ScopeId, Vec<InherentImpl>)),
     Struct((ScopeId, Vec<InherentImpl>)),
     Trait(ScopeId),
+    TraitSelf,
     TypeAlias((Option<ScopeId>, Option<Type>)),
     FunctionSignature {
         params: Vec<Type>,
@@ -185,6 +186,9 @@ impl TypeSymbol {
         match (&self.kind, &other.kind) {
             (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
             (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
+
+            (_, TypeSymbolKind::TraitSelf) => Some(self.id),
+            (TypeSymbolKind::TraitSelf, _) => Some(other.id),
 
             _ => None
         }
@@ -1046,6 +1050,7 @@ impl SymbolTable {
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
                     TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
+                    TypeSymbolKind::TraitSelf => "Self".green(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature {
                         params, return_type, ..

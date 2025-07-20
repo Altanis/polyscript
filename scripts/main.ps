@@ -1,20 +1,32 @@
-trait Rah {
-    
+trait Animal {
+    type SpeechEmission;
+
+    fn speak(&this): Self.SpeechEmission;
 }
 
-struct Point<T> {
-    x: T;
+struct Dog {}
+struct Cat {}
+
+impl Animal for Dog {
+    type SpeechEmission = char;
+    fn speak(&this): Self.SpeechEmission {
+        return 'b';
+    }
 }
 
-type GridPoint = Point<int>;
-
-impl<T> Point<T> {
-    type t = int;
+impl Animal for Cat {
+    type SpeechEmission = string;
+    fn speak(&this): Self.SpeechEmission {
+        return "meow";
+    }
 }
 
-impl<U: Rah> Point<U> {
-    type t = int;
+impl Dog {
+    type SpeechEmission = float;
 }
 
-let point: GridPoint = Point { x: 3 };
-let dimensions = Point.DIMENSIONS;
+let dog = Dog {};
+let cat = Cat {};
+
+let emission1: Dog.SpeechEmission = dog.speak();
+//let emission2: Cat.SpeechEmission = <Cat as Animal>.speak(&cat);
