@@ -7325,9 +7325,14 @@ impl SemanticAnalyzer {
 
                         let substituted_return_type = self.apply_substitution(return_type, substitutions);
 
-                        let mut sorted_subs: Vec<_> = substitutions.iter().collect();
-                        sorted_subs.sort_by_key(|(k, _)| *k);
+                        let relevant_substitutions: HashMap<_, _> = substitutions
+                            .iter()
+                            .filter(|(k, _)| base_symbol.generic_parameters.contains(k))
+                            .collect();
 
+                        let mut sorted_subs: Vec<_> = relevant_substitutions.iter().collect();
+                        sorted_subs.sort_by_key(|(k, _)| **k);
+                        
                         let specialization_key = sorted_subs
                             .iter()
                             .map(|(k, v)| format!("{}-{}", k, v))
@@ -7541,6 +7546,40 @@ impl SemanticAnalyzer {
         }
         
         Some(substitutions)
+    }
+
+    /// Checks if a type implements a trait.
+    fn does_type_implement_trait(&mut self, ty: &Type, trait_id: TypeSymbolId) -> Result<bool, BoxedError> {
+        let resolved_type = self.resolve_type(ty);
+        if self.is_uv(resolved_type.get_base_symbol()) {
+            return Ok(false);
+        }
+    
+        let type_id = resolved_type.get_base_symbol();
+        let mut impls = vec![];
+        
+        if let Some(impls_for_trait) = self.trait_registry.register.get(&trait_id) {
+            if let Some(impls_for_type) = impls_for_trait.get(&type_id) {
+                for imp in impls_for_type {
+                    impls.push(imp.clone());
+                }
+            }
+        }
+
+        for imp in impls {
+            if self.check_trait_impl_applicability(&resolved_type, &imp).is_some() {
+                return Ok(true);
+            }
+        }
+        
+        let type_symbol = self.symbol_table.get_type_symbol(type_id).unwrap();
+        if let TypeSymbolKind::Generic(constraints) = &type_symbol.kind {
+            if constraints.contains(&trait_id) {
+                return Ok(true);
+            }
+        }
+        
+        Ok(false)
     }
 }
 
@@ -7768,27 +7807,65 @@ impl SemanticAnalyzer {
             (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
             (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
 
-            (Type::Base { symbol: s1, args: a1 }, Type::Base { symbol: s2, args: a2 }) => {
-                let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap();
-                let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap();
+            (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
+                let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
+                let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap().clone();
+                
+                if let Some(resultant_symbol) = type_sym_s1.unify(&type_sym_s2) {
+                    if a1.len() != a2.len() {
+                        return Err(self.type_mismatch_error(t1, t2, info, Some(format!("expected {} generic arguments, but found {}", a1.len(), a2.len()))));
+                    }
 
-                let resultant_symbol = type_sym_s1.unify(type_sym_s2)
-                    .ok_or_else(|| self.type_mismatch_error(&t1, &t2, info, None))?;
+                    let mut unified_args = vec![];
+                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                        unified_args.push(self.unify(arg1.clone(), arg2.clone(), info)?);
+                    }
 
-                if a1.len() != a2.len() {
-                    return Err(self.type_mismatch_error(&t1, &t2, info, Some(format!("expected {} generic arguments, but found {}", a1.len(), a2.len()))));
+                    return Ok(Type::Base {
+                        symbol: resultant_symbol,
+                        args: unified_args,
+                    });
                 }
 
-                let mut unified_args = vec![];
-                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    unified_args.push(self.unify(arg1.clone(), arg2.clone(), info)?);
+                if let TypeSymbolKind::Generic(constraints) = &type_sym_s1.kind {
+                    for &trait_id in constraints {
+                        if !self.does_type_implement_trait(t2, trait_id)? {
+                            let trait_name = self.symbol_table.get_type_name(
+                                self.symbol_table.get_type_symbol(trait_id).unwrap().name_id
+                            ).to_string();
+
+                            let type_name = self.symbol_table.display_type(t2);
+                            return Err(self.create_error(
+                                ErrorKind::UnimplementedTrait(trait_name, type_name), 
+                                info.span, 
+                                &[info.span])
+                            );
+                        }
+                    }
+
+                    return Ok(t2.clone());
+                } else if let TypeSymbolKind::Generic(constraints) = &type_sym_s2.kind {
+                    for &trait_id in constraints {
+                        if !self.does_type_implement_trait(t1, trait_id)? {
+                            let trait_name = self.symbol_table.get_type_name(
+                                self.symbol_table.get_type_symbol(trait_id).unwrap().name_id
+                            ).to_string();
+
+                            let type_name = self.symbol_table.display_type(t1);
+                            return Err(self.create_error(
+                                ErrorKind::UnimplementedTrait(trait_name, type_name), 
+                                info.span, 
+                                &[info.span])
+                            );
+                        }
+                    }
+
+                    return Ok(t1.clone());
                 }
 
-                Ok(Type::Base {
-                    symbol: resultant_symbol,
-                    args: unified_args,
-                })
+                Err(self.type_mismatch_error(t1, t2, info, None))
             },
+
             (Type::Reference(inner1), Type::Reference(inner2)) => {
                 let unified = self.unify(*inner1, *inner2, info)?;
                 Ok(Type::Reference(Box::new(unified)))
@@ -7914,7 +7991,10 @@ impl SemanticAnalyzer {
                 self.unify(arg.clone(), expected.clone(), info)?;
             }
 
-            self.unify_receiver(instance_ty, concrete_receiver, info)?;
+            if self.unify_receiver(instance_ty, concrete_receiver, info)?.is_none() {
+                return Ok(false);
+            }
+
             self.unify(return_ty, concrete_return, info)?;
 
             Ok(true)
@@ -7927,33 +8007,49 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn unify_receiver(&mut self, passed: Type, expected: Type, info: ConstraintInfo) -> Result<Type, BoxedError> {
-        let passed = self.resolve_type(&passed);
-        let expected = self.resolve_type(&expected);
+    fn unify_receiver(&mut self, passed: Type, expected: Type, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
+        let current_passed = self.resolve_type(&passed);
+        let resolved_expected = self.resolve_type(&expected);
 
-        if let Ok(unified) = self.unify(passed.clone(), expected.clone(), info) {
-            return Ok(unified);
+        if self.is_uv(current_passed.get_base_symbol()) || self.is_uv(resolved_expected.get_base_symbol()) {
+            return Ok(None);
         }
 
-        match (passed.clone(), expected.clone()) {
-            (p @ Type::Base { .. }, e @ Type::Reference(_)) => {
-                self.unify(Type::Reference(Box::new(p)), e, info)
-            },
-            (p @ Type::Base { .. }, e @ Type::MutableReference(_)) => {
-                self.unify(Type::MutableReference(Box::new(p)), e, info)
-            },
-            (Type::Reference(p_inner), e @ Type::Base { .. }) => self.unify(*p_inner, e, info),
-            (Type::MutableReference(p_inner), e @ Type::Base { .. }) => self.unify(*p_inner, e, info),
-            (Type::MutableReference(p_inner), e @ Type::Reference(_)) => {
-                self.unify(Type::Reference(p_inner), e, info)
-            },
-            _ => Err(self.type_mismatch_error(
-                &passed,
-                &expected,
-                info,
-                Some("receiver type mismatch".to_string()),
-            )),
+        // Direct substitution.
+        if let Ok(unified) = self.unify(current_passed.clone(), resolved_expected.clone(), info) {
+            return Ok(Some(unified));
         }
+
+        // `&mut T` -> `&T`
+        if let (Type::MutableReference(p_inner), Type::Reference(e_inner)) = (current_passed.clone(), resolved_expected.clone()) {
+            let unified_inner = self.unify(*p_inner, *e_inner, info)?;
+            return Ok(Some(Type::Reference(Box::new(unified_inner))));
+        }
+
+        // `&^n T` | `&^n mut T` -> `T`
+        let mut deref_passed = current_passed.clone();
+        while let Type::Reference(inner) | Type::MutableReference(inner) = deref_passed {
+            deref_passed = *inner;
+            if let Ok(unified) = self.unify(deref_passed.clone(), resolved_expected.clone(), info) {
+                return Ok(Some(unified));
+            }
+        }
+        
+        // `T` -> `&^n T` | `&^n mut T`
+        if let p @ Type::Base { .. } = current_passed.clone() {
+             match resolved_expected.clone() {
+                e @ Type::Reference(_) => return self.unify(Type::Reference(Box::new(p)), e, info).map(Some),
+                e @ Type::MutableReference(_) => return self.unify(Type::MutableReference(Box::new(p)), e, info).map(Some),
+                _ => {}
+            }
+        }
+
+        Err(self.type_mismatch_error(
+            &current_passed,
+            &resolved_expected,
+            info,
+            Some("receiver type mismatch".to_string()),
+        ))
     }
 
     /// Unifies a member access operation (static or instance).

@@ -868,6 +868,8 @@ pub enum Constraint {
     InstanceMemberAccess(Type, Type, String),
     /// A type denotes a static member of a type, like an enum variant.
     StaticMemberAccess(Type, Type, String),
+    /// A type denotes a fully qualified path access.
+    FullyQualifiedAccess(Type, Type, Option<Type>, String),
     /// The initial type must be validly castable to the other.
     Cast(Type, Type)
 }
@@ -1330,6 +1332,13 @@ impl Constraint {
                         self.t.display_type(base).bright_blue(),
                         m.green()
                     ),
+                    FullyQualifiedAccess(result, ty, tr, m) => {
+                        write!(f, "{} = <{}", self.t.display_type(result).yellow(), self.t.display_type(ty))?;
+                        if let Some(tr) = tr {
+                            write!(f, " as {}", self.t.display_type(tr))?;
+                        }
+                        write!(f, ">.{}", m.green())
+                    },
                     Cast(initial, r#final) => write!(
                         f,
                         "{} -> {}",

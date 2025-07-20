@@ -628,6 +628,39 @@ impl SemanticAnalyzer {
     
         Ok(None)
     }
+
+    /// Finds a member in a given trait implementation for a given type.
+    fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
+        let type_id = ty.get_base_symbol();
+        let trait_id = tr.get_base_symbol();
+
+        if self.is_uv(type_id) || self.is_uv(trait_id) {
+            return Ok(None);
+        }
+
+        let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+        if !matches!(trait_symbol.kind, TypeSymbolKind::Trait(_)) {
+            return Err(self.create_error(
+                ErrorKind::InvalidConstraint(self.symbol_table.display_type(tr)),
+                info.span,
+                &[info.span],
+            ));
+        }
+
+        let all_trait_impls: Vec<_> = self.trait_registry.register.get(&trait_id)
+            .and_then(|impls_for_trait| impls_for_trait.get(&type_id))
+            .map_or(vec![], |v| v.clone());
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl) {
+                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true)? {
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    return Ok(Some(concrete_member_type));
+                }
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl SemanticAnalyzer {
@@ -673,6 +706,9 @@ impl SemanticAnalyzer {
             },
             Constraint::StaticMemberAccess(result_ty, lhs_type, rhs_name) => {
                 self.unify_member_access(result_ty, lhs_type, rhs_name, true, info)
+            },
+            Constraint::FullyQualifiedAccess(result_ty, ty, tr_opt, member_name) => {
+                self.unify_fully_qualified_access(result_ty, ty, tr_opt, member_name, info)
             },
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
             // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
@@ -968,6 +1004,45 @@ impl SemanticAnalyzer {
         } else {
             Err(self.create_error(
                 ErrorKind::MemberNotFound(rhs_name, self.symbol_table.display_type(&base_lhs_type)),
+                info.span,
+                &[info.span],
+            ))
+        }
+    }
+
+    fn unify_fully_qualified_access(
+        &mut self,
+        result_ty: Type,
+        ty: Type,
+        tr_opt: Option<Type>,
+        member_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        let resolved_ty = self.resolve_type(&ty);
+        if self.is_uv(resolved_ty.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let member_ty_opt = if let Some(tr) = tr_opt {
+            let resolved_tr = self.resolve_type(&tr);
+            if self.is_uv(resolved_tr.get_base_symbol()) {
+                return Ok(false);
+            }
+
+            self.find_member_in_trait_impl(&resolved_ty, &resolved_tr, &member_name, info)?
+        } else {
+            self.find_member(&resolved_ty, &member_name, true, info)?
+        };
+
+        if let Some(member_ty) = member_ty_opt {
+            self.unify(result_ty, member_ty, info)?;
+
+            Ok(true)
+        } else {
+            let type_name = self.symbol_table.display_type(&resolved_ty);
+            
+            Err(self.create_error(
+                ErrorKind::MemberNotFound(member_name, type_name),
                 info.span,
                 &[info.span],
             ))

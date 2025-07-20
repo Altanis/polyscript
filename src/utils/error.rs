@@ -46,7 +46,8 @@ pub enum ErrorKind {
         extra_fields: Vec<String>,
     },
     InvalidCast(String, String),
-    DuplicateSymbolsInInherentImpl(String, String)
+    DuplicateSymbolsInInherentImpl(String, String),
+    InvalidPathQualifier
 }
 
 impl ErrorKind {
@@ -145,7 +146,8 @@ impl ErrorKind {
             ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`"),
             ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
                 format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
-            }
+            },
+            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string()
         }
     }
 }

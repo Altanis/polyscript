@@ -941,29 +941,49 @@ impl SemanticAnalyzer {
             .get_name()
             .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
-        if let AstNodeKind::Identifier(left_name) = &left.kind {
-            if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
-                let left_type = self.collect_uvs(left)?;
+        match &mut left.kind {
+            AstNodeKind::PathQualifier { ty, tr } => {
+                let type_val = self.collect_uvs(ty)?;
+                let trait_val = if let Some(trait_node) = tr {
+                    Some(self.collect_uvs(trait_node)?)
+                } else {
+                    None
+                };
                 
-                self.unification_context.register_constraint(
-                    Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
-                    info,
-                );
-
+                self.unification_context.register_constraint(Constraint::FullyQualifiedAccess(
+                    Type::new_base(uv_id),
+                    type_val,
+                    trait_val,
+                    right_name,
+                ), info);
+                
                 return Ok(());
-            }
+            },
+            AstNodeKind::Identifier(left_name) => {
+                if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
+                    let left_type = self.collect_uvs(left)?;
+                    
+                    self.unification_context.register_constraint(
+                        Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
+                        info,
+                    );
 
-            if let Some(type_symbol) = self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), left_name) {
-                let static_type = Type::new_base(type_symbol.id);
-                left.type_id = Some(static_type.clone());
+                    return Ok(());
+                }
 
-                self.unification_context.register_constraint(
-                    Constraint::StaticMemberAccess(Type::new_base(uv_id), static_type, right_name),
-                    info,
-                );
+                if let Some(type_symbol) = self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), left_name) {
+                    let static_type = Type::new_base(type_symbol.id);
+                    left.type_id = Some(static_type.clone());
 
-                return Ok(());
-            }
+                    self.unification_context.register_constraint(
+                        Constraint::StaticMemberAccess(Type::new_base(uv_id), static_type, right_name),
+                        info,
+                    );
+
+                    return Ok(());
+                }
+            },
+            _ => {}
         }
 
         let left_type = self.collect_uvs(left)?;
@@ -1220,7 +1240,10 @@ impl SemanticAnalyzer {
             FieldAccess { left, right } => self.collect_uv_field_access(uv_id, left, right, info)?,
             FunctionCall { function, arguments } => {
                 self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?
-            }
+            },
+            PathQualifier { .. } => {
+                return Err(self.create_error(ErrorKind::InvalidPathQualifier, expr.span, &[expr.span]))
+            },
             TypeReference {
                 type_name,
                 generic_types,

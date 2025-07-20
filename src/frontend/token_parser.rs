@@ -228,6 +228,21 @@ impl Parser {
         let span = self.create_span_from_current_token();
 
         match token.get_token_kind() {
+            TokenKind::Operator(Operation::LessThan) => {
+                return self.spanned_node(|parser| {
+                    parser.consume(TokenKind::Operator(Operation::LessThan))?;
+
+                    let ty = boxed!(parser.parse_type()?);
+                    let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
+                        Some(boxed!(parser.parse_type()?))
+                    } else {
+                        None
+                    };
+                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+
+                    Ok(AstNodeKind::PathQualifier { ty, tr })
+                })
+            },
             TokenKind::Operator(operator) => {
                 if !operator.is_unary() {
                     return Err(self.generate_error(
@@ -630,7 +645,7 @@ impl Parser {
                             reference_kind,
                         })
                     }
-                }
+                },
 
                 TokenKind::Keyword(KeywordKind::Int)
                 | TokenKind::Keyword(KeywordKind::Float)
@@ -644,7 +659,7 @@ impl Parser {
                         generic_types,
                         reference_kind,
                     })
-                }
+                },
                 TokenKind::Keyword(KeywordKind::Fn) => {
                     let mut params = vec![];
 
@@ -667,17 +682,54 @@ impl Parser {
                     }
 
                     Ok(AstNodeKind::FunctionPointer { params, return_type })
-                }
+                },
+                TokenKind::Operator(Operation::LessThan) => {
+                    let ty = boxed!(parser.parse_type()?);
+
+                    let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
+                        Some(boxed!(parser.parse_type()?))
+                    } else {
+                        None
+                    };
+
+                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+
+                    let kind = AstNodeKind::PathQualifier { ty, tr };
+
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
+                        parser.advance();
+                        let next = parser.consume(TokenKind::Identifier)?;
+
+                        Ok(AstNodeKind::FieldAccess {
+                            left: boxed!(AstNode {
+                                kind,
+                                span: type_reference.get_span(),
+                                value_id: None,
+                                scope_id: None,
+                                type_id: None
+                            }),
+                            right: boxed!(AstNode {
+                                kind: AstNodeKind::Identifier(next.get_value().to_string()),
+                                span: next.get_span(),
+                                value_id: None,
+                                scope_id: None,
+                                type_id: None
+                            }),
+                        })
+                    } else {
+                        Ok(kind)
+                    }
+                },
                 _ => {
                     let span = type_reference.get_span();
-                    return Err(parser.generate_error(
+                    Err(parser.generate_error(
                         ErrorKind::UnexpectedToken(
                             type_reference.get_value().to_string(),
                             format!("{}", type_reference.get_token_kind()),
                             "a type reference".to_string(),
                         ),
                         span,
-                    ));
+                    ))
                 }
             }
         })

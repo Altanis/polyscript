@@ -37,9 +37,14 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+
     TypeCast {
         expr: BoxedAstNode,
         target_type: BoxedAstNode,
+    },
+    PathQualifier {
+        ty: BoxedAstNode,
+        tr: Option<BoxedAstNode>,
     },
 
     // A sequence of statements encapsulated by braces.
@@ -318,6 +323,15 @@ impl AstNode {
                 write!(f, " {} ", "as".yellow())?;
                 target_type.fmt_with_indent(f, 0)?;
                 write!(f, ")")?;
+            },
+            AstNodeKind::PathQualifier { ty, tr } => {
+                write!(f, "{}{}", indent_str, "<".dimmed())?;
+                ty.fmt_with_indent(f, 0)?;
+                if let Some(tr_node) = tr {
+                    write!(f, " {} ", "as".yellow())?;
+                    tr_node.fmt_with_indent(f, 0)?;
+                }
+                write!(f, "{}", ">".dimmed())?;
             }
 
             AstNodeKind::Block(nodes) => {
@@ -847,6 +861,13 @@ impl AstNode {
             },
 
             TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
+            PathQualifier { ty, tr } => {
+                let mut children = vec![ty.as_mut()];
+                if let Some(trait_node) = tr.as_mut() {
+                    children.push(trait_node.as_mut());
+                }
+                children
+            },
 
             Block(statements) => statements.iter_mut().collect(),
 

@@ -52,6 +52,11 @@ impl SemanticAnalyzer {
                 generic_parameters,
             } => self.collect_struct_symbols(name, fields, generic_parameters, node.span),
             ImplDeclaration { .. } => Ok((None, None)),
+            PathQualifier { ty, tr } => {
+                self.symbol_collector_check_node(ty)?;
+                self.collect_optional_node(tr)?;
+                Ok((None, None))
+            },
             EnumDeclaration { name, variants } => self.collect_enum_symbols(name, variants, node.span),
             TraitDeclaration {
                 name,

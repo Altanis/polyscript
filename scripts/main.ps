@@ -1,4 +1,4 @@
-// todo: downcasting, trait constraints
+// todo: path qualifiers, fix spans
 
 struct Point<T> {
     x: T;
@@ -19,7 +19,7 @@ impl<T> Hash for Point<T> {
 }
 
 fn hasher<T: Hash>(x: &T) {
-    let y = x.hash();
+    let y: <T as Hash>.Output = x.hash();
 }
 
 let point: Point<int> = Point {
