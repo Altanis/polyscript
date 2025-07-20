@@ -1,8 +1,8 @@
-// todo: trait constraints, downcasting
+// todo: downcasting, trait constraints
 
-struct Point {
-    x: int;
-    y: int;
+struct Point<T> {
+    x: T;
+    y: T;
 }
 
 trait Hash {
@@ -10,13 +10,21 @@ trait Hash {
     fn hash(&this): Self.Output;
 }
 
-impl Hash for Point {
-    type Output = int;
+impl<T> Hash for Point<T> {
+    type Output = T;
+
     fn hash(&this): Self.Output {
-        return 3;
+        return this.x;
     }
 }
 
 fn hasher<T: Hash>(x: &T) {
     let y = x.hash();
 }
+
+let point: Point<int> = Point {
+    x: 3,
+    y: 3
+};
+
+let hash = hasher(&point);
