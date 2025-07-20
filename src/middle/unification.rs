@@ -209,9 +209,14 @@ impl SemanticAnalyzer {
 
                         let substituted_return_type = self.apply_substitution(return_type, substitutions);
 
-                        let mut sorted_subs: Vec<_> = substitutions.iter().collect();
-                        sorted_subs.sort_by_key(|(k, _)| *k);
+                        let relevant_substitutions: HashMap<_, _> = substitutions
+                            .iter()
+                            .filter(|(k, _)| base_symbol.generic_parameters.contains(k))
+                            .collect();
 
+                        let mut sorted_subs: Vec<_> = relevant_substitutions.iter().collect();
+                        sorted_subs.sort_by_key(|(k, _)| **k);
+                        
                         let specialization_key = sorted_subs
                             .iter()
                             .map(|(k, v)| format!("{}-{}", k, v))

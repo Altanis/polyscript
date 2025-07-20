@@ -1,32 +1,22 @@
-trait Animal {
-    type SpeechEmission;
+// todo: trait constraints, downcasting
 
-    fn speak(&this): Self.SpeechEmission;
+struct Point {
+    x: int;
+    y: int;
 }
 
-struct Dog {}
-struct Cat {}
+trait Hash {
+    type Output;
+    fn hash(&this): Self.Output;
+}
 
-impl Animal for Dog {
-    type SpeechEmission = char;
-    fn speak(&this): Self.SpeechEmission {
-        return 'b';
+impl Hash for Point {
+    type Output = int;
+    fn hash(&this): Self.Output {
+        return 3;
     }
 }
 
-impl Animal for Cat {
-    type SpeechEmission = string;
-    fn speak(&this): Self.SpeechEmission {
-        return "meow";
-    }
+fn hasher<T: Hash>(x: &T) {
+    let y = x.hash();
 }
-
-impl Dog {
-    type SpeechEmission = float;
-}
-
-let dog = Dog {};
-let cat = Cat {};
-
-let emission1: Dog.SpeechEmission = dog.speak();
-//let emission2: Cat.SpeechEmission = <Cat as Animal>.speak(&cat);
