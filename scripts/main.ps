@@ -1,8 +1,28 @@
-struct X {}
-impl X {
-    fn default() {}
+trait Animal {
+    type SpeechEmission;
+
+    fn speak(&this): Self.SpeechEmission;
 }
 
-impl X {
-    const default: int = 3;
+struct Dog {}
+struct Cat {}
+
+impl Animal for Dog {
+    type SpeechEmission = char;
+    fn speak(&this): Self.SpeechEmission {
+        return 'b';
+    }
 }
+
+impl Animal for Cat {
+    type SpeechEmission = string;
+    fn speak(&this): Self.SpeechEmission {
+        return "meow";
+    }
+}
+
+let dog = Dog {};
+let cat = Cat {};
+
+let emission1: Dog.SpeechEmission = dog.speak();
+//let emission2: Cat.SpeechEmission = <Cat as Animal>.speak(&cat);

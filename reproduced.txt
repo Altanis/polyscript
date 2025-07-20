@@ -3491,7 +3491,6 @@ impl Parser {
 
 
 // middle/semantic_analyzer.rs
-// middle/semantic_analyzer.rs
 use crate::{
     frontend::ast::AstNode,
     utils::{error::*, kind::*},
@@ -4457,8 +4456,8 @@ impl SemanticAnalyzer {
          * 4: Attributes symbols with unification variables (unresolved type symbols).
          * 5: Collects constraints on unification symbols.
          * 6: Resolves unification variables via a unification algorithm.
-         * 7: Determines if typecasts are valid (i.e. `enum -> int` is ok, `string -> float` not ok).
-         * 8: Miscellaneous grammar checks (ex. error on use of `break` outside of loop, checking if impls match traits, generic checks, etc.).
+         * 7: Detects duplicate symbols across inherent impls.
+         * 8: Miscellaneous grammar checks.
          */
 
         pass!(self, symbol_collector_pass, &mut program);
@@ -4466,6 +4465,7 @@ impl SemanticAnalyzer {
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
+        pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
 
         Ok(program)
@@ -5847,7 +5847,6 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-// middle/uv_collector.rs
 use crate::{
     boxed,
     frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
@@ -7130,12 +7129,100 @@ impl SemanticAnalyzer {
 use std::collections::HashMap;
 
 use crate::{
-    frontend::ast::AstNode,
+    frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
-    utils::{error::{BoxedError, Error, ErrorKind}, kind::QualifierKind},
+    utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
+
+impl SemanticAnalyzer {
+    pub fn inherent_impl_deduplication_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                errors.append(&mut self.inherent_impl_deduplication_check_node(statement));
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+    
+    fn inherent_impl_deduplication_check_node(&mut self, statement: &mut AstNode) -> Vec<Error> {
+        match &statement.kind {
+            AstNodeKind::StructDeclaration { name, .. } 
+                => self.inherent_impl_deduplication_handle_struct(name, statement.scope_id.unwrap()),
+            AstNodeKind::EnumDeclaration { name, .. } 
+                => self.inherent_impl_deduplication_handle_enum(name, statement.scope_id.unwrap()),
+            _ => {
+                let mut errors = vec![];
+
+                for node in statement.children_mut() {
+                    errors.append(&mut self.inherent_impl_deduplication_check_node(node));
+                }
+
+                errors
+            }
+        }
+    }
+
+    fn inherent_impl_deduplication_handle_struct(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let TypeSymbolKind::Struct((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
+
+        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+    }
+
+    fn inherent_impl_deduplication_handle_enum(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name).unwrap();
+        let name = self.symbol_table.get_type_name(symbol.name_id);
+        let TypeSymbolKind::Enum((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
+
+        self.inherent_impl_deduplication_find_duplicates(name, inherent_impls)
+    }
+
+    fn inherent_impl_deduplication_find_duplicates(&self, namespace: &str, inherent_impls: &[InherentImpl]) -> Vec<Error> {
+        let mut errors = vec![];
+
+        let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
+
+        for inherent_impl in inherent_impls.iter() {
+            let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
+
+            for (&value_name_id, &value_symbol_id) in scope.values.iter() {
+                let value_name = self.symbol_table.get_value_name(value_name_id);
+                let value_span = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span.unwrap();
+
+                symbols.entry(value_name.to_string()).or_default().push(value_span);
+            }
+
+            for (&type_name_id, &type_symbol_id) in scope.types.iter() {
+                let type_name = self.symbol_table.get_type_name(type_name_id);
+                let type_span = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span;
+                
+                if let Some(type_span) = type_span { // `Self` has no span, so we ignore it.
+                    symbols.entry(type_name.to_string()).or_default().push(type_span);
+                }
+            }
+        }
+
+        for (name, spans) in symbols.iter() {
+            if spans.len() != 1 {
+                errors.push(*self.create_error(
+                    ErrorKind::DuplicateSymbolsInInherentImpl(name.to_string(), namespace.to_string()),
+                    spans[0], 
+                    &spans[0..spans.len()]
+                ))
+            }
+        }
+        
+        errors
+    }
+}
 
 impl SemanticAnalyzer {
     fn is_uv(&self, symbol_id: TypeSymbolId) -> bool {
@@ -7144,9 +7231,7 @@ impl SemanticAnalyzer {
             TypeSymbolKind::UnificationVariable(_)
         )
     }
-}
 
-impl SemanticAnalyzer {
     /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
     ///
     /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
@@ -7379,6 +7464,43 @@ impl SemanticAnalyzer {
             }
         }
 
+        Some(substitutions)
+    }
+
+    fn check_trait_impl_applicability(
+        &mut self,
+        instance_type: &Type,
+        imp: &TraitImpl,
+    ) -> Option<HashMap<TypeSymbolId, Type>> {
+        let instance_args = if let Type::Base { args, .. } = instance_type {
+            args
+        } else {
+            return None; // instance type is not a base type
+        };
+
+        let impl_target_arg_ids = &imp.type_specialization;
+
+        if instance_args.len() != impl_target_arg_ids.len() {
+            return None; // arity mismatch
+        }
+
+        let mut substitutions = HashMap::new();
+
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+            let target_symbol = self.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+            if imp.impl_generic_params.contains(&target_symbol.id) {
+                substitutions.insert(target_symbol.id, instance_arg.clone());
+            } else {
+                let resolved_instance_arg = self.resolve_type(instance_arg);
+                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
+
+                if resolved_instance_arg != resolved_impl_arg {
+                    return None;
+                }
+            }
+        }
+        
         Some(substitutions)
     }
 }
@@ -7715,6 +7837,34 @@ impl SemanticAnalyzer {
             }
         }
 
+        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
+            .filter_map(|impls_for_trait| impls_for_trait.get(&lhs_symbol.id))
+            .flatten()
+            .cloned().collect();
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(&lhs_type, &trait_impl) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
+
+                    let specialized_type = self.apply_substitution(&symbol_type, &substitutions);
+
+                    self.unify(result_ty.clone(), specialized_type, info)?;
+
+                    return Ok(true);
+                }
+
+                if let Some(assoc_type_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    let resolved_assoc_type = self.resolve_type(&Type::new_base(assoc_type_symbol.id));
+                    let specialized_type = self.apply_substitution(&resolved_assoc_type, &substitutions);
+
+                    self.unify(result_ty.clone(), specialized_type, info)?;
+
+                    return Ok(true);
+                }
+            }
+        }
+
         if let Some(scope_id) = enum_scope_id {
             if self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).is_some() {
                 self.unify(result_ty, lhs_type, info)?;
@@ -7795,6 +7945,26 @@ impl SemanticAnalyzer {
 
                         self.unify(result_ty, specialized_fn_type, info)?;
                         
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
+            .filter_map(|impls_for_trait| impls_for_trait.get(&base_symbol_id))
+            .flatten()
+            .cloned().collect();
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(&base_lhs_type, &trait_impl) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
+                        let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
+
+                        self.unify(result_ty.clone(), specialized_fn_type, info)?;
+
                         return Ok(true);
                     }
                 }
@@ -7882,7 +8052,8 @@ pub enum ErrorKind {
         missing_fields: Vec<String>,
         extra_fields: Vec<String>,
     },
-    InvalidCast(String, String)
+    InvalidCast(String, String),
+    DuplicateSymbolsInInherentImpl(String, String)
 }
 
 impl ErrorKind {
@@ -7978,7 +8149,10 @@ impl ErrorKind {
                 }
                 message
             },
-            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`")
+            ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`"),
+            ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
+                format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
+            }
         }
     }
 }

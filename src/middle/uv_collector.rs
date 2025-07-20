@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-// middle/uv_collector.rs
 use crate::{
     boxed,
     frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},

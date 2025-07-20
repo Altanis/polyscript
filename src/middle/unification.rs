@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -336,6 +336,43 @@ impl SemanticAnalyzer {
             }
         }
 
+        Some(substitutions)
+    }
+
+    fn check_trait_impl_applicability(
+        &mut self,
+        instance_type: &Type,
+        imp: &TraitImpl,
+    ) -> Option<HashMap<TypeSymbolId, Type>> {
+        let instance_args = if let Type::Base { args, .. } = instance_type {
+            args
+        } else {
+            return None; // instance type is not a base type
+        };
+
+        let impl_target_arg_ids = &imp.type_specialization;
+
+        if instance_args.len() != impl_target_arg_ids.len() {
+            return None; // arity mismatch
+        }
+
+        let mut substitutions = HashMap::new();
+
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+            let target_symbol = self.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+            if imp.impl_generic_params.contains(&target_symbol.id) {
+                substitutions.insert(target_symbol.id, instance_arg.clone());
+            } else {
+                let resolved_instance_arg = self.resolve_type(instance_arg);
+                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
+
+                if resolved_instance_arg != resolved_impl_arg {
+                    return None;
+                }
+            }
+        }
+        
         Some(substitutions)
     }
 }
@@ -672,6 +709,34 @@ impl SemanticAnalyzer {
             }
         }
 
+        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
+            .filter_map(|impls_for_trait| impls_for_trait.get(&lhs_symbol.id))
+            .flatten()
+            .cloned().collect();
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(&lhs_type, &trait_impl) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
+
+                    let specialized_type = self.apply_substitution(&symbol_type, &substitutions);
+
+                    self.unify(result_ty.clone(), specialized_type, info)?;
+
+                    return Ok(true);
+                }
+
+                if let Some(assoc_type_symbol) = self.symbol_table.find_type_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    let resolved_assoc_type = self.resolve_type(&Type::new_base(assoc_type_symbol.id));
+                    let specialized_type = self.apply_substitution(&resolved_assoc_type, &substitutions);
+
+                    self.unify(result_ty.clone(), specialized_type, info)?;
+
+                    return Ok(true);
+                }
+            }
+        }
+
         if let Some(scope_id) = enum_scope_id {
             if self.symbol_table.find_value_symbol_in_scope(&rhs_name, scope_id).is_some() {
                 self.unify(result_ty, lhs_type, info)?;
@@ -752,6 +817,26 @@ impl SemanticAnalyzer {
 
                         self.unify(result_ty, specialized_fn_type, info)?;
                         
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        let all_trait_impls: Vec<_> = self.trait_registry.register.values()
+            .filter_map(|impls_for_trait| impls_for_trait.get(&base_symbol_id))
+            .flatten()
+            .cloned().collect();
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(&base_lhs_type, &trait_impl) {
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&rhs_name, trait_impl.impl_scope_id).cloned() {
+                    if let ValueSymbolKind::Function(_) = value_symbol.kind {
+                        let symbol_type = self.resolve_type(value_symbol.type_id.as_ref().unwrap());
+                        let specialized_fn_type = self.apply_substitution(&symbol_type, &substitutions);
+
+                        self.unify(result_ty.clone(), specialized_fn_type, info)?;
+
                         return Ok(true);
                     }
                 }

@@ -1,4 +1,3 @@
-// middle/semantic_analyzer.rs
 use crate::{
     frontend::ast::AstNode,
     utils::{error::*, kind::*},
