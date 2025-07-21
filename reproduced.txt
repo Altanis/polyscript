@@ -2300,9 +2300,9 @@ impl Parser {
         let span = self.create_span_from_current_token();
 
         match token.get_token_kind() {
-            TokenKind::Operator(Operation::LessThan) => {
+            TokenKind::OpenBracket => {
                 return self.spanned_node(|parser| {
-                    parser.consume(TokenKind::Operator(Operation::LessThan))?;
+                    parser.consume(TokenKind::OpenBracket)?;
 
                     let ty = boxed!(parser.parse_type()?);
                     let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
@@ -2310,7 +2310,7 @@ impl Parser {
                     } else {
                         None
                     };
-                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+                    parser.consume(TokenKind::CloseBracket)?;
 
                     Ok(AstNodeKind::PathQualifier { ty, tr })
                 })
@@ -2755,7 +2755,7 @@ impl Parser {
 
                     Ok(AstNodeKind::FunctionPointer { params, return_type })
                 },
-                TokenKind::Operator(Operation::LessThan) => {
+                TokenKind::OpenBracket => {
                     let ty = boxed!(parser.parse_type()?);
 
                     let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
@@ -2764,7 +2764,7 @@ impl Parser {
                         None
                     };
 
-                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+                    parser.consume(TokenKind::CloseBracket)?;
 
                     let kind = AstNodeKind::PathQualifier { ty, tr };
 
@@ -3721,11 +3721,8 @@ impl TypeSymbol {
         }
 
         match (&self.kind, &other.kind) {
-            (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
-            (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
-
-            (_, TypeSymbolKind::TraitSelf) => Some(self.id),
-            (TypeSymbolKind::TraitSelf, _) => Some(other.id),
+            (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) | (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(self.id),
+            (_, TypeSymbolKind::TraitSelf) | (TypeSymbolKind::TraitSelf, _) => Some(self.id),
 
             _ => None
         }
@@ -3765,7 +3762,7 @@ pub struct SymbolTable {
     pub scopes: HashMap<ScopeId, Scope>,
 
     lines: Rc<Vec<String>>,
-    current_scope_id: ScopeId,
+    pub current_scope_id: ScopeId,
     next_scope_id: ScopeId,
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,

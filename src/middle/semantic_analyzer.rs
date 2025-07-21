@@ -184,11 +184,8 @@ impl TypeSymbol {
         }
 
         match (&self.kind, &other.kind) {
-            (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) => Some(self.id),
-            (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(other.id),
-
-            (_, TypeSymbolKind::TraitSelf) => Some(self.id),
-            (TypeSymbolKind::TraitSelf, _) => Some(other.id),
+            (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) | (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(self.id),
+            (_, TypeSymbolKind::TraitSelf) | (TypeSymbolKind::TraitSelf, _) => Some(self.id),
 
             _ => None
         }
@@ -1052,7 +1049,7 @@ impl SymbolTable {
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
                     TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
-                    TypeSymbolKind::TraitSelf => "Self".green(),
+                    TypeSymbolKind::TraitSelf => "TraitSelf".green(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature {
                         params, return_type, ..
@@ -1065,7 +1062,7 @@ impl SymbolTable {
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     }
                     TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
-                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
+                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red()
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {
@@ -1373,7 +1370,7 @@ impl UnificationContext {
                         let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
                         let lhs = uv_name.red().bold();
                         let rhs = self.tbl.display_type(sym).green();
-                        writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
+                        writeln!(f, "    {} {} [{}]({})", lhs, "->".blue(), rhs, sym.get_base_symbol())?;
                     }
                 }
 
