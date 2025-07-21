@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -184,39 +184,6 @@ impl SemanticAnalyzer {
                 }
 
                 let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap().clone();
-
-                let parent_scope = self.symbol_table.get_scope(base_symbol.scope_id);
-                if let Some(parent_scope) = parent_scope {
-                    if parent_scope.kind == ScopeKind::Trait && matches!(base_symbol.kind, TypeSymbolKind::TypeAlias(..)) {
-                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", parent_scope.id).unwrap().id;
-                        if let Some(on_type) = substitutions.get(&self_in_trait_id) {
-                            let trait_symbol = self.symbol_table.type_symbols.values().find(|s| {
-                                if let TypeSymbolKind::Trait(sid) = s.kind { sid == parent_scope.id } else { false }
-                            }).unwrap();
-    
-                            let placeholder_name = format!("[{} as {}]::{}", 
-                                self.symbol_table.display_type(on_type),
-                                self.symbol_table.get_type_name(trait_symbol.name_id),
-                                self.symbol_table.get_type_name(base_symbol.name_id)
-                            );
-                            
-                            if let Some(existing) = self.symbol_table.find_type_symbol(&placeholder_name) {
-                                return Type::new_base(existing.id);
-                            }
-    
-                            let new_uv = self.unification_context.generate_uv_type(&mut self.symbol_table, base_symbol.span.unwrap_or_default());
-                            let placeholder_id = self.symbol_table.add_type_symbol(
-                                &placeholder_name,
-                                TypeSymbolKind::TypeAlias((None, Some(new_uv))),
-                                vec![],
-                                QualifierKind::Private,
-                                base_symbol.span
-                            ).unwrap();
-
-                            return Type::new_base(placeholder_id);
-                        }
-                    }
-                }
 
                 match &base_symbol.kind {
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => {
@@ -636,15 +603,14 @@ impl SemanticAnalyzer {
                     let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
                     let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
         
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access)? {
+                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access)? {
                         let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
                         let substitutions = HashMap::from([(self_in_trait_id, base_type.clone())]);
-                        let concrete_member_type = self.apply_substitution(&member_in_trait, &substitutions);
-                        
+                        let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                         return Ok(Some(concrete_member_type));
                     }
                 }
-            },
+            }
             TypeSymbolKind::TraitSelf => {
                 if is_static_access {
                     let trait_scope_id = base_symbol.scope_id;
@@ -662,7 +628,7 @@ impl SemanticAnalyzer {
     
         Ok(None)
     }
-    
+
     /// Finds a member in a given trait implementation for a given type.
     fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
         let type_id = ty.get_base_symbol();
@@ -1061,26 +1027,6 @@ impl SemanticAnalyzer {
             let resolved_tr = self.resolve_type(&tr);
             if self.is_uv(resolved_tr.get_base_symbol()) {
                 return Ok(false);
-            }
-
-            let ty_symbol = self.symbol_table.get_type_symbol(resolved_ty.get_base_symbol()).unwrap();
-            if let TypeSymbolKind::Generic(constraints) = &ty_symbol.kind {
-                let trait_id = resolved_tr.get_base_symbol();
-
-                if constraints.contains(&trait_id) {
-                    let TypeSymbolKind::Trait(trait_scope_id) = self.symbol_table.get_type_symbol(trait_id).unwrap().kind else { 
-                        unreachable!()
-                    };
-
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, &member_name, true)? {
-                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
-                        let substitutions = HashMap::from([(self_in_trait_id, resolved_ty.clone())]);
-                        let projection_type = self.apply_substitution(&member_in_trait, &substitutions);
-
-                        self.unify(result_ty, projection_type, info)?;
-                        return Ok(true);
-                    }
-                }
             }
 
             self.find_member_in_trait_impl(&resolved_ty, &resolved_tr, &member_name, info)?
