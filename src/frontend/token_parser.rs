@@ -228,9 +228,9 @@ impl Parser {
         let span = self.create_span_from_current_token();
 
         match token.get_token_kind() {
-            TokenKind::Operator(Operation::LessThan) => {
+            TokenKind::OpenBracket => {
                 return self.spanned_node(|parser| {
-                    parser.consume(TokenKind::Operator(Operation::LessThan))?;
+                    parser.consume(TokenKind::OpenBracket)?;
 
                     let ty = boxed!(parser.parse_type()?);
                     let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
@@ -238,7 +238,7 @@ impl Parser {
                     } else {
                         None
                     };
-                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+                    parser.consume(TokenKind::CloseBracket)?;
 
                     Ok(AstNodeKind::PathQualifier { ty, tr })
                 })
@@ -683,7 +683,7 @@ impl Parser {
 
                     Ok(AstNodeKind::FunctionPointer { params, return_type })
                 },
-                TokenKind::Operator(Operation::LessThan) => {
+                TokenKind::OpenBracket => {
                     let ty = boxed!(parser.parse_type()?);
 
                     let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
@@ -692,7 +692,7 @@ impl Parser {
                         None
                     };
 
-                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+                    parser.consume(TokenKind::CloseBracket)?;
 
                     let kind = AstNodeKind::PathQualifier { ty, tr };
 

@@ -38,9 +38,14 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+
     TypeCast {
         expr: BoxedAstNode,
         target_type: BoxedAstNode,
+    },
+    PathQualifier {
+        ty: BoxedAstNode,
+        tr: Option<BoxedAstNode>,
     },
 
     // A sequence of statements encapsulated by braces.
@@ -319,6 +324,15 @@ impl AstNode {
                 write!(f, " {} ", "as".yellow())?;
                 target_type.fmt_with_indent(f, 0)?;
                 write!(f, ")")?;
+            },
+            AstNodeKind::PathQualifier { ty, tr } => {
+                write!(f, "{}{}", indent_str, "<".dimmed())?;
+                ty.fmt_with_indent(f, 0)?;
+                if let Some(tr_node) = tr {
+                    write!(f, " {} ", "as".yellow())?;
+                    tr_node.fmt_with_indent(f, 0)?;
+                }
+                write!(f, "{}", ">".dimmed())?;
             }
 
             AstNodeKind::Block(nodes) => {
@@ -848,6 +862,13 @@ impl AstNode {
             },
 
             TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
+            PathQualifier { ty, tr } => {
+                let mut children = vec![ty.as_mut()];
+                if let Some(trait_node) = tr.as_mut() {
+                    children.push(trait_node.as_mut());
+                }
+                children
+            },
 
             Block(statements) => statements.iter_mut().collect(),
 
@@ -2279,6 +2300,21 @@ impl Parser {
         let span = self.create_span_from_current_token();
 
         match token.get_token_kind() {
+            TokenKind::Operator(Operation::LessThan) => {
+                return self.spanned_node(|parser| {
+                    parser.consume(TokenKind::Operator(Operation::LessThan))?;
+
+                    let ty = boxed!(parser.parse_type()?);
+                    let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
+                        Some(boxed!(parser.parse_type()?))
+                    } else {
+                        None
+                    };
+                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+
+                    Ok(AstNodeKind::PathQualifier { ty, tr })
+                })
+            },
             TokenKind::Operator(operator) => {
                 if !operator.is_unary() {
                     return Err(self.generate_error(
@@ -2681,7 +2717,7 @@ impl Parser {
                             reference_kind,
                         })
                     }
-                }
+                },
 
                 TokenKind::Keyword(KeywordKind::Int)
                 | TokenKind::Keyword(KeywordKind::Float)
@@ -2695,7 +2731,7 @@ impl Parser {
                         generic_types,
                         reference_kind,
                     })
-                }
+                },
                 TokenKind::Keyword(KeywordKind::Fn) => {
                     let mut params = vec![];
 
@@ -2718,17 +2754,54 @@ impl Parser {
                     }
 
                     Ok(AstNodeKind::FunctionPointer { params, return_type })
-                }
+                },
+                TokenKind::Operator(Operation::LessThan) => {
+                    let ty = boxed!(parser.parse_type()?);
+
+                    let tr = if parser.match_token(TokenKind::Operator(Operation::As)) {
+                        Some(boxed!(parser.parse_type()?))
+                    } else {
+                        None
+                    };
+
+                    parser.consume(TokenKind::Operator(Operation::GreaterThan))?;
+
+                    let kind = AstNodeKind::PathQualifier { ty, tr };
+
+                    if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
+                        parser.advance();
+                        let next = parser.consume(TokenKind::Identifier)?;
+
+                        Ok(AstNodeKind::FieldAccess {
+                            left: boxed!(AstNode {
+                                kind,
+                                span: type_reference.get_span(),
+                                value_id: None,
+                                scope_id: None,
+                                type_id: None
+                            }),
+                            right: boxed!(AstNode {
+                                kind: AstNodeKind::Identifier(next.get_value().to_string()),
+                                span: next.get_span(),
+                                value_id: None,
+                                scope_id: None,
+                                type_id: None
+                            }),
+                        })
+                    } else {
+                        Ok(kind)
+                    }
+                },
                 _ => {
                     let span = type_reference.get_span();
-                    return Err(parser.generate_error(
+                    Err(parser.generate_error(
                         ErrorKind::UnexpectedToken(
                             type_reference.get_value().to_string(),
                             format!("{}", type_reference.get_token_kind()),
                             "a type reference".to_string(),
                         ),
                         span,
-                    ));
+                    ))
                 }
             }
         })
@@ -4332,6 +4405,8 @@ pub enum Constraint {
     InstanceMemberAccess(Type, Type, String),
     /// A type denotes a static member of a type, like an enum variant.
     StaticMemberAccess(Type, Type, String),
+    /// A type denotes a fully qualified path access.
+    FullyQualifiedAccess(Type, Type, Option<Type>, String),
     /// The initial type must be validly castable to the other.
     Cast(Type, Type)
 }
@@ -4794,6 +4869,13 @@ impl Constraint {
                         self.t.display_type(base).bright_blue(),
                         m.green()
                     ),
+                    FullyQualifiedAccess(result, ty, tr, m) => {
+                        write!(f, "{} = <{}", self.t.display_type(result).yellow(), self.t.display_type(ty))?;
+                        if let Some(tr) = tr {
+                            write!(f, " as {}", self.t.display_type(tr))?;
+                        }
+                        write!(f, ">.{}", m.green())
+                    },
                     Cast(initial, r#final) => write!(
                         f,
                         "{} -> {}",
@@ -4965,6 +5047,11 @@ impl SemanticAnalyzer {
                 generic_parameters,
             } => self.collect_struct_symbols(name, fields, generic_parameters, node.span),
             ImplDeclaration { .. } => Ok((None, None)),
+            PathQualifier { ty, tr } => {
+                self.symbol_collector_check_node(ty)?;
+                self.collect_optional_node(tr)?;
+                Ok((None, None))
+            },
             EnumDeclaration { name, variants } => self.collect_enum_symbols(name, variants, node.span),
             TraitDeclaration {
                 name,
@@ -6769,29 +6856,49 @@ impl SemanticAnalyzer {
             .get_name()
             .ok_or_else(|| self.create_error(ErrorKind::ExpectedIdentifier, right.span, &[right.span]))?;
 
-        if let AstNodeKind::Identifier(left_name) = &left.kind {
-            if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
-                let left_type = self.collect_uvs(left)?;
+        match &mut left.kind {
+            AstNodeKind::PathQualifier { ty, tr } => {
+                let type_val = self.collect_uvs(ty)?;
+                let trait_val = if let Some(trait_node) = tr {
+                    Some(self.collect_uvs(trait_node)?)
+                } else {
+                    None
+                };
                 
-                self.unification_context.register_constraint(
-                    Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
-                    info,
-                );
-
+                self.unification_context.register_constraint(Constraint::FullyQualifiedAccess(
+                    Type::new_base(uv_id),
+                    type_val,
+                    trait_val,
+                    right_name,
+                ), info);
+                
                 return Ok(());
-            }
+            },
+            AstNodeKind::Identifier(left_name) => {
+                if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
+                    let left_type = self.collect_uvs(left)?;
+                    
+                    self.unification_context.register_constraint(
+                        Constraint::InstanceMemberAccess(Type::new_base(uv_id), left_type, right_name),
+                        info,
+                    );
 
-            if let Some(type_symbol) = self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), left_name) {
-                let static_type = Type::new_base(type_symbol.id);
-                left.type_id = Some(static_type.clone());
+                    return Ok(());
+                }
 
-                self.unification_context.register_constraint(
-                    Constraint::StaticMemberAccess(Type::new_base(uv_id), static_type, right_name),
-                    info,
-                );
+                if let Some(type_symbol) = self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), left_name) {
+                    let static_type = Type::new_base(type_symbol.id);
+                    left.type_id = Some(static_type.clone());
 
-                return Ok(());
-            }
+                    self.unification_context.register_constraint(
+                        Constraint::StaticMemberAccess(Type::new_base(uv_id), static_type, right_name),
+                        info,
+                    );
+
+                    return Ok(());
+                }
+            },
+            _ => {}
         }
 
         let left_type = self.collect_uvs(left)?;
@@ -7048,7 +7155,10 @@ impl SemanticAnalyzer {
             FieldAccess { left, right } => self.collect_uv_field_access(uv_id, left, right, info)?,
             FunctionCall { function, arguments } => {
                 self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?
-            }
+            },
+            PathQualifier { .. } => {
+                return Err(self.create_error(ErrorKind::InvalidPathQualifier, expr.span, &[expr.span]))
+            },
             TypeReference {
                 type_name,
                 generic_types,
@@ -7744,6 +7854,39 @@ impl SemanticAnalyzer {
     
         Ok(None)
     }
+
+    /// Finds a member in a given trait implementation for a given type.
+    fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
+        let type_id = ty.get_base_symbol();
+        let trait_id = tr.get_base_symbol();
+
+        if self.is_uv(type_id) || self.is_uv(trait_id) {
+            return Ok(None);
+        }
+
+        let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+        if !matches!(trait_symbol.kind, TypeSymbolKind::Trait(_)) {
+            return Err(self.create_error(
+                ErrorKind::InvalidConstraint(self.symbol_table.display_type(tr)),
+                info.span,
+                &[info.span],
+            ));
+        }
+
+        let all_trait_impls: Vec<_> = self.trait_registry.register.get(&trait_id)
+            .and_then(|impls_for_trait| impls_for_trait.get(&type_id))
+            .map_or(vec![], |v| v.clone());
+
+        for trait_impl in all_trait_impls {
+            if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl) {
+                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true)? {
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    return Ok(Some(concrete_member_type));
+                }
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl SemanticAnalyzer {
@@ -7789,6 +7932,9 @@ impl SemanticAnalyzer {
             },
             Constraint::StaticMemberAccess(result_ty, lhs_type, rhs_name) => {
                 self.unify_member_access(result_ty, lhs_type, rhs_name, true, info)
+            },
+            Constraint::FullyQualifiedAccess(result_ty, ty, tr_opt, member_name) => {
+                self.unify_fully_qualified_access(result_ty, ty, tr_opt, member_name, info)
             },
             // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
             // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
@@ -8090,6 +8236,45 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn unify_fully_qualified_access(
+        &mut self,
+        result_ty: Type,
+        ty: Type,
+        tr_opt: Option<Type>,
+        member_name: String,
+        info: ConstraintInfo,
+    ) -> Result<bool, BoxedError> {
+        let resolved_ty = self.resolve_type(&ty);
+        if self.is_uv(resolved_ty.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let member_ty_opt = if let Some(tr) = tr_opt {
+            let resolved_tr = self.resolve_type(&tr);
+            if self.is_uv(resolved_tr.get_base_symbol()) {
+                return Ok(false);
+            }
+
+            self.find_member_in_trait_impl(&resolved_ty, &resolved_tr, &member_name, info)?
+        } else {
+            self.find_member(&resolved_ty, &member_name, true, info)?
+        };
+
+        if let Some(member_ty) = member_ty_opt {
+            self.unify(result_ty, member_ty, info)?;
+
+            Ok(true)
+        } else {
+            let type_name = self.symbol_table.display_type(&resolved_ty);
+            
+            Err(self.create_error(
+                ErrorKind::MemberNotFound(member_name, type_name),
+                info.span,
+                &[info.span],
+            ))
+        }
+    }
+
     fn unify_cast(&mut self, source: Type, target: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
         let resolved_source = self.resolve_type(&source);
         let resolved_target = self.resolve_type(&target);
@@ -8165,7 +8350,8 @@ pub enum ErrorKind {
         extra_fields: Vec<String>,
     },
     InvalidCast(String, String),
-    DuplicateSymbolsInInherentImpl(String, String)
+    DuplicateSymbolsInInherentImpl(String, String),
+    InvalidPathQualifier
 }
 
 impl ErrorKind {
@@ -8264,7 +8450,8 @@ impl ErrorKind {
             ErrorKind::InvalidCast(from, to) => format!("cannot cast type `{from}` to `{to}`"),
             ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
                 format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
-            }
+            },
+            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string()
         }
     }
 }
