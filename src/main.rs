@@ -122,6 +122,8 @@ fn assert_scripts_work() {
 }
 
 fn main() {
+    std::env::set_var("RUST_BACKTRACE", "1");
+
     // assert_scripts_work();
     test_main_script();
 }

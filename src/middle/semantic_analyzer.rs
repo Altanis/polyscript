@@ -116,6 +116,11 @@ pub enum TypeSymbolKind {
     },
     Generic(Vec<TypeSymbolId>),
     UnificationVariable(TypeSymbolId),
+    OpaqueTypeProjection {
+        ty: Type,
+        tr: Type,
+        member: String
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1062,7 +1067,9 @@ impl SymbolTable {
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     }
                     TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
-                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red()
+                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
+                    TypeSymbolKind::OpaqueTypeProjection { ty, tr, member } =>
+                        format!("[{:?} as {:?}]::{:?}", ty, tr, member).white()
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {

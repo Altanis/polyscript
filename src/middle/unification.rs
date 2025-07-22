@@ -515,11 +515,7 @@ impl SemanticAnalyzer {
                 Ok(())
             },
             (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {
-                if cs != ts {
-                    return Ok(());
-                }
-
-                if ca.len() != ta.len() {
+                if cs != ts || ca.len() != ta.len() {
                     return Ok(());
                 }
 
@@ -535,7 +531,7 @@ impl SemanticAnalyzer {
             (Type::MutableReference(ci), Type::MutableReference(ti)) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
             },
-            _ => Ok(()),
+            _ => Ok(())
         }
     }
 }
@@ -1128,12 +1124,7 @@ impl SemanticAnalyzer {
                         unreachable!()
                     };
 
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, &member_name, true)? {
-                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
-                        let substitutions = HashMap::from([(self_in_trait_id, resolved_ty.clone())]);
-                        let projection_type = self.apply_substitution(&member_in_trait, &substitutions);
-
-                        self.unify(result_ty, projection_type, info)?;
+                    if self.find_member_in_impl_scope(trait_scope_id, &member_name, true)?.is_some() {
                         return Ok(true);
                     }
                 }

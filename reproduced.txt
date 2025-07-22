@@ -3653,6 +3653,11 @@ pub enum TypeSymbolKind {
     },
     Generic(Vec<TypeSymbolId>),
     UnificationVariable(TypeSymbolId),
+    OpaqueTypeProjection {
+        ty: Type,
+        tr: Type,
+        member: String
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4599,7 +4604,9 @@ impl SymbolTable {
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     }
                     TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
-                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red()
+                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
+                    TypeSymbolKind::OpaqueTypeProjection { ty, tr, member } =>
+                        format!("[{:?} as {:?}]::{:?}", ty, tr, member).white()
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {
@@ -7696,6 +7703,25 @@ impl SemanticAnalyzer {
         Ok(false)
     }
 
+    /// Recursively traverses a type to find all of its constituent generic type variables.
+    fn collect_signature_generics(&self, ty: &Type, generics: &mut HashSet<TypeSymbolId>) {
+        match ty {
+            Type::Base { symbol, args } => {
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
+                if let TypeSymbolKind::Generic(_) = type_symbol.kind {
+                    generics.insert(*symbol);
+                }
+
+                for arg in args {
+                    self.collect_signature_generics(arg, generics);
+                }
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.collect_signature_generics(inner, generics);
+            }
+        }
+    }
+
     /// Recursively traverses a `call_site` type and a `signature` type to infer
     /// the concrete types for a function's generic parameters.
     fn collect_substitutions(
@@ -7719,11 +7745,7 @@ impl SemanticAnalyzer {
                 Ok(())
             },
             (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {
-                if cs != ts {
-                    return Ok(());
-                }
-
-                if ca.len() != ta.len() {
+                if cs != ts || ca.len() != ta.len() {
                     return Ok(());
                 }
 
@@ -7739,7 +7761,7 @@ impl SemanticAnalyzer {
             (Type::MutableReference(ci), Type::MutableReference(ti)) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
             },
-            _ => Ok(()),
+            _ => Ok(())
         }
     }
 }
@@ -8060,7 +8082,6 @@ impl SemanticAnalyzer {
                 }
 
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
-                let fn_generic_param_ids: HashSet<TypeSymbolId> = callee_symbol.generic_parameters.iter().cloned().collect();
 
                 if let TypeSymbolKind::FunctionSignature {
                     params: sig_params,
@@ -8074,6 +8095,13 @@ impl SemanticAnalyzer {
                             info.span,
                             &[info.span],
                         ));
+                    }
+
+                    let mut fn_generic_param_ids = HashSet::new();
+
+                    self.collect_signature_generics(sig_return, &mut fn_generic_param_ids);
+                    for p in sig_params {
+                        self.collect_signature_generics(p, &mut fn_generic_param_ids);
                     }
 
                     let mut substitutions = HashMap::new();
@@ -8141,7 +8169,6 @@ impl SemanticAnalyzer {
         };
 
         let callee_symbol = self.symbol_table.get_type_symbol(callee_symbol_id).unwrap().clone();
-        let fn_generic_param_ids: HashSet<TypeSymbolId> = callee_symbol.generic_parameters.iter().cloned().collect();
 
         if let TypeSymbolKind::FunctionSignature {
             params: expected_params_with_receiver,
@@ -8163,6 +8190,14 @@ impl SemanticAnalyzer {
                     &[info.span],
                 ));
             }
+
+            let mut fn_generic_param_ids = HashSet::new();
+
+            self.collect_signature_generics(&expected_return, &mut fn_generic_param_ids);
+            for p in &expected_params_with_receiver {
+                self.collect_signature_generics(p, &mut fn_generic_param_ids);
+            }
+
 
             let mut substitutions = HashMap::new();
 
@@ -8319,12 +8354,7 @@ impl SemanticAnalyzer {
                         unreachable!()
                     };
 
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, &member_name, true)? {
-                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
-                        let substitutions = HashMap::from([(self_in_trait_id, resolved_ty.clone())]);
-                        let projection_type = self.apply_substitution(&member_in_trait, &substitutions);
-
-                        self.unify(result_ty, projection_type, info)?;
+                    if self.find_member_in_impl_scope(trait_scope_id, &member_name, true)?.is_some() {
                         return Ok(true);
                     }
                 }
