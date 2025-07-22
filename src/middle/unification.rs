@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
@@ -472,6 +472,72 @@ impl SemanticAnalyzer {
         
         Ok(false)
     }
+
+    /// Recursively traverses a type to find all of its constituent generic type variables.
+    fn collect_signature_generics(&self, ty: &Type, generics: &mut HashSet<TypeSymbolId>) {
+        match ty {
+            Type::Base { symbol, args } => {
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
+                if let TypeSymbolKind::Generic(_) = type_symbol.kind {
+                    generics.insert(*symbol);
+                }
+
+                for arg in args {
+                    self.collect_signature_generics(arg, generics);
+                }
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.collect_signature_generics(inner, generics);
+            }
+        }
+    }
+
+    /// Recursively traverses a `call_site` type and a `signature` type to infer
+    /// the concrete types for a function's generic parameters.
+    fn collect_substitutions(
+        &mut self,
+        concrete_ty: &Type,
+        template_ty: &Type,
+        substitutions: &mut HashMap<TypeSymbolId, Type>,
+        fn_generics: &HashSet<TypeSymbolId>,
+        info: ConstraintInfo,
+    ) -> Result<(), BoxedError> {
+        let concrete_ty = self.resolve_type(concrete_ty);
+
+        match (concrete_ty.clone(), template_ty.clone()) {
+            (_, Type::Base { symbol: s, .. }) if fn_generics.contains(&s) => {
+                if let Some(existing_sub) = substitutions.get(&s) {
+                    self.unify(existing_sub.clone(), concrete_ty, info)?;
+                } else {
+                    substitutions.insert(s, concrete_ty);
+                }
+
+                Ok(())
+            },
+            (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {
+                if cs != ts {
+                    return Ok(());
+                }
+
+                if ca.len() != ta.len() {
+                    return Ok(());
+                }
+
+                for (c_arg, t_arg) in ca.iter().zip(ta.iter()) {
+                    self.collect_substitutions(c_arg, t_arg, substitutions, fn_generics, info)?;
+                }
+
+                Ok(())
+            },
+            (Type::Reference(ci), Type::Reference(ti)) => {
+                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
+            },
+            (Type::MutableReference(ci), Type::MutableReference(ti)) => {
+                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
+            },
+            _ => Ok(()),
+        }
+    }
 }
 
 impl SemanticAnalyzer {
@@ -784,7 +850,7 @@ impl SemanticAnalyzer {
         let callee_ty = self.resolve_type(&callee_ty);
 
         match callee_ty.clone() {
-            Type::Base { symbol, args } => {
+            Type::Base { symbol, .. } => {
                 if self.is_uv(symbol) {
                     return Ok(false);
                 }
@@ -804,24 +870,34 @@ impl SemanticAnalyzer {
                             &[info.span],
                         ));
                     }
-                    
-                    let mut substitutions = HashMap::new();
-                    for (i, param) in sig_params.iter().enumerate() {
-                        let expected_param_symbol = self.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap();
 
-                        if let TypeSymbolKind::Generic(_) = expected_param_symbol.kind {
-                            substitutions.insert(param.get_base_symbol(), params[i].clone());
-                        }
+                    let mut fn_generic_param_ids = HashSet::new();
+
+                    self.collect_signature_generics(sig_return, &mut fn_generic_param_ids);
+                    for p in sig_params {
+                        self.collect_signature_generics(p, &mut fn_generic_param_ids);
                     }
 
-                    let expected_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
-                    let expected_return = self.apply_substitution(sig_return, &substitutions);
+                    let mut substitutions = HashMap::new();
+                    for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
+                        self.collect_substitutions(
+                            call_arg,
+                            sig_param,
+                            &mut substitutions,
+                            &fn_generic_param_ids,
+                            info,
+                        )?;
+                    }
 
-                    for (arg, expected) in params.iter().zip(expected_params.iter()) {
+                    let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
+                    let concrete_return = self.apply_substitution(sig_return, &substitutions);
+
+                    for (arg, expected) in params.iter().zip(concrete_sig_params.iter()) {
                         self.unify(arg.clone(), expected.clone(), info)?;
                     }
 
-                    self.unify(return_ty, expected_return, info)?;
+                    self.unify(return_ty, concrete_return, info)?;
+
                     Ok(true)
                 } else {
                     Err(self.create_error(
@@ -849,11 +925,14 @@ impl SemanticAnalyzer {
     ) -> Result<bool, BoxedError> {
         let callee_ty = self.resolve_type(&callee_ty);
 
-        let (callee_symbol_id, callee_args) = match callee_ty.clone() {
-            Type::Base { symbol, args } => {
-                if self.is_uv(symbol) { return Ok(false); }
-                (symbol, args)
-            },
+        let callee_symbol_id = match callee_ty.clone() {
+            Type::Base { symbol, .. } => {
+                if self.is_uv(symbol) {
+                    return Ok(false);
+                }
+                
+                symbol
+            }
             _ => {
                 return Err(self.create_error(
                     ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)),
@@ -863,7 +942,7 @@ impl SemanticAnalyzer {
             }
         };
 
-        let callee_symbol = self.symbol_table.get_type_symbol(callee_symbol_id).unwrap();
+        let callee_symbol = self.symbol_table.get_type_symbol(callee_symbol_id).unwrap().clone();
 
         if let TypeSymbolKind::FunctionSignature {
             params: expected_params_with_receiver,
@@ -875,7 +954,8 @@ impl SemanticAnalyzer {
                 panic!("This shouldn't happen. [1]");
             }
 
-            let (expected_receiver_ty, expected_params) = expected_params_with_receiver.split_first().unwrap();
+            let (expected_receiver_ty, expected_params) =
+                expected_params_with_receiver.split_first().unwrap();
 
             if params.len() != expected_params.len() {
                 return Err(self.create_error(
@@ -885,19 +965,39 @@ impl SemanticAnalyzer {
                 ));
             }
 
-            let mut substitutions = HashMap::new();
-            for (i, param) in expected_params.iter().enumerate() {
-                let expected_param_symbol = self.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap();
+            let mut fn_generic_param_ids = HashSet::new();
 
-                if let TypeSymbolKind::Generic(_) = expected_param_symbol.kind {
-                    substitutions.insert(param.get_base_symbol(), params[i].clone());
-                }
+            self.collect_signature_generics(&expected_return, &mut fn_generic_param_ids);
+            for p in &expected_params_with_receiver {
+                self.collect_signature_generics(p, &mut fn_generic_param_ids);
+            }
+
+
+            let mut substitutions = HashMap::new();
+
+            self.collect_substitutions(
+                &instance_ty,
+                expected_receiver_ty,
+                &mut substitutions,
+                &fn_generic_param_ids,
+                info,
+            )?;
+
+            for (call_arg, sig_param) in params.iter().zip(expected_params.iter()) {
+                self.collect_substitutions(
+                    call_arg,
+                    sig_param,
+                    &mut substitutions,
+                    &fn_generic_param_ids,
+                    info,
+                )?;
             }
 
             let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);
+            let concrete_params = expected_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
             let concrete_return = self.apply_substitution(&expected_return, &substitutions);
 
-            for (arg, expected) in params.iter().zip(expected_params.iter()) {
+            for (arg, expected) in params.iter().zip(concrete_params.iter()) {
                 self.unify(arg.clone(), expected.clone(), info)?;
             }
 

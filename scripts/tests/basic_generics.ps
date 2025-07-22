@@ -1,3 +1,7 @@
+struct S<T> {x:T;}
+fn identity<X>(x: S<X>): S<X> { x }
+let x : S<int> = identity(S{x:1});
+
 struct Type<A> {
     x: A;
 }
