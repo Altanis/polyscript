@@ -3762,7 +3762,7 @@ pub struct SymbolTable {
     pub scopes: HashMap<ScopeId, Scope>,
 
     lines: Rc<Vec<String>>,
-    current_scope_id: ScopeId,
+    pub current_scope_id: ScopeId,
     next_scope_id: ScopeId,
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
@@ -4586,7 +4586,7 @@ impl SymbolTable {
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
                     TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
-                    TypeSymbolKind::TraitSelf => "TraitSelf".green(),
+                    TypeSymbolKind::TraitSelf => "Self".green(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature {
                         params, return_type, ..
@@ -4599,7 +4599,7 @@ impl SymbolTable {
                         format!("fn({}): {}", params_str, self.table.display_type(return_type)).blue()
                     }
                     TypeSymbolKind::Generic(constraints) => format!("Generic({:?})", constraints).white(),
-                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red()
+                    TypeSymbolKind::UnificationVariable(id) => format!("UnificationVariable({})", id).red(),
                 };
                 write!(f, "[{}] {}", type_variant, name.cyan().bold())?;
                 if !self.symbol.generic_parameters.is_empty() {
@@ -4907,7 +4907,7 @@ impl UnificationContext {
                         let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
                         let lhs = uv_name.red().bold();
                         let rhs = self.tbl.display_type(sym).green();
-                        writeln!(f, "    {} {} [{}]({})", lhs, "->".blue(), rhs, sym.get_base_symbol())?;
+                        writeln!(f, "    {} {} {}", lhs, "->".blue(), rhs)?;
                     }
                 }
 
