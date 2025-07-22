@@ -1,19 +1,6 @@
-trait Iterator {
-    type Item;
-    fn next(&this): Self.Item;
+fn identity<X>(t: X): X {
+    t
 }
 
-fn next_item<I: Iterator>(x: &I): [I as Iterator].Item {
-  x.next()
-}
-
-struct X {}
-impl Iterator for X {
-    type Item = int;
-    fn next(&this): Self.Item {
-        3
-    }
-}
-
-let x = X {};
-let next: [X as Iterator].Item = next_item(&x);
+let x: int = identity(3);
+let y: float = identity(3.0);

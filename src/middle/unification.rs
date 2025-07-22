@@ -781,42 +781,6 @@ impl SemanticAnalyzer {
                     });
                 }
 
-                if let TypeSymbolKind::Generic(constraints) = &type_sym_s1.kind {
-                    for &trait_id in constraints {
-                        if !self.does_type_implement_trait(t2, trait_id)? {
-                            let trait_name = self.symbol_table.get_type_name(
-                                self.symbol_table.get_type_symbol(trait_id).unwrap().name_id
-                            ).to_string();
-
-                            let type_name = self.symbol_table.display_type(t2);
-                            return Err(self.create_error(
-                                ErrorKind::UnimplementedTrait(trait_name, type_name), 
-                                info.span, 
-                                &[info.span])
-                            );
-                        }
-                    }
-
-                    return Ok(t2.clone());
-                } else if let TypeSymbolKind::Generic(constraints) = &type_sym_s2.kind {
-                    for &trait_id in constraints {
-                        if !self.does_type_implement_trait(t1, trait_id)? {
-                            let trait_name = self.symbol_table.get_type_name(
-                                self.symbol_table.get_type_symbol(trait_id).unwrap().name_id
-                            ).to_string();
-
-                            let type_name = self.symbol_table.display_type(t1);
-                            return Err(self.create_error(
-                                ErrorKind::UnimplementedTrait(trait_name, type_name), 
-                                info.span, 
-                                &[info.span])
-                            );
-                        }
-                    }
-
-                    return Ok(t1.clone());
-                }
-
                 Err(self.type_mismatch_error(t1, t2, info, None))
             },
 
@@ -864,7 +828,6 @@ impl SemanticAnalyzer {
                     }
                     
                     let substitutions = self.create_generic_substitution_map(&callee_symbol.generic_parameters, &args);
-
                     let expected_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
                     let expected_return = self.apply_substitution(sig_return, &substitutions);
 
