@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -155,6 +155,13 @@ impl SemanticAnalyzer {
         )
     }
 
+    fn is_never(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::Primitive(PrimitiveKind::Never)
+        )
+    }
+
     /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
     ///
     /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
@@ -184,39 +191,6 @@ impl SemanticAnalyzer {
                 }
 
                 let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap().clone();
-
-                let parent_scope = self.symbol_table.get_scope(base_symbol.scope_id);
-                if let Some(parent_scope) = parent_scope {
-                    if parent_scope.kind == ScopeKind::Trait && matches!(base_symbol.kind, TypeSymbolKind::TypeAlias(..)) {
-                        let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", parent_scope.id).unwrap().id;
-                        if let Some(on_type) = substitutions.get(&self_in_trait_id) {
-                            let trait_symbol = self.symbol_table.type_symbols.values().find(|s| {
-                                if let TypeSymbolKind::Trait(sid) = s.kind { sid == parent_scope.id } else { false }
-                            }).unwrap();
-    
-                            let placeholder_name = format!("[{} as {}]::{}", 
-                                self.symbol_table.display_type(on_type),
-                                self.symbol_table.get_type_name(trait_symbol.name_id),
-                                self.symbol_table.get_type_name(base_symbol.name_id)
-                            );
-                            
-                            if let Some(existing) = self.symbol_table.find_type_symbol(&placeholder_name) {
-                                return Type::new_base(existing.id);
-                            }
-    
-                            let new_uv = self.unification_context.generate_uv_type(&mut self.symbol_table, base_symbol.span.unwrap_or_default());
-                            let placeholder_id = self.symbol_table.add_type_symbol(
-                                &placeholder_name,
-                                TypeSymbolKind::TypeAlias((None, Some(new_uv))),
-                                vec![],
-                                QualifierKind::Private,
-                                base_symbol.span
-                            ).unwrap();
-
-                            return Type::new_base(placeholder_id);
-                        }
-                    }
-                }
 
                 match &base_symbol.kind {
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => {
@@ -758,8 +732,11 @@ impl SemanticAnalyzer {
         match (t1.clone(), t2.clone()) {
             (t1, t2) if t1 == t2 => Ok(t1),
 
-            (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
-            (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
+            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. }) 
+                if self.is_uv(s) => self.unify_variable(s, other, info),
+
+            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
+                if self.is_never(s) => Ok(other.clone()),
 
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
@@ -811,6 +788,7 @@ impl SemanticAnalyzer {
                 if self.is_uv(symbol) {
                     return Ok(false);
                 }
+
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
 
                 if let TypeSymbolKind::FunctionSignature {
@@ -827,7 +805,15 @@ impl SemanticAnalyzer {
                         ));
                     }
                     
-                    let substitutions = self.create_generic_substitution_map(&callee_symbol.generic_parameters, &args);
+                    let mut substitutions = HashMap::new();
+                    for (i, param) in sig_params.iter().enumerate() {
+                        let expected_param_symbol = self.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap();
+
+                        if let TypeSymbolKind::Generic(_) = expected_param_symbol.kind {
+                            substitutions.insert(param.get_base_symbol(), params[i].clone());
+                        }
+                    }
+
                     let expected_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
                     let expected_return = self.apply_substitution(sig_return, &substitutions);
 
@@ -899,12 +885,19 @@ impl SemanticAnalyzer {
                 ));
             }
 
-            let substitutions = self.create_generic_substitution_map(&callee_symbol.generic_parameters, &callee_args);
-            let concrete_expected_params: Vec<Type> = expected_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect();
+            let mut substitutions = HashMap::new();
+            for (i, param) in expected_params.iter().enumerate() {
+                let expected_param_symbol = self.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap();
+
+                if let TypeSymbolKind::Generic(_) = expected_param_symbol.kind {
+                    substitutions.insert(param.get_base_symbol(), params[i].clone());
+                }
+            }
+
             let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);
             let concrete_return = self.apply_substitution(&expected_return, &substitutions);
 
-            for (arg, expected) in params.iter().zip(concrete_expected_params.iter()) {
+            for (arg, expected) in params.iter().zip(expected_params.iter()) {
                 self.unify(arg.clone(), expected.clone(), info)?;
             }
 

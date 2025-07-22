@@ -1,6 +1,7 @@
-fn identity<X>(t: X): X {
-    t
+struct S<T> {x:T;}
+fn identity<X>(x: S<X>): S<X> {
+    x
 }
 
-let x: int = identity(3);
-let y: float = identity(3.0);
+let s1 = S { x: 4 };
+identity(s1);
