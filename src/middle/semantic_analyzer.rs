@@ -4,7 +4,7 @@ use crate::{
 };
 use colored::*;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
 };
 use strum::IntoEnumIterator;
@@ -155,6 +155,20 @@ impl Type {
         match self {
             Type::Base { symbol, .. } => *symbol,
             Type::Reference(inner) | Type::MutableReference(inner) => inner.get_base_symbol(),
+        }
+    }
+
+    /// Recursively traverses a type to check if it contains any generic type variables from a given set.
+    pub fn contains_generics(&self, generics: &HashSet<TypeSymbolId>) -> bool {
+        match self {
+            Type::Base { symbol, args } => {
+                if generics.contains(symbol) {
+                    return true;
+                }
+
+                args.iter().any(|arg| arg.contains_generics(generics))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => inner.contains_generics(generics)
         }
     }
 }

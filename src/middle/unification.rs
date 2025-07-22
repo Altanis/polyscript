@@ -162,6 +162,13 @@ impl SemanticAnalyzer {
         )
     }
 
+    fn is_opaque_type_projection(&self, symbol_id: TypeSymbolId) -> bool {
+        matches!(
+            self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
+            TypeSymbolKind::OpaqueTypeProjection { .. }
+        )
+    }
+
     /// Creates a substitution map from an impl's generic parameters to a concrete type's arguments.
     ///
     /// `impl<T, U> for MyStruct<T, U>` on `MyStruct<i32, bool>`
@@ -514,6 +521,30 @@ impl SemanticAnalyzer {
 
                 Ok(())
             },
+            (concrete_ty, Type::Base { symbol: ts, .. }) if self.is_opaque_type_projection(ts) => {
+                let opaque_symbol = self.symbol_table.get_type_symbol(ts).unwrap().clone();
+                if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } = opaque_symbol.kind {
+                    let substituted_opaque_ty = self.apply_substitution(&opaque_ty, substitutions);
+
+                    if substituted_opaque_ty.contains_generics(fn_generics) {
+                        return Ok(());
+                    }
+
+                    if let Some(resolved_member_type) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
+                        self.unify(concrete_ty, resolved_member_type, info)?;
+                    } else {
+                        return Err(self.create_error(
+                            ErrorKind::UnimplementedTrait(
+                                self.symbol_table.display_type(&opaque_tr),
+                                self.symbol_table.display_type(&substituted_opaque_ty)
+                            ),
+                            info.span,
+                            &[info.span]
+                        ));
+                    }
+                }
+                Ok(())
+            },
             (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {
                 if cs != ts || ca.len() != ta.len() {
                     return Ok(());
@@ -799,6 +830,9 @@ impl SemanticAnalyzer {
 
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
                 if self.is_never(s) => Ok(other.clone()),
+            
+            (ref t @ Type::Base { symbol: s, .. }, _) | (_, ref t @ Type::Base { symbol: s, .. })
+                if self.is_opaque_type_projection(s) => Ok(t.clone()),
 
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
@@ -1116,18 +1150,32 @@ impl SemanticAnalyzer {
             }
 
             let ty_symbol = self.symbol_table.get_type_symbol(resolved_ty.get_base_symbol()).unwrap();
-            if let TypeSymbolKind::Generic(constraints) = &ty_symbol.kind {
-                let trait_id = resolved_tr.get_base_symbol();
+            if let TypeSymbolKind::Generic(_) = &ty_symbol.kind {
+                let type_name = &format!(
+                    "[{} as {}]::{}", 
+                    self.symbol_table.display_type(&resolved_ty), 
+                    self.symbol_table.display_type(&resolved_tr),
+                    member_name
+                );
 
-                if constraints.contains(&trait_id) {
-                    let TypeSymbolKind::Trait(trait_scope_id) = self.symbol_table.get_type_symbol(trait_id).unwrap().kind else { 
-                        unreachable!()
-                    };
+                let symbol = if let Some(ty) = self.symbol_table.find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name) {
+                    ty.id
+                } else {
+                    self.symbol_table.add_type_symbol(
+                        type_name, 
+                        TypeSymbolKind::OpaqueTypeProjection {
+                            ty: resolved_ty,
+                            tr: resolved_tr,
+                            member: member_name.clone()
+                        }, 
+                        vec![],
+                        QualifierKind::Private, 
+                        Some(info.span)
+                    )?
+                };
 
-                    if self.find_member_in_impl_scope(trait_scope_id, &member_name, true)?.is_some() {
-                        return Ok(true);
-                    }
-                }
+                self.unify(result_ty, Type::new_base(symbol), info)?;
+                return Ok(true);
             }
 
             self.find_member_in_trait_impl(&resolved_ty, &resolved_tr, &member_name, info)?
