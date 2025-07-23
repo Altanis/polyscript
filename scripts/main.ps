@@ -9,13 +9,9 @@ struct Dog {}
 impl Animal for Dog {
     type SpeechEmission = char;
     fn speak(&this): Self.SpeechEmission {
-        'b'
+        return 'b';
     }
 }
 
-impl Dog {
-    type SpeechEmission = float;
-}
-
 let dog = Dog {};
-let f: [Dog as Animal].SpeechEmission = dog.speak();
+let f: string = dog.speak();

@@ -231,6 +231,7 @@ pub struct Scope {
     pub parent: Option<ScopeId>,
     pub id: ScopeId,
     pub receiver_kind: Option<ReferenceKind>,
+    pub trait_id: Option<TypeSymbolId>,
 }
 
 pub struct SymbolTable {
@@ -277,6 +278,7 @@ impl SymbolTable {
             id: root_scope_id,
             kind: ScopeKind::Root,
             receiver_kind: None,
+            trait_id: None,
         };
         table.scopes.insert(root_scope_id, root_scope);
 
@@ -300,6 +302,7 @@ impl SymbolTable {
             id: init_scope_id,
             kind: ScopeKind::Block,
             receiver_kind: None,
+            trait_id: None,
         };
 
         table.scopes.insert(init_scope_id, init_scope);
@@ -789,6 +792,7 @@ impl SymbolTable {
             id: new_id,
             kind,
             receiver_kind: None,
+            trait_id: None,
         };
 
         self.scopes.insert(new_id, new_scope);

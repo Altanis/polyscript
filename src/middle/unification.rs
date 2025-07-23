@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -565,20 +565,6 @@ impl SemanticAnalyzer {
             _ => Ok(())
         }
     }
-
-    /// Finds a trait implementation by its scope ID.
-    fn find_trait_impl_by_scope(&self, scope_id: ScopeId) -> Option<(TypeSymbolId, TypeSymbolId, &TraitImpl)> {
-        for (&trait_id, impls_for_trait) in &self.trait_registry.register {
-            for (&type_id, impls_for_type) in impls_for_trait {
-                for imp in impls_for_type {
-                    if imp.impl_scope_id == scope_id {
-                        return Some((trait_id, type_id, imp));
-                    }
-                }
-            }
-        }
-        None
-    }
 }
 
 impl SemanticAnalyzer {
@@ -1128,33 +1114,6 @@ impl SemanticAnalyzer {
 
         if self.is_uv(base_lhs_type.get_base_symbol()) {
             return Ok(false);
-        }
-
-        let is_self_access = self.symbol_table.get_type_symbol(base_lhs_type.get_base_symbol())
-            .map_or(false, |s| self.symbol_table.get_type_name(s.name_id) == "Self");
-
-        if is_static && is_self_access {
-            let mut current_scope_id = Some(info.scope_id);
-            let mut impl_scope_id = None;
-
-            while let Some(id) = current_scope_id {
-                let scope = self.symbol_table.get_scope(id).unwrap();
-                if scope.kind == ScopeKind::Impl {
-                    impl_scope_id = Some(id);
-                    break;
-                }
-
-                current_scope_id = scope.parent;
-            }
-
-            if let Some(scope_id) = impl_scope_id {
-                if let Some((trait_id, _type_id, trait_impl)) = self.find_trait_impl_by_scope(scope_id) {
-                    let trait_args = trait_impl.trait_generic_specialization.iter()
-                        .map(|id| Type::new_base(*id)).collect();
-                    let trait_type = Type::Base { symbol: trait_id, args: trait_args };
-                    return self.unify_fully_qualified_access(result_ty, base_lhs_type, Some(trait_type), rhs_name, info);
-                }
-            }
         }
 
         let member_ty_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;

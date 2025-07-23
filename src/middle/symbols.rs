@@ -690,6 +690,8 @@ impl SemanticAnalyzer {
             trait_node.scope_id = Some(impl_scope_id);
 
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
+            self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
+
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let self_type = Type::Base {

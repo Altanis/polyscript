@@ -30,6 +30,19 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn get_type_from_type_name(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<Type, BoxedError> {
+        let type_symbol = self
+            .symbol_table
+            .find_type_symbol_from_scope(scope_id, name)
+            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span]))?;
+
+        if let TypeSymbolKind::TypeAlias((_, Some(ty))) = &type_symbol.kind {
+            return Ok(ty.clone());
+        }
+
+        Ok(Type::new_base(type_symbol.id))
+    }
+
     fn collect_uv_unary_operation(
         &mut self,
         uv_id: TypeSymbolId,
@@ -960,6 +973,36 @@ impl SemanticAnalyzer {
                 return Ok(());
             },
             AstNodeKind::Identifier(left_name) => {
+                if left_name == "Self" {
+                    let mut scope_id = Some(info.scope_id);
+
+                    while let Some(id) = scope_id {
+                        let scope = self.symbol_table.get_scope(id).unwrap();
+                        if scope.kind == ScopeKind::Impl {
+                            if let Some(trait_id) = scope.trait_id {
+                                let self_type = self.get_type_from_type_name(info.scope_id, "Self", left.span)?;
+                                let trait_type = Type::new_base(trait_id);
+
+                                self.unification_context.register_constraint(
+                                    Constraint::FullyQualifiedAccess(
+                                        Type::new_base(uv_id),
+                                        self_type,
+                                        Some(trait_type),
+                                        right_name,
+                                    ),
+                                    info,
+                                );
+                                
+                                return Ok(());
+                            }
+
+                            break;
+                        }
+
+                        scope_id = scope.parent;
+                    }
+                }
+
                 if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
                     let left_type = self.collect_uvs(left)?;
                     
