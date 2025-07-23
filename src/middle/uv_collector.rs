@@ -992,7 +992,7 @@ impl SemanticAnalyzer {
                                     ),
                                     info,
                                 );
-                                
+
                                 return Ok(());
                             }
 

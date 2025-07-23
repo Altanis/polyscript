@@ -3768,6 +3768,7 @@ pub struct Scope {
     pub parent: Option<ScopeId>,
     pub id: ScopeId,
     pub receiver_kind: Option<ReferenceKind>,
+    pub trait_id: Option<TypeSymbolId>,
 }
 
 pub struct SymbolTable {
@@ -3814,6 +3815,7 @@ impl SymbolTable {
             id: root_scope_id,
             kind: ScopeKind::Root,
             receiver_kind: None,
+            trait_id: None,
         };
         table.scopes.insert(root_scope_id, root_scope);
 
@@ -3837,6 +3839,7 @@ impl SymbolTable {
             id: init_scope_id,
             kind: ScopeKind::Block,
             receiver_kind: None,
+            trait_id: None,
         };
 
         table.scopes.insert(init_scope_id, init_scope);
@@ -4326,6 +4329,7 @@ impl SymbolTable {
             id: new_id,
             kind,
             receiver_kind: None,
+            trait_id: None,
         };
 
         self.scopes.insert(new_id, new_scope);
@@ -5703,6 +5707,8 @@ impl SemanticAnalyzer {
             trait_node.scope_id = Some(impl_scope_id);
 
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
+            self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
+
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let self_type = Type::Base {
@@ -5946,6 +5952,19 @@ impl SemanticAnalyzer {
             },
             None => Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span])),
         }
+    }
+
+    fn get_type_from_type_name(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<Type, BoxedError> {
+        let type_symbol = self
+            .symbol_table
+            .find_type_symbol_from_scope(scope_id, name)
+            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span]))?;
+
+        if let TypeSymbolKind::TypeAlias((_, Some(ty))) = &type_symbol.kind {
+            return Ok(ty.clone());
+        }
+
+        Ok(Type::new_base(type_symbol.id))
     }
 
     fn collect_uv_unary_operation(
@@ -6878,6 +6897,36 @@ impl SemanticAnalyzer {
                 return Ok(());
             },
             AstNodeKind::Identifier(left_name) => {
+                if left_name == "Self" {
+                    let mut scope_id = Some(info.scope_id);
+
+                    while let Some(id) = scope_id {
+                        let scope = self.symbol_table.get_scope(id).unwrap();
+                        if scope.kind == ScopeKind::Impl {
+                            if let Some(trait_id) = scope.trait_id {
+                                let self_type = self.get_type_from_type_name(info.scope_id, "Self", left.span)?;
+                                let trait_type = Type::new_base(trait_id);
+
+                                self.unification_context.register_constraint(
+                                    Constraint::FullyQualifiedAccess(
+                                        Type::new_base(uv_id),
+                                        self_type,
+                                        Some(trait_type),
+                                        right_name,
+                                    ),
+                                    info,
+                                );
+
+                                return Ok(());
+                            }
+
+                            break;
+                        }
+
+                        scope_id = scope.parent;
+                    }
+                }
+
                 if self.symbol_table.find_value_symbol_from_scope(left.scope_id.unwrap(), left_name).is_some() {
                     let left_type = self.collect_uvs(left)?;
                     
@@ -7232,7 +7281,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
 };
@@ -7794,20 +7843,6 @@ impl SemanticAnalyzer {
             _ => Ok(())
         }
     }
-
-    /// Finds a trait implementation by its scope ID.
-    fn find_trait_impl_by_scope(&self, scope_id: ScopeId) -> Option<(TypeSymbolId, TypeSymbolId, &TraitImpl)> {
-        for (&trait_id, impls_for_trait) in &self.trait_registry.register {
-            for (&type_id, impls_for_type) in impls_for_trait {
-                for imp in impls_for_type {
-                    if imp.impl_scope_id == scope_id {
-                        return Some((trait_id, type_id, imp));
-                    }
-                }
-            }
-        }
-        None
-    }
 }
 
 impl SemanticAnalyzer {
@@ -8357,33 +8392,6 @@ impl SemanticAnalyzer {
 
         if self.is_uv(base_lhs_type.get_base_symbol()) {
             return Ok(false);
-        }
-
-        let is_self_access = self.symbol_table.get_type_symbol(base_lhs_type.get_base_symbol())
-            .map_or(false, |s| self.symbol_table.get_type_name(s.name_id) == "Self");
-
-        if is_static && is_self_access {
-            let mut current_scope_id = Some(info.scope_id);
-            let mut impl_scope_id = None;
-
-            while let Some(id) = current_scope_id {
-                let scope = self.symbol_table.get_scope(id).unwrap();
-                if scope.kind == ScopeKind::Impl {
-                    impl_scope_id = Some(id);
-                    break;
-                }
-
-                current_scope_id = scope.parent;
-            }
-
-            if let Some(scope_id) = impl_scope_id {
-                if let Some((trait_id, _type_id, trait_impl)) = self.find_trait_impl_by_scope(scope_id) {
-                    let trait_args = trait_impl.trait_generic_specialization.iter()
-                        .map(|id| Type::new_base(*id)).collect();
-                    let trait_type = Type::Base { symbol: trait_id, args: trait_args };
-                    return self.unify_fully_qualified_access(result_ty, base_lhs_type, Some(trait_type), rhs_name, info);
-                }
-            }
         }
 
         let member_ty_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;

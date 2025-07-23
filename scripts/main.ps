@@ -1,6 +1,5 @@
 trait Animal {
     type SpeechEmission;
-
     fn speak(&this): Self.SpeechEmission;
 }
 
@@ -9,9 +8,6 @@ struct Dog {}
 impl Animal for Dog {
     type SpeechEmission = char;
     fn speak(&this): Self.SpeechEmission {
-        return 'b';
+        return "1";
     }
 }
-
-let dog = Dog {};
-let f: string = dog.speak();
