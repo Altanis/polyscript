@@ -61,6 +61,7 @@ impl SemanticAnalyzer {
                         Type::new_base(self.trait_registry.get_default_trait(&trait_name)),
                         uv_type,
                         None,
+                        *operator
                     ),
                     info,
                 );
@@ -108,6 +109,7 @@ impl SemanticAnalyzer {
                         },
                         left_type,
                         Some(right_type),
+                        *operator
                     ),
                     info,
                 );

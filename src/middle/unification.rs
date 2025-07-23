@@ -5,7 +5,7 @@ use crate::{
     middle::semantic_analyzer::{
         Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, ScopeId, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
-    utils::{error::{BoxedError, Error, ErrorKind}, kind::{QualifierKind, Span}},
+    utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}},
 };
 
 // https://rustc-dev-guide.rust-lang.org/solve/canonicalization.html
@@ -811,10 +811,10 @@ impl SemanticAnalyzer {
             Constraint::FullyQualifiedAccess(result_ty, ty, tr_opt, member_name) => {
                 self.unify_fully_qualified_access(result_ty, ty, tr_opt, member_name, info)
             },
-            // Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs)
-            // => self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info),
-            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
-            _ => unreachable!(),
+            Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs, operation) => {
+                self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info, operation)
+            },
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info)
         }
     }
 
@@ -1193,6 +1193,97 @@ impl SemanticAnalyzer {
             
             Err(self.create_error(
                 ErrorKind::MemberNotFound(member_name, type_name),
+                info.span,
+                &[info.span],
+            ))
+        }
+    }
+
+    fn unify_operation(
+        &mut self,
+        result_ty: Type,
+        trait_type: Type,
+        lhs: Type,
+        _rhs: Option<Type>,
+        info: ConstraintInfo,
+        _operation: Operation,
+    ) -> Result<bool, BoxedError> {
+        let resolved_lhs = self.resolve_type(&lhs);
+        if self.is_uv(resolved_lhs.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let (trait_id, trait_args) = match self.resolve_type(&trait_type) {
+            Type::Base { symbol, args } => {
+                if self.is_uv(symbol) { return Ok(false); }
+                let resolved_args = args.iter().map(|a| self.resolve_type(a)).collect::<Vec<_>>();
+                for arg in &resolved_args {
+                    if self.is_uv(arg.get_base_symbol()) {
+                        return Ok(false);
+                    }
+                }
+                (symbol, resolved_args)
+            },
+            _ => unreachable!("trait type must be a base type for an operation"),
+        };
+
+        let lhs_type_id = resolved_lhs.get_base_symbol();
+        let candidate_impls = self
+            .trait_registry
+            .register
+            .get(&trait_id)
+            .and_then(|impls_for_trait| impls_for_trait.get(&lhs_type_id))
+            .cloned()
+            .unwrap_or_default();
+
+        let mut found_impl: Option<(TraitImpl, HashMap<TypeSymbolId, Type>)> = None;
+
+        for imp in &candidate_impls {
+            let Some(mut substitutions) = self.check_trait_impl_applicability(&resolved_lhs, imp) else {
+                continue;
+            };
+
+            let impl_trait_template = Type::Base {
+                symbol: trait_id,
+                args: imp.trait_generic_specialization.iter().map(|id| Type::new_base(*id)).collect(),
+            };
+            let call_site_trait = Type::Base { symbol: trait_id, args: trait_args.clone() };
+            let impl_generics_set: HashSet<TypeSymbolId> = imp.impl_generic_params.iter().cloned().collect();
+
+            if self.collect_substitutions(&call_site_trait, &impl_trait_template, &mut substitutions, &impl_generics_set, info).is_err() {
+                continue;
+            }
+
+            let substituted_impl_trait = self.apply_substitution(&impl_trait_template, &substitutions);
+            if self.unify(call_site_trait.clone(), substituted_impl_trait, info).is_ok() {
+                found_impl = Some((imp.clone(), substitutions));
+                break;
+            }
+        }
+
+        if let Some((imp, substitutions)) = found_impl {
+            let output_type_symbol = self.symbol_table
+                .find_type_symbol_in_scope("Output", imp.impl_scope_id)
+                .ok_or_else(|| {
+                    let trait_name = self.symbol_table.display_type(&Type::new_base(trait_id));
+                    self.create_error(ErrorKind::UnknownIdentifier(format!("associated type 'Output' for trait '{}'", trait_name)), info.span, &[info.span])
+                })?
+                .clone();
+
+            let TypeSymbolKind::TypeAlias((_, Some(output_type_template))) = &output_type_symbol.kind else {
+                unreachable!("The 'Output' associated type in a trait impl must be a resolved alias");
+            };
+
+            let concrete_output_type = self.apply_substitution(output_type_template, &substitutions);
+            
+            self.unify(result_ty, concrete_output_type, info)?;
+            
+            Ok(true)
+        } else {
+            let trait_name = self.symbol_table.display_type(&Type::Base { symbol: trait_id, args: trait_args });
+            let lhs_name = self.symbol_table.display_type(&resolved_lhs);
+            Err(self.create_error(
+                ErrorKind::UnimplementedTrait(trait_name, lhs_name),
                 info.span,
                 &[info.span],
             ))

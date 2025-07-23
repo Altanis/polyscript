@@ -883,7 +883,7 @@ pub enum Constraint {
     FunctionSignature(Type, Vec<Type>, Type),
     /// A type denotes the result of an operation that
     /// is trait overloadable.
-    Operation(Type, Type, Type, Option<Type>),
+    Operation(Type, Type, Type, Option<Type>, Operation),
     /// A type denotes the value of a member on an instance variable.
     InstanceMemberAccess(Type, Type, String),
     /// A type denotes a static member of a type, like an enum variant.
@@ -1324,20 +1324,25 @@ impl Constraint {
                             self.t.display_type(r)
                         )
                     }
-                    Operation(result, trait_ty, lhs, rhs) => {
+                    Operation(result, trait_ty, lhs, rhs, operation) => {
                         let op_str = if let Some(r) = rhs {
-                            format!("op({}, {})", self.t.display_type(lhs), self.t.display_type(r))
+                            format!("{}({}, {})", operation, self.t.display_type(lhs), self.t.display_type(r))
                         } else {
-                            format!("op({})", self.t.display_type(lhs))
+                            format!("{}({})", operation, self.t.display_type(lhs))
                         };
 
                         write!(
                             f,
-                            "{} = {} where {}: {}",
+                            "{} = {} where {}: {}<{}>",
                             self.t.display_type(result).yellow(),
                             op_str,
                             self.t.display_type(lhs),
-                            self.t.display_type(trait_ty).cyan()
+                            self.t.display_type(trait_ty).cyan(),
+                            if let Some(rhs) = rhs {
+                                self.t.display_type(rhs)
+                            } else {
+                                "Self".to_string()
+                            }
                         )
                     }
                     InstanceMemberAccess(result, base, m) => write!(
