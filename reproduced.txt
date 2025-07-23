@@ -3541,7 +3541,7 @@ use crate::{
 };
 use colored::*;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
 };
 use strum::IntoEnumIterator;
@@ -3692,6 +3692,20 @@ impl Type {
         match self {
             Type::Base { symbol, .. } => *symbol,
             Type::Reference(inner) | Type::MutableReference(inner) => inner.get_base_symbol(),
+        }
+    }
+
+    /// Recursively traverses a type to check if it contains any generic type variables from a given set.
+    pub fn contains_generics(&self, generics: &HashSet<TypeSymbolId>) -> bool {
+        match self {
+            Type::Base { symbol, args } => {
+                if generics.contains(symbol) {
+                    return true;
+                }
+
+                args.iter().any(|arg| arg.contains_generics(generics))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => inner.contains_generics(generics)
         }
     }
 }
@@ -5614,20 +5628,6 @@ impl SemanticAnalyzer {
 
                 Ok(Type::new_base(fn_ptr_id))
             },
-            AstNodeKind::SelfType(reference_kind) => {
-                let self_symbol = self.symbol_table.find_type_symbol_from_scope(node.scope_id.unwrap(), "Self")
-                    .ok_or_else(|| {
-                        self.create_error(ErrorKind::SelfOutsideImpl, node.span, &[node.span])
-                    })?;
-
-                let base_type = Type::new_base(self_symbol.id);
-
-                Ok(match reference_kind {
-                    ReferenceKind::Value => base_type,
-                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
-                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
-                })
-            }
             _ => Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span])),
         }
     }
@@ -5703,8 +5703,7 @@ impl SemanticAnalyzer {
             trait_node.scope_id = Some(impl_scope_id);
 
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
-            let (implementing_type_id, type_specialization) =
-                self.resolve_type_ref_from_ast(type_reference)?;
+            let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let self_type = Type::Base {
                 symbol: implementing_type_id,
@@ -7749,6 +7748,30 @@ impl SemanticAnalyzer {
                     substitutions.insert(s, concrete_ty);
                 }
 
+                Ok(())
+            },
+            (concrete_ty, Type::Base { symbol: ts, .. }) if self.is_opaque_type_projection(ts) => {
+                let opaque_symbol = self.symbol_table.get_type_symbol(ts).unwrap().clone();
+                if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } = opaque_symbol.kind {
+                    let substituted_opaque_ty = self.apply_substitution(&opaque_ty, substitutions);
+
+                    if substituted_opaque_ty.contains_generics(fn_generics) {
+                        return Ok(());
+                    }
+
+                    if let Some(resolved_member_type) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
+                        self.unify(concrete_ty, resolved_member_type, info)?;
+                    } else {
+                        return Err(self.create_error(
+                            ErrorKind::UnimplementedTrait(
+                                self.symbol_table.display_type(&opaque_tr),
+                                self.symbol_table.display_type(&substituted_opaque_ty)
+                            ),
+                            info.span,
+                            &[info.span]
+                        ));
+                    }
+                }
                 Ok(())
             },
             (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {

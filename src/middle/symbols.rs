@@ -615,20 +615,6 @@ impl SemanticAnalyzer {
 
                 Ok(Type::new_base(fn_ptr_id))
             },
-            AstNodeKind::SelfType(reference_kind) => {
-                let self_symbol = self.symbol_table.find_type_symbol_from_scope(node.scope_id.unwrap(), "Self")
-                    .ok_or_else(|| {
-                        self.create_error(ErrorKind::SelfOutsideImpl, node.span, &[node.span])
-                    })?;
-
-                let base_type = Type::new_base(self_symbol.id);
-
-                Ok(match reference_kind {
-                    ReferenceKind::Value => base_type,
-                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
-                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
-                })
-            }
             _ => Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span])),
         }
     }
@@ -704,8 +690,7 @@ impl SemanticAnalyzer {
             trait_node.scope_id = Some(impl_scope_id);
 
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
-            let (implementing_type_id, type_specialization) =
-                self.resolve_type_ref_from_ast(type_reference)?;
+            let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let self_type = Type::Base {
                 symbol: implementing_type_id,
