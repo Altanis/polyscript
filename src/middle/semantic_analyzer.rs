@@ -996,15 +996,15 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * methods not detected for type projections
-         * impls on traits dont conform to trait signature
+         * `break` and `continue` allowed outside loop
+         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
+         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
+         * enum X {A}; type B = X.A; compiles...
+         * uvs must be substituted for their real type
+         * impls on traits dont conform to trait signature (do after unification)
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)
-         * `break` and `continue` allowed outside loop
          * uninitialized variables
-         * doesn't check for function returns on all paths
-         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
-         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
          * shit error messages
          */
 

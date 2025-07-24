@@ -25,7 +25,11 @@ pub enum ErrorKind {
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
     InvalidTraitNodeInImpl(String, usize, usize),
-    DeformedTraitImpl(String),
+    DeformedTraitImpl {
+        trait_name: String,
+        missing: Vec<String>,
+        extra: Vec<String>,
+    },
     ConflictingInherentImpl(String),
     InvalidDereference(String),
     ExpectedScopedItem,
@@ -92,8 +96,19 @@ impl ErrorKind {
             ErrorKind::InvalidTraitNodeInImpl(ty, given, expected) => {
                 format!("trait {ty} has {given} generic parameters but expects {expected} generic parameters")
             }
-            ErrorKind::DeformedTraitImpl(ty) => {
-                format!("not all types in trait implemented, missing: {ty}")
+            ErrorKind::DeformedTraitImpl {
+                trait_name,
+                missing,
+                extra,
+            } => {
+                let mut message = format!("deformed implementation of trait `{}`", trait_name);
+                if !missing.is_empty() {
+                    message.push_str(&format!("\n  - missing items: {}", missing.join(", ")));
+                }
+                if !extra.is_empty() {
+                    message.push_str(&format!("\n  - extraneous items: {}", extra.join(", ")));
+                }
+                message
             }
             ErrorKind::ConflictingInherentImpl(ty) => {
                 format!("conflicting implementations for type {ty}")

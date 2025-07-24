@@ -8085,12 +8085,22 @@ impl SemanticAnalyzer {
 
         for trait_impl in all_trait_impls {
             if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl) {
-                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true)? {
+                let scope_id = trait_impl.impl_scope_id;
+                
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
+                    let member_type = value_symbol.type_id.as_ref().unwrap().clone();
+                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                    return Ok(Some(concrete_member_type));
+                }
+                
+                if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id) {
+                    let member_type = Type::new_base(type_symbol.id);
                     let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                     return Ok(Some(concrete_member_type));
                 }
             }
         }
+        
         Ok(None)
     }
 }

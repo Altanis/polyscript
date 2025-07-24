@@ -1,23 +1,27 @@
-struct MyStruct {}
+struct Dog {}
+struct Cat {}
 
-trait Printable {
-    fn print(&this): int;
+trait Animal {
+    type FormOfSpeech;
+    const Speech: Self.FormOfSpeech;
+
+    fn speak(&this): Self.FormOfSpeech;
 }
 
-impl Printable for MyStruct {
-    fn print(&this): int {
+impl Animal for Dog {
+    type FormOfSpeech = string;
+    const Speech: string = "bark";
+
+    fn speak(&this): int {
         return 3;
     }
 }
 
-impl MyStruct {
-    fn print(&this): char {
-        return '3';
-    }
-}
+impl Animal for Cat {
+    type FormOfSpeech = string;
+    const Speech: string = "meow";
 
-fn main() {
-    let s: MyStruct = MyStruct {};
-    let instance_printed: char = s.print();
-    let trait_printed: int = [MyStruct as Printable].print(&s);
+    fn speak(&this): Self.FormOfSpeech {
+        return Self.Speech;
+    }
 }
