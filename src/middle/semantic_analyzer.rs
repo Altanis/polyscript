@@ -936,13 +936,18 @@ impl UnificationContext {
     }
 }
 
+pub struct UVCollectionContext {
+    pub current_return_type: Option<Type>,
+    pub in_loop: bool
+}
+
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     // TODO: Find better place to put this.
-    pub current_return_type: Option<Type>,
+    pub uv_collection_ctx: UVCollectionContext,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
 }
@@ -963,7 +968,7 @@ impl SemanticAnalyzer {
             symbol_table,
             builtin_types,
             unification_context: UnificationContext::default(),
-            current_return_type: None,
+            uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false },
             errors: vec![],
             lines,
         }
@@ -996,7 +1001,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * `break` and `continue` allowed outside loop
          * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
          * types that require n generic params but are supplied m generic params, for n != m, compiles fine
          * enum X {A}; type B = X.A; compiles...

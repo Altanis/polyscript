@@ -286,9 +286,11 @@ impl Operation {
 
                 And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
 
-                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
-                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Void),
+
+                Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf 
+                | MutableAddressOf | As => None,
             },
 
             Float => match self {
@@ -302,9 +304,11 @@ impl Operation {
 
                 And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
 
-                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
-                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq => Some(Void),
+
+                Assign | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq | RightBitShiftEq 
+                | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference 
+                | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Bool => match self {
@@ -322,7 +326,9 @@ impl Operation {
                 Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Neg | PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
+                PlusEq => Some(Void),
+
+                Neg | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf

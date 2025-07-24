@@ -1,4 +1,30 @@
+struct Dog {}
+struct Cat {}
 
+trait Animal {
+    type FormOfSpeech;
+    const Speech: Self.FormOfSpeech;
+
+    fn speak(&this): Self.FormOfSpeech;
+}
+
+impl Animal for Dog {
+    type FormOfSpeech = string;
+    const Speech: string = "bark";
+
+    fn speak(&this): int {
+        return 3;
+    }
+}
+
+impl Animal for Cat {
+    type FormOfSpeech = string;
+    const Speech: string = "meow";
+
+    fn speak(&this): Self.FormOfSpeech {
+        return Self.Speech;
+    }
+}
 
 
 let x = 1;

@@ -348,6 +348,8 @@ impl SemanticAnalyzer {
         body: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        self.uv_collection_ctx.in_loop = true;
+
         let cond_type = self.collect_uvs(condition)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
         self.unification_context
@@ -363,6 +365,8 @@ impl SemanticAnalyzer {
             info,
         );
 
+        self.uv_collection_ctx.in_loop = false;
+
         Ok(())
     }
 
@@ -375,6 +379,8 @@ impl SemanticAnalyzer {
         body: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        self.uv_collection_ctx.in_loop = true;
+
         if let Some(init) = initializer {
             self.collect_uvs(init)?;
         }
@@ -400,6 +406,8 @@ impl SemanticAnalyzer {
             info,
         );
 
+        self.uv_collection_ctx.in_loop = false;
+
         Ok(())
     }
 
@@ -417,7 +425,7 @@ impl SemanticAnalyzer {
             info,
         );
 
-        let Some(expected_return_type) = self.current_return_type.clone() else {
+        let Some(expected_return_type) = self.uv_collection_ctx.current_return_type.clone() else {
              return Err(self.create_error(ErrorKind::InvalidReturn, info.span, &[info.span]));
         };
 
@@ -499,8 +507,8 @@ impl SemanticAnalyzer {
             Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
         };
 
-        let old_return_type = self.current_return_type.clone();
-        self.current_return_type = Some(return_type_val.clone());
+        let old_return_type = self.uv_collection_ctx.current_return_type.clone();
+        self.uv_collection_ctx.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
             let body_type = self.collect_uvs(body_node)?;
@@ -520,7 +528,7 @@ impl SemanticAnalyzer {
             );
         }
 
-        self.current_return_type = old_return_type;
+        self.uv_collection_ctx.current_return_type = old_return_type;
 
         let fn_sig_type_id = self.symbol_table.add_type_symbol(
             &format!("#fn_sig_{}", uv_id),
@@ -1328,13 +1336,19 @@ impl SemanticAnalyzer {
                 self.collect_uv_struct_field(uv_id, info)?
             }
             EnumVariant(_) => self.collect_uv_enum_variant(uv_id, info)?,
-            Break | Continue => self.unification_context.register_constraint(
-                Constraint::Equality(
-                    uv.clone(), 
-                    Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
-                ),
-                info
-            ),
+            Break | Continue => {
+                if self.uv_collection_ctx.in_loop {
+                    self.unification_context.register_constraint(
+                        Constraint::Equality(
+                            uv.clone(), 
+                            Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
+                        ),
+                        info
+                    )
+                } else {
+                    return Err(self.create_error(ErrorKind::OutsideOfLoop, expr.span, &[expr.span]));
+                }
+            },
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }

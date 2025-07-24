@@ -53,6 +53,7 @@ pub enum ErrorKind {
     InvalidCast(String, String),
     DuplicateSymbolsInInherentImpl(String, String),
     InvalidPathQualifier,
+    OutsideOfLoop
 }
 
 impl ErrorKind {
@@ -166,7 +167,8 @@ impl ErrorKind {
             ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
                 format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
             },
-            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string()
+            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string(),
+            ErrorKind::OutsideOfLoop => "use of control flow keyword outside of loop".to_string()
         }
     }
 }
