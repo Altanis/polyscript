@@ -1001,7 +1001,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
          * types that require n generic params but are supplied m generic params, for n != m, compiles fine
          * enum X {A}; type B = X.A; compiles...
          * uvs must be substituted for their real type

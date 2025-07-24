@@ -854,7 +854,6 @@ impl Parser {
                         return Ok(AstNodeKind::FunctionParameter {
                             name: "this".to_string(),
                             type_annotation,
-                            initializer: None,
                             mutable: false,
                         });
                     }
@@ -867,7 +866,6 @@ impl Parser {
                     return Ok(AstNodeKind::FunctionParameter {
                         name: "this".to_string(),
                         type_annotation,
-                        initializer: None,
                         mutable: false,
                     });
                 }
@@ -877,16 +875,10 @@ impl Parser {
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
             let type_annotation = boxed!(parser.parse_type()?);
-            let mut initializer = None;
-
-            if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(boxed!(parser.parse_expression()?));
-            }
 
             Ok(AstNodeKind::FunctionParameter {
                 name,
                 type_annotation,
-                initializer,
                 mutable,
             })
         })?;

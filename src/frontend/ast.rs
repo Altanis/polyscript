@@ -88,7 +88,6 @@ pub enum AstNodeKind {
     FunctionParameter {
         name: String,
         type_annotation: BoxedAstNode,
-        initializer: Option<BoxedAstNode>,
         mutable: bool,
     },
 
@@ -571,7 +570,6 @@ impl AstNode {
             AstNodeKind::FunctionParameter {
                 name,
                 type_annotation,
-                initializer,
                 mutable,
             } => {
                 write!(f, "{}", indent_str)?;
@@ -582,10 +580,6 @@ impl AstNode {
                     name.yellow(),
                     type_annotation
                 )?;
-                if let Some(default) = initializer {
-                    write!(f, " = ")?;
-                    default.fmt_with_indent(f, 0)?;
-                }
             }
 
             AstNodeKind::StructDeclaration {
@@ -968,20 +962,7 @@ impl AstNode {
                 children
             }
 
-            FunctionParameter {
-                type_annotation,
-                initializer,
-                ..
-            } => {
-                let mut children = vec![];
-                children.push(type_annotation.as_mut());
-
-                if let Some(init) = initializer.as_mut() {
-                    children.push(init.as_mut());
-                }
-
-                children
-            }
+            FunctionParameter { type_annotation, .. } => vec![type_annotation],
 
             StructDeclaration {
                 generic_parameters,

@@ -572,7 +572,6 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         let AstNodeKind::FunctionParameter {
             type_annotation,
-            initializer,
             ..
         } = &mut node.kind
         else {
@@ -588,12 +587,6 @@ impl SemanticAnalyzer {
         );
 
         let annotation_type = self.collect_uvs(type_annotation)?;
-
-        if let Some(init_node) = initializer {
-            let init_type = self.collect_uvs(init_node)?;
-            self.unification_context
-                .register_constraint(Constraint::Equality(init_type, annotation_type.clone()), info);
-        }
 
         let symbol_uv = self
             .unification_context
