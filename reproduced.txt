@@ -8156,15 +8156,14 @@ impl SemanticAnalyzer {
         match (t1.clone(), t2.clone()) {
             (t1, t2) if t1 == t2 => Ok(t1),
 
-
-            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
-                if self.is_never(s) => Ok(other.clone()),
-
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. }) 
                 if self.is_uv(s) => self.unify_variable(s, other, info),
             
             (ref t @ Type::Base { symbol: s, .. }, _) | (_, ref t @ Type::Base { symbol: s, .. })
                 if self.is_opaque_type_projection(s) => Ok(t.clone()),
+
+            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
+                if self.is_never(s) => Ok(other.clone()),
 
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();

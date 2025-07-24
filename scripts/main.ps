@@ -1,18 +1,23 @@
 struct MyStruct {}
 
 trait Printable {
-    fn print(&this);
+    fn print(&this): int;
 }
 
 impl Printable for MyStruct {
-    fn print(&this) { /* trait print */ }
+    fn print(&this): int {
+        return 3;
+    }
 }
 
 impl MyStruct {
-    fn print(&this) { /* inherent print */ }
+    fn print(&this): char {
+        return '3';
+    }
 }
 
 fn main() {
     let s: MyStruct = MyStruct {};
-    [MyStruct as Printable].print(&s);
+    let instance_printed: char = s.print();
+    let trait_printed: int = [MyStruct as Printable].print(&s);
 }
