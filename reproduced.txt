@@ -5714,8 +5714,20 @@ impl SemanticAnalyzer {
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
             self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
 
-            let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
+            let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+            if trait_symbol.generic_parameters.len() != trait_generic_specialization.len() {
+                return Err(self.create_error(
+                    ErrorKind::InvalidTraitNodeInImpl(
+                        self.symbol_table.display_type(&Type::new_base(trait_id)),
+                        trait_generic_specialization.len(),
+                        trait_symbol.generic_parameters.len()
+                    ),
+                    trait_node.span,
+                    &[trait_node.span]
+                ));
+            }
 
+            let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
             let self_type = Type::Base {
                 symbol: implementing_type_id,
                 args: type_specialization.iter().map(|id| Type::new_base(*id)).collect()
@@ -8628,7 +8640,8 @@ pub enum ErrorKind {
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
-    InvalidTraitImpl(String),
+    InvalidTraitNodeInImpl(String, usize, usize),
+    DeformedTraitImpl(String),
     ConflictingInherentImpl(String),
     InvalidDereference(String),
     ExpectedScopedItem,
@@ -8651,7 +8664,7 @@ pub enum ErrorKind {
     },
     InvalidCast(String, String),
     DuplicateSymbolsInInherentImpl(String, String),
-    InvalidPathQualifier
+    InvalidPathQualifier,
 }
 
 impl ErrorKind {
@@ -8692,7 +8705,10 @@ impl ErrorKind {
             ErrorKind::ConflictingTraitImpl(tr, ty) => {
                 format!("conflicting trait implementations for {tr} on type {ty}")
             }
-            ErrorKind::InvalidTraitImpl(ty) => {
+            ErrorKind::InvalidTraitNodeInImpl(ty, given, expected) => {
+                format!("trait {ty} has {given} generic parameters but expects {expected} generic parameters")
+            }
+            ErrorKind::DeformedTraitImpl(ty) => {
                 format!("not all types in trait implemented, missing: {ty}")
             }
             ErrorKind::ConflictingInherentImpl(ty) => {

@@ -24,7 +24,8 @@ pub enum ErrorKind {
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
-    InvalidTraitImpl(String),
+    InvalidTraitNodeInImpl(String, usize, usize),
+    DeformedTraitImpl(String),
     ConflictingInherentImpl(String),
     InvalidDereference(String),
     ExpectedScopedItem,
@@ -47,7 +48,7 @@ pub enum ErrorKind {
     },
     InvalidCast(String, String),
     DuplicateSymbolsInInherentImpl(String, String),
-    InvalidPathQualifier
+    InvalidPathQualifier,
 }
 
 impl ErrorKind {
@@ -88,7 +89,10 @@ impl ErrorKind {
             ErrorKind::ConflictingTraitImpl(tr, ty) => {
                 format!("conflicting trait implementations for {tr} on type {ty}")
             }
-            ErrorKind::InvalidTraitImpl(ty) => {
+            ErrorKind::InvalidTraitNodeInImpl(ty, given, expected) => {
+                format!("trait {ty} has {given} generic parameters but expects {expected} generic parameters")
+            }
+            ErrorKind::DeformedTraitImpl(ty) => {
                 format!("not all types in trait implemented, missing: {ty}")
             }
             ErrorKind::ConflictingInherentImpl(ty) => {
