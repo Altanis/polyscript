@@ -66,6 +66,7 @@ pub const CHAR_DELIMITER: char = '\'';
 pub enum Operation {
     // UNARY
     Not, // !
+    Neg, // Negate, i.e. `-1`
     BitwiseNegate,
 
     // BINARY
@@ -121,6 +122,7 @@ impl Operation {
         matches!(
             self,
             Operation::Not
+                | Operation::Neg
                 | Operation::BitwiseNegate
                 | Operation::Plus
                 | Operation::Minus
@@ -214,7 +216,7 @@ impl Operation {
             Operation::Exp => (12, 11),
 
             Operation::As => (13, 14),
-            Operation::Not | Operation::BitwiseNegate => (13, 14),
+            Operation::Not | Operation::Neg | Operation::BitwiseNegate => (13, 14),
 
             Operation::FunctionCall => (14, 0),
             Operation::FieldAccess => (14, 15),
@@ -223,10 +225,11 @@ impl Operation {
         }
     }
 
-    /// Returns the trait name and whether it is a unary or binary operation.
+    /// Returns the trait name and if it is a binary operation
     pub fn to_trait_data(&self) -> Option<(String, bool)> {
         match self {
             Operation::Not => Some(("Not".to_string(), false)),
+            Operation::Neg => Some(("Neg".to_string(), false)),
             Operation::BitwiseNegate => Some(("BitwiseNegate".to_string(), false)),
             Operation::Plus => Some(("Add".to_string(), true)),
             Operation::Minus => Some(("Subtract".to_string(), true)),
@@ -276,7 +279,7 @@ impl Operation {
         match primitive {
             Int => match self {
                 Not => Some(Bool),
-                BitwiseNegate => Some(Int),
+                Neg | BitwiseNegate => Some(Int),
 
                 Plus | Minus | Mul | Div | Mod | Exp | BitwiseAnd | BitwiseOr | BitwiseXor
                 | RightBitShift | LeftBitShift => Some(Int),
@@ -290,6 +293,7 @@ impl Operation {
 
             Float => match self {
                 Not => Some(Bool),
+                Neg => Some(Float),
                 BitwiseNegate => None,
 
                 Plus | Minus | Mul | Div | Mod | Exp => Some(Float),
@@ -305,10 +309,10 @@ impl Operation {
 
             Bool => match self {
                 Not => Some(Bool),
-                And | Or | Equivalence | NotEqual | Assign => Some(Bool),
+                And | Or | Equivalence | NotEqual => Some(Bool),
 
-                BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq
-                | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                Neg | Assign | BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq
+                | DivEq | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
                 | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
                 | ImmutableAddressOf | MutableAddressOf | As => None,
@@ -318,7 +322,7 @@ impl Operation {
                 Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
+                Neg | PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
@@ -328,7 +332,7 @@ impl Operation {
             Char => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
+                Neg | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
                 | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
                 | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
                 | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
@@ -344,6 +348,7 @@ impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Operation::Not => NOT_TOKEN.to_string(),
+            Operation::Neg => SUB_TOKEN.to_string(),
             Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
 
             Operation::Plus => ADD_TOKEN.to_string(),

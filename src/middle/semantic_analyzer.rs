@@ -991,9 +991,21 @@ impl SemanticAnalyzer {
          * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
          * 4: Attributes symbols with unification variables (unresolved type symbols).
          * 5: Collects constraints on unification symbols.
-         * 6: Resolves unification variables via a unification algorithm.
-         * 7: Detects duplicate symbols across inherent impls.
-         * 8: Miscellaneous grammar checks.
+         * 6: Detects duplicate symbols across inherent impls.
+         * 7: Resolves unification variables via a unification algorithm.
+         */
+        
+        /* need to fix:
+         * methods not detected for type projections
+         * impls on traits dont conform to trait signature
+         * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
+         * privacy is ignored (can access private methods and fields)
+         * `break` and `continue` allowed outside loop
+         * uninitialized variables
+         * doesn't check for function returns on all paths
+         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
+         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
+         * shit error messages
          */
 
         pass!(self, symbol_collector_pass, &mut program);

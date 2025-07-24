@@ -2331,6 +2331,7 @@ impl Parser {
                 let mut operator = match operator {
                     Operation::Mul => Operation::Dereference,
                     Operation::BitwiseAnd => Operation::ImmutableAddressOf,
+                    Operation::Minus => Operation::Neg,
                     _ => operator,
                 };
 
@@ -4528,9 +4529,21 @@ impl SemanticAnalyzer {
          * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
          * 4: Attributes symbols with unification variables (unresolved type symbols).
          * 5: Collects constraints on unification symbols.
-         * 6: Resolves unification variables via a unification algorithm.
-         * 7: Detects duplicate symbols across inherent impls.
-         * 8: Miscellaneous grammar checks.
+         * 6: Detects duplicate symbols across inherent impls.
+         * 7: Resolves unification variables via a unification algorithm.
+         */
+        
+        /* need to fix:
+         * methods not detected for type projections
+         * impls on traits dont conform to trait signature
+         * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
+         * privacy is ignored (can access private methods and fields)
+         * `break` and `continue` allowed outside loop
+         * uninitialized variables
+         * doesn't check for function returns on all paths
+         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
+         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
+         * shit error messages
          */
 
         pass!(self, symbol_collector_pass, &mut program);
@@ -6103,20 +6116,40 @@ impl SemanticAnalyzer {
         uv_id: TypeSymbolId,
         left: &mut BoxedAstNode,
         right: &mut BoxedAstNode,
+        operator: &mut Operation,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         let left_type = self.collect_uvs(left)?;
         let right_type = self.collect_uvs(right)?;
-        let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+        let result_uv = Type::new_base(uv_id);
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(left_type, bool_type.clone()), info);
-        self.unification_context
-            .register_constraint(Constraint::Equality(right_type, bool_type.clone()), info);
-        self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), bool_type),
-            info,
-        );
+        match *operator {
+            Operation::And | Operation::Or => {
+                let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+
+                self.unification_context.register_constraint(Constraint::Equality(left_type, bool_type.clone()), info);
+                self.unification_context.register_constraint(Constraint::Equality(right_type, bool_type.clone()), info);
+
+                self.unification_context.register_constraint(Constraint::Equality(result_uv, bool_type), info);
+            }
+            _ => {
+                let (trait_name, _) = operator.to_trait_data().unwrap();
+
+                self.unification_context.register_constraint(
+                    Constraint::Operation(
+                        result_uv,
+                        Type::Base {
+                            symbol: self.trait_registry.get_default_trait(&trait_name),
+                            args: vec![right_type.clone()],
+                        },
+                        left_type,
+                        Some(right_type),
+                        *operator,
+                    ),
+                    info,
+                );
+            }
+        }
 
         Ok(())
     }
@@ -6227,10 +6260,6 @@ impl SemanticAnalyzer {
         let result_uv = Type::new_base(uv_id);
 
         let then_type = self.collect_uvs(then_branch)?;
-        self.unification_context.register_constraint(
-            Constraint::Equality(result_uv.clone(), then_type),
-            info,
-        );
 
         for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
             let elif_cond_type = self.collect_uvs(elif_cond)?;
@@ -6239,7 +6268,7 @@ impl SemanticAnalyzer {
 
             let elif_type = self.collect_uvs(elif_branch)?;
             self.unification_context.register_constraint(
-                Constraint::Equality(result_uv.clone(), elif_type),
+                Constraint::Equality(then_type.clone(), elif_type),
                 info,
             );
         }
@@ -6247,7 +6276,12 @@ impl SemanticAnalyzer {
         if let Some(else_node) = else_branch {
             let else_type = self.collect_uvs(else_node)?;
             self.unification_context.register_constraint(
-                Constraint::Equality(result_uv.clone(), else_type),
+                Constraint::Equality(then_type.clone(), else_type),
+                info,
+            );
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv, then_type),
                 info,
             );
         } else {
@@ -7182,8 +7216,8 @@ impl SemanticAnalyzer {
                 expr,
                 target_type,
             } => self.collect_uv_type_cast(uv_id, expr, target_type, info)?,
-            ConditionalOperation { left, right, .. } => {
-                self.collect_uv_conditional_operation(uv_id, left, right, info)?
+            ConditionalOperation { left, right, operator, .. } => {
+                self.collect_uv_conditional_operation(uv_id, left, right, operator, info)?
             }
             VariableDeclaration { .. } => {
                 self.collect_uv_variable_declaration(uv_id, expr, expr.span, info)?
@@ -8921,6 +8955,7 @@ pub const CHAR_DELIMITER: char = '\'';
 pub enum Operation {
     // UNARY
     Not, // !
+    Neg, // Negate, i.e. `-1`
     BitwiseNegate,
 
     // BINARY
@@ -8976,6 +9011,7 @@ impl Operation {
         matches!(
             self,
             Operation::Not
+                | Operation::Neg
                 | Operation::BitwiseNegate
                 | Operation::Plus
                 | Operation::Minus
@@ -9069,7 +9105,7 @@ impl Operation {
             Operation::Exp => (12, 11),
 
             Operation::As => (13, 14),
-            Operation::Not | Operation::BitwiseNegate => (13, 14),
+            Operation::Not | Operation::Neg | Operation::BitwiseNegate => (13, 14),
 
             Operation::FunctionCall => (14, 0),
             Operation::FieldAccess => (14, 15),
@@ -9078,10 +9114,11 @@ impl Operation {
         }
     }
 
-    /// Returns the trait name and whether it is a unary or binary operation.
+    /// Returns the trait name and if it is a binary operation
     pub fn to_trait_data(&self) -> Option<(String, bool)> {
         match self {
             Operation::Not => Some(("Not".to_string(), false)),
+            Operation::Neg => Some(("Neg".to_string(), false)),
             Operation::BitwiseNegate => Some(("BitwiseNegate".to_string(), false)),
             Operation::Plus => Some(("Add".to_string(), true)),
             Operation::Minus => Some(("Subtract".to_string(), true)),
@@ -9131,7 +9168,7 @@ impl Operation {
         match primitive {
             Int => match self {
                 Not => Some(Bool),
-                BitwiseNegate => Some(Int),
+                Neg | BitwiseNegate => Some(Int),
 
                 Plus | Minus | Mul | Div | Mod | Exp | BitwiseAnd | BitwiseOr | BitwiseXor
                 | RightBitShift | LeftBitShift => Some(Int),
@@ -9145,6 +9182,7 @@ impl Operation {
 
             Float => match self {
                 Not => Some(Bool),
+                Neg => Some(Float),
                 BitwiseNegate => None,
 
                 Plus | Minus | Mul | Div | Mod | Exp => Some(Float),
@@ -9160,10 +9198,10 @@ impl Operation {
 
             Bool => match self {
                 Not => Some(Bool),
-                And | Or | Equivalence | NotEqual | Assign => Some(Bool),
+                And | Or | Equivalence | NotEqual => Some(Bool),
 
-                BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq
-                | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                Neg | Assign | BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq
+                | DivEq | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
                 | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
                 | ImmutableAddressOf | MutableAddressOf | As => None,
@@ -9173,7 +9211,7 @@ impl Operation {
                 Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
+                Neg | PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
@@ -9183,7 +9221,7 @@ impl Operation {
             Char => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
+                Neg | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
                 | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
                 | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
                 | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
@@ -9199,6 +9237,7 @@ impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Operation::Not => NOT_TOKEN.to_string(),
+            Operation::Neg => SUB_TOKEN.to_string(),
             Operation::BitwiseNegate => BITWISE_NEGATE_TOKEN.to_string(),
 
             Operation::Plus => ADD_TOKEN.to_string(),

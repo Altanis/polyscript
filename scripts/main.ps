@@ -1,5 +1,18 @@
-type A = B;
-type B = C;
-type C = A;
+struct MyStruct {}
 
-let x: A;
+trait Printable {
+    fn print(&this);
+}
+
+impl Printable for MyStruct {
+    fn print(&this) { /* trait print */ }
+}
+
+impl MyStruct {
+    fn print(&this) { /* inherent print */ }
+}
+
+fn main() {
+    let s: MyStruct = MyStruct {};
+    [MyStruct as Printable].print(&s);
+}

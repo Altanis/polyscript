@@ -259,6 +259,7 @@ impl Parser {
                 let mut operator = match operator {
                     Operation::Mul => Operation::Dereference,
                     Operation::BitwiseAnd => Operation::ImmutableAddressOf,
+                    Operation::Minus => Operation::Neg,
                     _ => operator,
                 };
 

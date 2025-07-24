@@ -162,20 +162,40 @@ impl SemanticAnalyzer {
         uv_id: TypeSymbolId,
         left: &mut BoxedAstNode,
         right: &mut BoxedAstNode,
+        operator: &mut Operation,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         let left_type = self.collect_uvs(left)?;
         let right_type = self.collect_uvs(right)?;
-        let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+        let result_uv = Type::new_base(uv_id);
 
-        self.unification_context
-            .register_constraint(Constraint::Equality(left_type, bool_type.clone()), info);
-        self.unification_context
-            .register_constraint(Constraint::Equality(right_type, bool_type.clone()), info);
-        self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), bool_type),
-            info,
-        );
+        match *operator {
+            Operation::And | Operation::Or => {
+                let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
+
+                self.unification_context.register_constraint(Constraint::Equality(left_type, bool_type.clone()), info);
+                self.unification_context.register_constraint(Constraint::Equality(right_type, bool_type.clone()), info);
+
+                self.unification_context.register_constraint(Constraint::Equality(result_uv, bool_type), info);
+            }
+            _ => {
+                let (trait_name, _) = operator.to_trait_data().unwrap();
+
+                self.unification_context.register_constraint(
+                    Constraint::Operation(
+                        result_uv,
+                        Type::Base {
+                            symbol: self.trait_registry.get_default_trait(&trait_name),
+                            args: vec![right_type.clone()],
+                        },
+                        left_type,
+                        Some(right_type),
+                        *operator,
+                    ),
+                    info,
+                );
+            }
+        }
 
         Ok(())
     }
@@ -286,10 +306,6 @@ impl SemanticAnalyzer {
         let result_uv = Type::new_base(uv_id);
 
         let then_type = self.collect_uvs(then_branch)?;
-        self.unification_context.register_constraint(
-            Constraint::Equality(result_uv.clone(), then_type),
-            info,
-        );
 
         for (elif_cond, elif_branch) in else_if_branches.iter_mut() {
             let elif_cond_type = self.collect_uvs(elif_cond)?;
@@ -298,7 +314,7 @@ impl SemanticAnalyzer {
 
             let elif_type = self.collect_uvs(elif_branch)?;
             self.unification_context.register_constraint(
-                Constraint::Equality(result_uv.clone(), elif_type),
+                Constraint::Equality(then_type.clone(), elif_type),
                 info,
             );
         }
@@ -306,7 +322,12 @@ impl SemanticAnalyzer {
         if let Some(else_node) = else_branch {
             let else_type = self.collect_uvs(else_node)?;
             self.unification_context.register_constraint(
-                Constraint::Equality(result_uv.clone(), else_type),
+                Constraint::Equality(then_type.clone(), else_type),
+                info,
+            );
+
+            self.unification_context.register_constraint(
+                Constraint::Equality(result_uv, then_type),
                 info,
             );
         } else {
@@ -1241,8 +1262,8 @@ impl SemanticAnalyzer {
                 expr,
                 target_type,
             } => self.collect_uv_type_cast(uv_id, expr, target_type, info)?,
-            ConditionalOperation { left, right, .. } => {
-                self.collect_uv_conditional_operation(uv_id, left, right, info)?
+            ConditionalOperation { left, right, operator, .. } => {
+                self.collect_uv_conditional_operation(uv_id, left, right, operator, info)?
             }
             VariableDeclaration { .. } => {
                 self.collect_uv_variable_declaration(uv_id, expr, expr.span, info)?
