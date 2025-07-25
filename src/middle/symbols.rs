@@ -692,19 +692,6 @@ impl SemanticAnalyzer {
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
             self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
 
-            let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
-            if trait_symbol.generic_parameters.len() != trait_generic_specialization.len() {
-                return Err(self.create_error(
-                    ErrorKind::InvalidTraitNodeInImpl(
-                        self.symbol_table.display_type(&Type::new_base(trait_id)),
-                        trait_generic_specialization.len(),
-                        trait_symbol.generic_parameters.len()
-                    ),
-                    trait_node.span,
-                    &[trait_node.span]
-                ));
-            }
-
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
             let self_type = Type::Base {
                 symbol: implementing_type_id,

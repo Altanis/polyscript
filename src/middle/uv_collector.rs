@@ -792,16 +792,20 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        // dbg!(type_name);
-        
-        let symbol = self
-            .symbol_table
-            .find_type_symbol_from_scope(scope_id, type_name)
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, type_name)
             .ok_or_else(|| {
                 self.create_error(ErrorKind::UnknownIdentifier(type_name.to_owned()), span, &[span])
-            })?
-            .id;
-        // dbg!(uv_id, symbol);
+            })?.id;
+
+        let symbol_params = &self.symbol_table.get_type_symbol(symbol).unwrap().generic_parameters;
+        
+        if symbol_params.len() != generic_types.len() {
+            return Err(self.create_error(
+                ErrorKind::InvalidTypeReference(type_name.to_string(), generic_types.len(), symbol_params.len()),
+                span,
+                &[span]
+            ))
+        }
 
         let args: Vec<Type> = generic_types
             .iter_mut()

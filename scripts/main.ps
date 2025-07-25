@@ -1,3 +1,14 @@
-fn main(x: int = 0) {
-    
+struct Point<T> {
+    x: T;
+    y: T;
+}
+
+type PointInteger = Point<int>;
+type InvalidPoint = Point;
+
+impl Add for Point {
+    type Output = int;
+    fn add(&this, other: &Self): Self.Output {
+        3
+    }
 }

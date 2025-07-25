@@ -24,7 +24,6 @@ pub enum ErrorKind {
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
-    InvalidTraitNodeInImpl(String, usize, usize),
     DeformedTraitImpl {
         trait_name: String,
         missing: Vec<String>,
@@ -53,7 +52,8 @@ pub enum ErrorKind {
     InvalidCast(String, String),
     DuplicateSymbolsInInherentImpl(String, String),
     InvalidPathQualifier,
-    OutsideOfLoop
+    OutsideOfLoop,
+    InvalidTypeReference(String, usize, usize)
 }
 
 impl ErrorKind {
@@ -93,9 +93,6 @@ impl ErrorKind {
             }
             ErrorKind::ConflictingTraitImpl(tr, ty) => {
                 format!("conflicting trait implementations for {tr} on type {ty}")
-            }
-            ErrorKind::InvalidTraitNodeInImpl(ty, given, expected) => {
-                format!("trait {ty} has {given} generic parameters but expects {expected} generic parameters")
             }
             ErrorKind::DeformedTraitImpl {
                 trait_name,
@@ -168,7 +165,10 @@ impl ErrorKind {
                 format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
             },
             ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string(),
-            ErrorKind::OutsideOfLoop => "use of control flow keyword outside of loop".to_string()
+            ErrorKind::OutsideOfLoop => "use of control flow keyword outside of loop".to_string(),
+            ErrorKind::InvalidTypeReference(ty, given, expected) => {
+                format!("type {ty} was given {given} generic parameters but expects {expected} generic parameters")
+            }
         }
     }
 }
