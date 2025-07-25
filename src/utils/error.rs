@@ -84,7 +84,7 @@ impl ErrorKind {
                 "cannot construct impl block for {}",
                 type_ref.as_ref().map_or("an unnamed identifier", |v| v)
             ),
-            ErrorKind::ExpectedType => "expected identifier to resolve to a type".to_string(),
+            ErrorKind::ExpectedType => "expected this to resolve to a type".to_string(),
             ErrorKind::InvalidConstraint(constraint) => format!(
                 "expected constraint to be a trait, instead found \"{constraint}\""
             ),

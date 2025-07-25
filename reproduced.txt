@@ -89,7 +89,6 @@ pub enum AstNodeKind {
     FunctionParameter {
         name: String,
         type_annotation: BoxedAstNode,
-        initializer: Option<BoxedAstNode>,
         mutable: bool,
     },
 
@@ -572,7 +571,6 @@ impl AstNode {
             AstNodeKind::FunctionParameter {
                 name,
                 type_annotation,
-                initializer,
                 mutable,
             } => {
                 write!(f, "{}", indent_str)?;
@@ -583,10 +581,6 @@ impl AstNode {
                     name.yellow(),
                     type_annotation
                 )?;
-                if let Some(default) = initializer {
-                    write!(f, " = ")?;
-                    default.fmt_with_indent(f, 0)?;
-                }
             }
 
             AstNodeKind::StructDeclaration {
@@ -969,20 +963,7 @@ impl AstNode {
                 children
             }
 
-            FunctionParameter {
-                type_annotation,
-                initializer,
-                ..
-            } => {
-                let mut children = vec![];
-                children.push(type_annotation.as_mut());
-
-                if let Some(init) = initializer.as_mut() {
-                    children.push(init.as_mut());
-                }
-
-                children
-            }
+            FunctionParameter { type_annotation, .. } => vec![type_annotation],
 
             StructDeclaration {
                 generic_parameters,
@@ -2926,7 +2907,6 @@ impl Parser {
                         return Ok(AstNodeKind::FunctionParameter {
                             name: "this".to_string(),
                             type_annotation,
-                            initializer: None,
                             mutable: false,
                         });
                     }
@@ -2939,7 +2919,6 @@ impl Parser {
                     return Ok(AstNodeKind::FunctionParameter {
                         name: "this".to_string(),
                         type_annotation,
-                        initializer: None,
                         mutable: false,
                     });
                 }
@@ -2949,16 +2928,10 @@ impl Parser {
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
             parser.consume(TokenKind::Colon)?;
             let type_annotation = boxed!(parser.parse_type()?);
-            let mut initializer = None;
-
-            if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(boxed!(parser.parse_expression()?));
-            }
 
             Ok(AstNodeKind::FunctionParameter {
                 name,
                 type_annotation,
-                initializer,
                 mutable,
             })
         })?;
@@ -4474,13 +4447,18 @@ impl UnificationContext {
     }
 }
 
+pub struct UVCollectionContext {
+    pub current_return_type: Option<Type>,
+    pub in_loop: bool
+}
+
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
     pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     // TODO: Find better place to put this.
-    pub current_return_type: Option<Type>,
+    pub uv_collection_ctx: UVCollectionContext,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
 }
@@ -4501,7 +4479,7 @@ impl SemanticAnalyzer {
             symbol_table,
             builtin_types,
             unification_context: UnificationContext::default(),
-            current_return_type: None,
+            uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false },
             errors: vec![],
             lines,
         }
@@ -4534,9 +4512,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * `break` and `continue` allowed outside loop
-         * defaults for parameters exist (eliminate them, must eliminate them, don't let them be here)
-         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
          * enum X {A}; type B = X.A; compiles...
          * uvs must be substituted for their real type
          * impls on traits dont conform to trait signature (do after unification)
@@ -5727,19 +5702,6 @@ impl SemanticAnalyzer {
             let (trait_id, trait_generic_specialization) = self.resolve_type_ref_from_ast(trait_node)?;
             self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
 
-            let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
-            if trait_symbol.generic_parameters.len() != trait_generic_specialization.len() {
-                return Err(self.create_error(
-                    ErrorKind::InvalidTraitNodeInImpl(
-                        self.symbol_table.display_type(&Type::new_base(trait_id)),
-                        trait_generic_specialization.len(),
-                        trait_symbol.generic_parameters.len()
-                    ),
-                    trait_node.span,
-                    &[trait_node.span]
-                ));
-            }
-
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
             let self_type = Type::Base {
                 symbol: implementing_type_id,
@@ -6302,6 +6264,8 @@ impl SemanticAnalyzer {
         body: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        self.uv_collection_ctx.in_loop = true;
+
         let cond_type = self.collect_uvs(condition)?;
         let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
         self.unification_context
@@ -6317,6 +6281,8 @@ impl SemanticAnalyzer {
             info,
         );
 
+        self.uv_collection_ctx.in_loop = false;
+
         Ok(())
     }
 
@@ -6329,6 +6295,8 @@ impl SemanticAnalyzer {
         body: &mut BoxedAstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        self.uv_collection_ctx.in_loop = true;
+
         if let Some(init) = initializer {
             self.collect_uvs(init)?;
         }
@@ -6354,6 +6322,8 @@ impl SemanticAnalyzer {
             info,
         );
 
+        self.uv_collection_ctx.in_loop = false;
+
         Ok(())
     }
 
@@ -6371,7 +6341,7 @@ impl SemanticAnalyzer {
             info,
         );
 
-        let Some(expected_return_type) = self.current_return_type.clone() else {
+        let Some(expected_return_type) = self.uv_collection_ctx.current_return_type.clone() else {
              return Err(self.create_error(ErrorKind::InvalidReturn, info.span, &[info.span]));
         };
 
@@ -6453,8 +6423,8 @@ impl SemanticAnalyzer {
             Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
         };
 
-        let old_return_type = self.current_return_type.clone();
-        self.current_return_type = Some(return_type_val.clone());
+        let old_return_type = self.uv_collection_ctx.current_return_type.clone();
+        self.uv_collection_ctx.current_return_type = Some(return_type_val.clone());
 
         if let Some(body_node) = body {
             let body_type = self.collect_uvs(body_node)?;
@@ -6474,7 +6444,7 @@ impl SemanticAnalyzer {
             );
         }
 
-        self.current_return_type = old_return_type;
+        self.uv_collection_ctx.current_return_type = old_return_type;
 
         let fn_sig_type_id = self.symbol_table.add_type_symbol(
             &format!("#fn_sig_{}", uv_id),
@@ -6518,7 +6488,6 @@ impl SemanticAnalyzer {
     ) -> Result<(), BoxedError> {
         let AstNodeKind::FunctionParameter {
             type_annotation,
-            initializer,
             ..
         } = &mut node.kind
         else {
@@ -6534,12 +6503,6 @@ impl SemanticAnalyzer {
         );
 
         let annotation_type = self.collect_uvs(type_annotation)?;
-
-        if let Some(init_node) = initializer {
-            let init_type = self.collect_uvs(init_node)?;
-            self.unification_context
-                .register_constraint(Constraint::Equality(init_type, annotation_type.clone()), info);
-        }
 
         let symbol_uv = self
             .unification_context
@@ -6745,16 +6708,20 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        // dbg!(type_name);
-        
-        let symbol = self
-            .symbol_table
-            .find_type_symbol_from_scope(scope_id, type_name)
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, type_name)
             .ok_or_else(|| {
                 self.create_error(ErrorKind::UnknownIdentifier(type_name.to_owned()), span, &[span])
-            })?
-            .id;
-        // dbg!(uv_id, symbol);
+            })?.id;
+
+        let symbol_params = &self.symbol_table.get_type_symbol(symbol).unwrap().generic_parameters;
+        
+        if symbol_params.len() != generic_types.len() {
+            return Err(self.create_error(
+                ErrorKind::InvalidTypeReference(type_name.to_string(), generic_types.len(), symbol_params.len()),
+                span,
+                &[span]
+            ))
+        }
 
         let args: Vec<Type> = generic_types
             .iter_mut()
@@ -7282,13 +7249,19 @@ impl SemanticAnalyzer {
                 self.collect_uv_struct_field(uv_id, info)?
             }
             EnumVariant(_) => self.collect_uv_enum_variant(uv_id, info)?,
-            Break | Continue => self.unification_context.register_constraint(
-                Constraint::Equality(
-                    uv.clone(), 
-                    Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
-                ),
-                info
-            ),
+            Break | Continue => {
+                if self.uv_collection_ctx.in_loop {
+                    self.unification_context.register_constraint(
+                        Constraint::Equality(
+                            uv.clone(), 
+                            Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
+                        ),
+                        info
+                    )
+                } else {
+                    return Err(self.create_error(ErrorKind::OutsideOfLoop, expr.span, &[expr.span]));
+                }
+            },
             StructDeclaration { .. }
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }
@@ -8683,7 +8656,6 @@ pub enum ErrorKind {
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String, String),
-    InvalidTraitNodeInImpl(String, usize, usize),
     DeformedTraitImpl {
         trait_name: String,
         missing: Vec<String>,
@@ -8712,6 +8684,8 @@ pub enum ErrorKind {
     InvalidCast(String, String),
     DuplicateSymbolsInInherentImpl(String, String),
     InvalidPathQualifier,
+    OutsideOfLoop,
+    InvalidTypeReference(String, usize, usize)
 }
 
 impl ErrorKind {
@@ -8751,9 +8725,6 @@ impl ErrorKind {
             }
             ErrorKind::ConflictingTraitImpl(tr, ty) => {
                 format!("conflicting trait implementations for {tr} on type {ty}")
-            }
-            ErrorKind::InvalidTraitNodeInImpl(ty, given, expected) => {
-                format!("trait {ty} has {given} generic parameters but expects {expected} generic parameters")
             }
             ErrorKind::DeformedTraitImpl {
                 trait_name,
@@ -8825,7 +8796,11 @@ impl ErrorKind {
             ErrorKind::DuplicateSymbolsInInherentImpl(name, namespace) => {
                 format!("symbol `{name}` defined multiple times in inherent impls for namespace {namespace}")
             },
-            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string()
+            ErrorKind::InvalidPathQualifier => "path qualifier can only be used on the left side of a member access".to_string(),
+            ErrorKind::OutsideOfLoop => "use of control flow keyword outside of loop".to_string(),
+            ErrorKind::InvalidTypeReference(ty, given, expected) => {
+                format!("type {ty} was given {given} generic parameters but expects {expected} generic parameters")
+            }
         }
     }
 }
@@ -9199,9 +9174,11 @@ impl Operation {
 
                 And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
 
-                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
-                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Void),
+
+                Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf 
+                | MutableAddressOf | As => None,
             },
 
             Float => match self {
@@ -9215,9 +9192,11 @@ impl Operation {
 
                 And | Or | GreaterThan | Geq | LessThan | Leq | Equivalence | NotEqual => Some(Bool),
 
-                Assign | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
-                | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall
-                | Dereference | ImmutableAddressOf | MutableAddressOf | As => None,
+                PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq => Some(Void),
+
+                Assign | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq | RightBitShiftEq 
+                | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference 
+                | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
             Bool => match self {
@@ -9235,7 +9214,9 @@ impl Operation {
                 Plus => Some(String),
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
 
-                Neg | PlusEq | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
+                PlusEq => Some(Void),
+
+                Neg | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf

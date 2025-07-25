@@ -1001,8 +1001,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * types that require n generic params but are supplied m generic params, for n != m, compiles fine
-         * enum X {A}; type B = X.A; compiles...
          * uvs must be substituted for their real type
          * impls on traits dont conform to trait signature (do after unification)
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)

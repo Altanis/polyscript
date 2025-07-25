@@ -7,7 +7,7 @@ use crate::{
     frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
     middle::semantic_analyzer::{
         Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId,
-        TypeSymbolKind,
+        TypeSymbolKind, ValueSymbolKind,
     },
     utils::{
         error::{BoxedError, Error, ErrorKind},
@@ -843,13 +843,27 @@ impl SemanticAnalyzer {
             info,
         );
 
-        let initializer_type = if let AstNodeKind::AssociatedType { value, .. } = &mut node.kind {
-            self.collect_uvs(value)?
+        let value_node = if let AstNodeKind::AssociatedType { value, .. } = &mut node.kind {
+            value
         } else if let AstNodeKind::TypeDeclaration { value, .. } = &mut node.kind {
-            self.collect_uvs(value)?
+            value
         } else {
             unreachable!();
         };
+ 
+        // Ensure RHS is not an enum variant.
+        if let AstNodeKind::FieldAccess { left, right } = &value_node.kind
+            && let Some(left_name) = left.get_name()
+            && let Some(symbol) = self.symbol_table.find_type_symbol_from_scope(node.scope_id.unwrap(), &left_name)
+            && let TypeSymbolKind::Enum((scope_id, _)) = symbol.kind
+            && let Some(right_name) = right.get_name()
+            && let Some(variant_symbol) = self.symbol_table.find_value_symbol_in_scope(&right_name, scope_id)
+            && matches!(variant_symbol.kind, ValueSymbolKind::EnumVariant)
+        {
+            return Err(self.create_error(ErrorKind::ExpectedType, value_node.span, &[value_node.span]));
+        }
+         
+        let initializer_type = self.collect_uvs(value_node)?;
 
         let symbol_uv = self
             .unification_context
