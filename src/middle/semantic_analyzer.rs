@@ -245,7 +245,7 @@ pub struct SymbolTable {
     pub scopes: HashMap<ScopeId, Scope>,
 
     lines: Rc<Vec<String>>,
-    current_scope_id: ScopeId,
+    pub current_scope_id: ScopeId,
     next_scope_id: ScopeId,
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
@@ -1001,7 +1001,7 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * uvs must be substituted for their real type
+         * use substitution map to substitute types onto ast nodes
          * impls on traits dont conform to trait signature (do after unification)
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)

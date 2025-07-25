@@ -775,6 +775,57 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    fn resolve_all_uvs_in_type(&mut self, ty: &Type, visited: &mut HashSet<TypeSymbolId>) -> Type {
+        match ty {
+            Type::Base { symbol, args } => {
+                if self.is_uv(*symbol) {
+                    if visited.contains(symbol) {
+                        return ty.clone();
+                    }
+
+                    visited.insert(*symbol);
+
+                    let result = if let Some(sub) = self.unification_context.substitutions.get(symbol).cloned() {
+                        let resolved_sub = self.resolve_all_uvs_in_type(&sub, visited);
+                        self.unification_context.substitutions.insert(*symbol, resolved_sub.clone());
+                        resolved_sub
+                    } else {
+                        ty.clone()
+                    };
+                    
+                    visited.remove(symbol);
+                    
+                    return result;
+                }
+
+                let resolved_args: Vec<Type> = args.iter()
+                    .map(|arg| self.resolve_all_uvs_in_type(arg, visited))
+                    .collect();
+
+                let symbol_data = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
+                if let TypeSymbolKind::FunctionSignature { ref params, ref return_type, .. } = symbol_data.kind {
+                    let resolved_params: Vec<Type> = params.iter().map(|p| self.resolve_all_uvs_in_type(p, visited)).collect();
+                    let resolved_return = self.resolve_all_uvs_in_type(return_type, visited);
+
+                    if resolved_params != *params || resolved_return != *return_type {
+                        let fn_sig_symbol = self.symbol_table.get_type_symbol_mut(*symbol).unwrap();
+                        
+                        if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &mut fn_sig_symbol.kind {
+                            *params = resolved_params;
+                            *return_type = resolved_return;
+                        } else {
+                            unreachable!();
+                        }
+                    }
+                }
+                
+                Type::Base { symbol: *symbol, args: resolved_args }
+            },
+            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_all_uvs_in_type(inner, visited))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_all_uvs_in_type(inner, visited))),
+        }
+    }
+
     pub fn unification_pass(&mut self, _program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
         let mut constraints = std::mem::take(&mut self.unification_context.constraints);
@@ -794,6 +845,15 @@ impl SemanticAnalyzer {
                 Ok(success) if !success => constraints.push_back((constraint, info)),
                 Err(e) => errors.push(*e),
                 _ => (),
+            }
+        }
+
+        let keys: Vec<TypeSymbolId> = self.unification_context.substitutions.keys().cloned().collect();
+        for uv_id in keys {
+            if let Some(ty) = self.unification_context.substitutions.get(&uv_id).cloned() {
+                let mut visited = HashSet::new();
+                let fully_resolved_type = self.resolve_all_uvs_in_type(&ty, &mut visited);
+                self.unification_context.substitutions.insert(uv_id, fully_resolved_type);
             }
         }
 
