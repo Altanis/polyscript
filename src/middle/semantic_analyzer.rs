@@ -1016,6 +1016,7 @@ impl SemanticAnalyzer {
         pass!(self, uv_collector_pass, &mut program);
         pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
+        pass!(self, substitution_pass, &mut program);
 
         Ok(program)
     }

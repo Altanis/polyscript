@@ -794,7 +794,7 @@ impl SemanticAnalyzer {
                     };
                     
                     visited.remove(symbol);
-                    
+
                     return result;
                 }
 
@@ -1382,5 +1382,104 @@ impl SemanticAnalyzer {
                 &[info.span],
             ))
         }
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn substitution_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(e) = self.substitution_pass_check_node(statement) {
+                    errors.push(*e);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn resolve_final_type(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Base { symbol, args } => {
+                let resolved_args = args
+                    .iter()
+                    .map(|arg| self.resolve_final_type(arg))
+                    .collect::<Vec<_>>();
+
+                if self.is_uv(*symbol) {
+                    return self.unification_context.substitutions[symbol].clone();
+                }
+                
+                Type::Base {
+                    symbol: *symbol,
+                    args: resolved_args,
+                }
+            },
+            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_final_type(inner))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_final_type(inner)))
+        }
+    }
+
+    fn substitution_pass_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        for child in node.children_mut() {
+            self.substitution_pass_check_node(child)?;
+        }
+
+        if let Some(ty) = node.type_id.take() {
+            let resolved_type = self.resolve_final_type(&ty);
+            node.type_id = Some(resolved_type);
+        }
+
+        if let Some(value_id) = node.value_id {
+            let maybe_type_id = self.symbol_table
+                .get_value_symbol_mut(value_id)
+                .and_then(|symbol| symbol.type_id.take());
+
+            if let Some(ty) = maybe_type_id {
+                let resolved_type = self.resolve_final_type(&ty);
+
+                if let Some(symbol) = self.symbol_table.get_value_symbol_mut(value_id) {
+                    symbol.type_id = Some(resolved_type);
+                }
+            }
+        }
+
+        if let Some(base_type) = &node.type_id {
+            if let Some(symbol_clone) = self.symbol_table.get_type_symbol(base_type.get_base_symbol()).cloned() {
+                let mut new_kind = symbol_clone.kind;
+                let mut was_changed = false;
+
+                match &mut new_kind {
+                    TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                        let new_params = params.iter().map(|p| self.resolve_final_type(p)).collect::<Vec<_>>();
+                        let new_return = self.resolve_final_type(return_type);
+                        
+                        if &new_params != params || &new_return != return_type {
+                            *params = new_params;
+                            *return_type = new_return;
+                            was_changed = true;
+                        }
+                    },
+                    TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
+                        let new_alias = self.resolve_final_type(alias_ty);
+                        if &new_alias != alias_ty {
+                            *alias_ty = new_alias;
+                            was_changed = true;
+                        }
+                    },
+                    _ => {}
+                }
+
+                if was_changed {
+                    self.symbol_table.get_type_symbol_mut(symbol_clone.id).unwrap().kind = new_kind;
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
