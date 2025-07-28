@@ -1001,7 +1001,7 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * impls on traits dont conform to trait signature (do after unification)
+         * delete uvs from symbol table
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)
          * uninitialized variables

@@ -23,6 +23,7 @@ mod utils;
 pub const READ_TOKENS: bool = false;
 pub const PARSE_TOKENS: bool = true;
 pub const SEMANTIC_ANALYSIS: bool = true;
+pub const PRINT: bool = true;
 
 fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
     let mut lexer = frontend::lexer::Lexer::new(program);
@@ -85,11 +86,14 @@ fn test_main_script() {
 
         if SEMANTIC_ANALYSIS {
             let (analyzer, program) = analyze_tokens(lined_source, program);
-            println!("--- ANNOTATED AST ---");
-            println!("{}", program);
+            
+            if PRINT {
+                println!("--- ANNOTATED AST ---");
+                println!("{}", program);
 
-            println!("--- SEMANTIC ANALYZER ---");
-            println!("{}", analyzer);
+                println!("--- SEMANTIC ANALYZER ---");
+                println!("{}", analyzer);
+            }
         }
     }
 }

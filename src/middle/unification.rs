@@ -1399,7 +1399,76 @@ impl SemanticAnalyzer {
             unreachable!();
         }
 
+        self.traverse_symbol_table();
+
         errors
+    }
+
+    fn traverse_symbol_table(&mut self) {
+        let keys: Vec<_> = self.symbol_table.value_symbols.keys().cloned().collect();
+
+        for key in keys {
+            let ty_opt = {
+                let map = &mut self.symbol_table.value_symbols;
+
+                if let Some(symbol) = map.get_mut(&key) {
+                    symbol.type_id.take()
+                } else {
+                    None
+                }
+            };
+
+            if let Some(ty) = ty_opt {
+                let resolved = self.resolve_final_type(&ty);
+
+                if let Some(symbol) = self.symbol_table.value_symbols.get_mut(&key) {
+                    symbol.type_id = Some(resolved);
+                }
+            }
+        }
+
+        let type_symbol_ids: Vec<TypeSymbolId> = self.symbol_table.type_symbols.keys().cloned().collect();
+
+        for id in type_symbol_ids {
+            let mut kind_clone = self.symbol_table.type_symbols[&id].kind.clone();
+            let mut was_changed = false;
+
+            match &mut kind_clone {
+                TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                    let new_params: Vec<Type> = params.iter().map(|p| self.resolve_final_type(p)).collect();
+                    let new_return = self.resolve_final_type(return_type);
+                    if *params != new_params || *return_type != new_return {
+                        *params = new_params;
+                        *return_type = new_return;
+                        was_changed = true;
+                    }
+                },
+                TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
+                    let new_alias = self.resolve_final_type(alias_ty);
+                    if *alias_ty != new_alias {
+                        *alias_ty = new_alias;
+                        was_changed = true;
+                    }
+                },
+                TypeSymbolKind::OpaqueTypeProjection { ty, tr, .. } => {
+                    let new_ty = self.resolve_final_type(ty);
+                    let new_tr = self.resolve_final_type(tr);
+                    if *ty != new_ty || *tr != new_tr {
+                        *ty = new_ty;
+                        *tr = new_tr;
+                        was_changed = true;
+                    }
+                },
+                _ => {}
+            }
+
+            if was_changed {
+                if let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
+                    symbol.kind = kind_clone;
+                }
+            }
+        }
+
     }
 
     fn resolve_final_type(&self, ty: &Type) -> Type {
@@ -1516,37 +1585,163 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn build_concrete_type_from_template(
-        &self,
-        template: &Type,
+    fn apply_trait_substitutions(
+        &mut self,
+        ty: &Type,
         substitutions: &HashMap<TypeSymbolId, Type>,
     ) -> Type {
-        match template {
+        match ty {
             Type::Base { symbol, args } => {
-                // If the base symbol is a generic or associated type to be substituted,
-                // return its concrete counterpart from the map.
-                if let Some(concrete_type) = substitutions.get(symbol) {
-                    return concrete_type.clone();
+                if let Some(substituted_type) = substitutions.get(symbol) {
+                    return substituted_type.clone();
                 }
 
-                // Otherwise, recursively build the arguments.
-                let new_args = args
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
+                if let TypeSymbolKind::FunctionSignature { params, return_type, instance } = &type_symbol.kind {
+                    let substituted_params: Vec<Type> = params
+                        .iter()
+                        .map(|p| self.apply_trait_substitutions(p, substitutions))
+                        .collect();
+
+                    let substituted_return_type = self.apply_trait_substitutions(return_type, substitutions);
+
+                    if &substituted_params == params && &substituted_return_type == return_type {
+                        return ty.clone();
+                    }
+
+                    let new_sig_name = format!("#fn_sig_conformance_{}_{:?}", symbol, substitutions.keys());
+
+                    let specialized_sig_id = self.symbol_table.add_type_symbol(
+                        &new_sig_name,
+                        TypeSymbolKind::FunctionSignature {
+                            params: substituted_params,
+                            return_type: substituted_return_type,
+                            instance: *instance
+                        },
+                        vec![],
+                        QualifierKind::Private,
+                        type_symbol.span,
+                    ).unwrap();
+
+                    return Type::Base {
+                        symbol: specialized_sig_id,
+                        args: vec![],
+                    };
+                }
+
+                let substituted_args: Vec<Type> = args
                     .iter()
-                    .map(|arg| self.build_concrete_type_from_template(arg, substitutions))
+                    .map(|arg| self.apply_trait_substitutions(arg, substitutions))
                     .collect();
 
                 Type::Base {
                     symbol: *symbol,
-                    args: new_args,
+                    args: substituted_args,
                 }
-            }
+            },
             Type::Reference(inner) => {
-                Type::Reference(Box::new(self.build_concrete_type_from_template(inner, substitutions)))
-            }
+                Type::Reference(Box::new(self.apply_trait_substitutions(inner, substitutions)))
+            },
             Type::MutableReference(inner) => {
-                Type::MutableReference(Box::new(self.build_concrete_type_from_template(inner, substitutions)))
+                Type::MutableReference(Box::new(self.apply_trait_substitutions(inner, substitutions)))
             }
         }
+    }
+
+    fn check_constant_conformance(
+        &mut self,
+        member_name: &str,
+        trait_scope_id: ScopeId,
+        impl_scope_id: ScopeId,
+        substitution_map: &HashMap<TypeSymbolId, Type>,
+    ) -> Result<(), BoxedError> {
+        let trait_const_symbol = self.symbol_table.find_value_symbol_in_scope(member_name, trait_scope_id).unwrap().clone();
+        let impl_const_symbol = self.symbol_table.find_value_symbol_in_scope(member_name, impl_scope_id).unwrap().clone();
+
+        let template_type = trait_const_symbol.type_id.as_ref().unwrap();
+        let actual_type = impl_const_symbol.type_id.as_ref().unwrap();
+
+        let expected_type = self.apply_trait_substitutions(template_type, substitution_map);
+
+        let info = ConstraintInfo {
+            span: impl_const_symbol.span.unwrap(),
+            scope_id: impl_scope_id,
+        };
+
+        if self.unify(expected_type.clone(), actual_type.clone(), info).is_err() {
+            return Err(self.create_error(
+                ErrorKind::TypeMismatch(
+                    self.symbol_table.display_type(&expected_type),
+                    self.symbol_table.display_type(actual_type),
+                    Some(format!("for associated constant `{}`", member_name)),
+                ),
+                impl_const_symbol.span.unwrap(),
+                &[impl_const_symbol.span.unwrap(), trait_const_symbol.span.unwrap()],
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn check_function_conformance(
+        &mut self,
+        member_name: &str,
+        trait_scope_id: ScopeId,
+        impl_scope_id: ScopeId,
+        substitution_map: &HashMap<TypeSymbolId, Type>,
+    ) -> Result<(), BoxedError> {
+        let trait_fn_symbol = self.symbol_table.find_value_symbol_in_scope(member_name, trait_scope_id).unwrap().clone();
+        let impl_fn_symbol = self.symbol_table.find_value_symbol_in_scope(member_name, impl_scope_id).unwrap().clone();
+
+        let trait_fn_type = trait_fn_symbol.type_id.as_ref().unwrap();
+        let impl_fn_type = impl_fn_symbol.type_id.as_ref().unwrap();
+
+        let (trait_params, trait_return) = if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &self.symbol_table.get_type_symbol(trait_fn_type.get_base_symbol()).unwrap().kind {
+            (params.clone(), return_type.clone())
+        } else { unreachable!(); };
+
+        let (impl_params, impl_return) = if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &self.symbol_table.get_type_symbol(impl_fn_type.get_base_symbol()).unwrap().kind {
+            (params.clone(), return_type.clone())
+        } else { unreachable!(); };
+
+        if trait_params.len() != impl_params.len() {
+            return Err(self.create_error(ErrorKind::ArityMismatch(trait_params.len(), impl_params.len()), impl_fn_symbol.span.unwrap(), &[trait_fn_symbol.span.unwrap()]));
+        }
+
+        let info = ConstraintInfo {
+            span: impl_fn_symbol.span.unwrap(),
+            scope_id: impl_scope_id,
+        };
+
+        for (trait_param, impl_param) in trait_params.iter().zip(impl_params.iter()) {
+            let expected_param = self.apply_trait_substitutions(trait_param, substitution_map);
+            if self.unify(expected_param.clone(), impl_param.clone(), info).is_err() {
+                 return Err(self.create_error(
+                    ErrorKind::TypeMismatch(
+                        self.symbol_table.display_type(&expected_param),
+                        self.symbol_table.display_type(impl_param),
+                        Some(format!("in parameter for function `{}`", member_name)),
+                    ),
+                    info.span,
+                    &[trait_fn_symbol.span.unwrap()],
+                ));
+            }
+        }
+
+        let expected_return = self.apply_trait_substitutions(&trait_return, substitution_map);
+        if self.unify(expected_return.clone(), impl_return.clone(), info).is_err() {
+            return Err(self.create_error(
+                ErrorKind::TypeMismatch(
+                    self.symbol_table.display_type(&expected_return),
+                    self.symbol_table.display_type(&impl_return),
+                    Some(format!("for return type of function `{}`", member_name)),
+                ),
+                info.span,
+                &[trait_fn_symbol.span.unwrap()],
+            ));
+        }
+
+        Ok(())
     }
 
     fn check_trait_conformance(&mut self, impl_node: &AstNode) -> Result<(), BoxedError> {
@@ -1617,43 +1812,37 @@ impl SemanticAnalyzer {
 
         substitution_map.insert(
             self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id,
-            implementing_type.clone()
+            implementing_type.clone(),
         );
 
-        for member in trait_members.iter() {
-            if let Some(trait_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member, trait_scope_id) {
-                let Some(impl_type_symbol) =  self.symbol_table.find_type_symbol_in_scope(member, impl_scope_id) else {
-                    unreachable!(); 
-                };
-
-                let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
-                    unreachable!();
-                };
-
-                substitution_map.insert(trait_type_symbol.id, alias.clone());
+        if let Type::Base { args, .. } = trait_type {
+            if !trait_symbol.generic_parameters.is_empty() {
+                let generic_substitutions = self.create_generic_substitution_map(
+                    &trait_symbol.generic_parameters,
+                    args,
+                );
+                substitution_map.extend(generic_substitutions);
             }
         }
 
         for member_name in trait_members.iter() {
-            if let Some(trait_value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, trait_scope_id).cloned() {
-                let impl_value_symbol = self.symbol_table.find_value_symbol_in_scope(member_name, impl_scope_id).unwrap();
+            if let Some(trait_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, trait_scope_id) {
+                if let Some(impl_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, impl_scope_id) {
+                    let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
+                        unreachable!();
+                    };
 
-                let trait_member_type = trait_value_symbol.type_id.as_ref().unwrap();
-                let impl_member_type = impl_value_symbol.type_id.as_ref().unwrap();
+                    substitution_map.insert(trait_type_symbol.id, alias.clone());
+                }
+            }
+        }
 
-                let concrete_trait_member_type = self.build_concrete_type_from_template(trait_member_type, &substitution_map);
-                
-                if impl_member_type != &concrete_trait_member_type {
-                    let member_span = impl_value_symbol.span.unwrap();
-                     return Err(self.create_error(
-                        ErrorKind::TypeMismatch(
-                            self.symbol_table.display_type(impl_member_type),
-                            self.symbol_table.display_type(&concrete_trait_member_type),
-                            Some(format!("for `{}` in trait implementation", member_name))
-                        ),
-                        member_span,
-                        &[member_span, trait_value_symbol.span.unwrap()]
-                    ));
+        for member_name in trait_members.iter() {
+            if let Some(trait_value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, trait_scope_id) {
+                match trait_value_symbol.kind {
+                    ValueSymbolKind::Variable => self.check_constant_conformance(member_name, trait_scope_id, impl_scope_id, &substitution_map)?,
+                    ValueSymbolKind::Function(_) => self.check_function_conformance(member_name, trait_scope_id, impl_scope_id, &substitution_map)?,
+                    _ => {}
                 }
             }
         }

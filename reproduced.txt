@@ -4513,6 +4513,7 @@ impl SemanticAnalyzer {
         
         /* need to fix:
          * impls on traits dont conform to trait signature (do after unification)
+         * delete uvs from symbol table
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)
          * uninitialized variables
@@ -8749,7 +8750,76 @@ impl SemanticAnalyzer {
             unreachable!();
         }
 
+        self.traverse_symbol_table();
+
         errors
+    }
+
+    fn traverse_symbol_table(&mut self) {
+        let keys: Vec<_> = self.symbol_table.value_symbols.keys().cloned().collect();
+
+        for key in keys {
+            let ty_opt = {
+                let map = &mut self.symbol_table.value_symbols;
+
+                if let Some(symbol) = map.get_mut(&key) {
+                    symbol.type_id.take()
+                } else {
+                    None
+                }
+            };
+
+            if let Some(ty) = ty_opt {
+                let resolved = self.resolve_final_type(&ty);
+
+                if let Some(symbol) = self.symbol_table.value_symbols.get_mut(&key) {
+                    symbol.type_id = Some(resolved);
+                }
+            }
+        }
+
+        let type_symbol_ids: Vec<TypeSymbolId> = self.symbol_table.type_symbols.keys().cloned().collect();
+
+        for id in type_symbol_ids {
+            let mut kind_clone = self.symbol_table.type_symbols[&id].kind.clone();
+            let mut was_changed = false;
+
+            match &mut kind_clone {
+                TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                    let new_params: Vec<Type> = params.iter().map(|p| self.resolve_final_type(p)).collect();
+                    let new_return = self.resolve_final_type(return_type);
+                    if *params != new_params || *return_type != new_return {
+                        *params = new_params;
+                        *return_type = new_return;
+                        was_changed = true;
+                    }
+                },
+                TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
+                    let new_alias = self.resolve_final_type(alias_ty);
+                    if *alias_ty != new_alias {
+                        *alias_ty = new_alias;
+                        was_changed = true;
+                    }
+                },
+                TypeSymbolKind::OpaqueTypeProjection { ty, tr, .. } => {
+                    let new_ty = self.resolve_final_type(ty);
+                    let new_tr = self.resolve_final_type(tr);
+                    if *ty != new_ty || *tr != new_tr {
+                        *ty = new_ty;
+                        *tr = new_tr;
+                        was_changed = true;
+                    }
+                },
+                _ => {}
+            }
+
+            if was_changed {
+                if let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
+                    symbol.kind = kind_clone;
+                }
+            }
+        }
+
     }
 
     fn resolve_final_type(&self, ty: &Type) -> Type {
@@ -8932,31 +9002,25 @@ impl SemanticAnalyzer {
 
         let mut substitution_map: HashMap<TypeSymbolId, Type> = HashMap::new();
 
-        let impl_self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", impl_scope_id).unwrap();
-        let TypeSymbolKind::TypeAlias((_, Some(inner))) = &impl_self_symbol.kind else { unreachable!(); };
-
         substitution_map.insert(
             self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id,
-            inner.clone()
+            implementing_type.clone()
         );
 
         for member in trait_members.iter() {
             if let Some(trait_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member, trait_scope_id) {
-                let Some(impl_type_symbol) =  self.symbol_table.find_type_symbol_in_scope(member, impl_scope_id) else {
-                    unreachable!(); 
-                };
+                if let Some(impl_type_symbol) =  self.symbol_table.find_type_symbol_in_scope(member, impl_scope_id) {
+                    let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
+                        unreachable!();
+                    };
 
-                let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
-                    unreachable!();
-                };
-
-                substitution_map.insert(trait_type_symbol.id, alias.clone());
+                    substitution_map.insert(trait_type_symbol.id, alias.clone());
+                }
             }
         }
 
-        for member in trait_members.iter() {
-            if let Some(trait_value_symbol) = self.symbol_table.find_value_symbol_in_scope(member, trait_scope_id) {
-            }
+        for member_name in trait_members.iter() {
+            
         }
 
         Ok(())
