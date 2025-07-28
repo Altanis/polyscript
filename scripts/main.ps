@@ -1,19 +1,29 @@
-struct Point {
+struct Vector2 {
     public x: int;
     public y: int;
 }
 
-trait Add<Rhs> {
-    type Output;
-    fn add(&this, other: Rhs): Self.Output;
+struct Scalar {
+    public value: int;
 }
 
-impl Add<Point> for Point {
-    type Output = Point;
+trait Combine<Other> {
+    type Output;
+    fn combine(&this, other: Other): Self.Output;
+}
 
-    fn add(&this, other: Point): Point {
-        let new_x = this.x + other.x;
-        let new_y = this.y + other.y;
-        return Point { x: new_x, y: new_y };
+impl Combine<Scalar> for Vector2 {
+    type Output = Vector2;
+
+    fn combine(&this, other: Scalar): Vector2 {
+        return Vector2 {
+            x: this.x * other.value,
+            y: this.y * other.value
+        };
     }
 }
+
+let v = Vector2 { x: 2, y: 3 };
+let s = Scalar { value: 5 };
+
+let result = v.combine(s); 

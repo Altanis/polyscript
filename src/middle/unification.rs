@@ -1469,6 +1469,8 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.delete_uvs();
+        self.unification_context.substitutions.clear();
     }
 
     fn resolve_final_type(&self, ty: &Type) -> Type {

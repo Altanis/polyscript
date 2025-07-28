@@ -9125,16 +9125,20 @@ impl SemanticAnalyzer {
         let get_member_names = |scope: &Scope, table: &SymbolTable| {
             let mut members = HashSet::new();
 
-            for name_id in scope.values.keys().chain(scope.types.keys()) {
-                let name = if scope.values.contains_key(name_id) {
-                    table.get_value_name(*name_id)
-                } else {
-                    table.get_type_name(*name_id)
-                };
+            for (name_id, symbol_id) in &scope.types {
+                let symbol = table.get_type_symbol(*symbol_id).unwrap();
+                if matches!(symbol.kind, TypeSymbolKind::Generic(_)) {
+                    continue;
+                }
 
+                let name = table.get_type_name(*name_id);
                 if name != "Self" {
                     members.insert(name.to_string());
                 }
+            }
+
+            for name_id in scope.values.keys() {
+                members.insert(table.get_value_name(*name_id).to_string());
             }
 
             members
