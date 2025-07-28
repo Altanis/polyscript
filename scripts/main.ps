@@ -1,3 +1,17 @@
-let add = fn(x: int, y: int): int {
-    return x + y;
-};
+struct Dog {}
+
+trait Animal {
+    type FormOfSpeech;
+    const Speech: Self.FormOfSpeech;
+
+    fn speak(&this): Self.FormOfSpeech;
+}
+
+impl Animal for Dog {
+    type FormOfSpeech = string;
+    const Speech: Self.FormOfSpeech = "bark";
+
+    fn speak(&this): Self.FormOfSpeech {
+        return Self.Speech;
+    }
+}

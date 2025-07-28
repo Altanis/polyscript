@@ -782,6 +782,38 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    fn collect_uv_trait_const(
+        &mut self,
+        uv_id: TypeSymbolId,
+        node: &mut AstNode,
+        span: Span,
+        info: ConstraintInfo,
+    ) -> Result<(), BoxedError> {
+        self.unification_context.register_constraint(
+            Constraint::Equality(
+                Type::new_base(uv_id),
+                Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+            ),
+            info,
+        );
+        
+        let AstNodeKind::TraitConstant {
+            type_annotation,
+            ..
+        } = &mut node.kind
+        else {
+            unreachable!();
+        };
+
+        let annot_type = self.collect_uvs(type_annotation)?;
+
+        let symbol_uv = self.unification_context.generate_uv_type(&mut self.symbol_table, span);
+        self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
+        self.symbol_table.get_value_symbol_mut(node.value_id.unwrap()).unwrap().type_id = Some(symbol_uv.clone());
+
+        Ok(())
+    }
+
     fn collect_uv_type_reference(
         &mut self,
         uv_id: TypeSymbolId,
@@ -1318,6 +1350,7 @@ impl SemanticAnalyzer {
                 self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, fields, expr.span, info)?
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
+            TraitConstant { .. } => self.collect_uv_trait_const(uv_id, expr, expr.span, info)?,
             SelfValue => self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?,
             SelfType(reference_kind) => {
                 self.collect_uv_self_type(uv_id, expr.scope_id.unwrap(), *reference_kind, expr.span, info)?
@@ -1364,7 +1397,6 @@ impl SemanticAnalyzer {
             | EnumDeclaration { .. }
             | TraitDeclaration { .. }
             | ImplDeclaration { .. }
-            | TraitConstant { .. }
             | TraitType(_)
             | GenericParameter { .. } => {
                 self.unification_context.register_constraint(

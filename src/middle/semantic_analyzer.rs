@@ -1001,7 +1001,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * use substitution map to substitute types onto ast nodes
          * impls on traits dont conform to trait signature (do after unification)
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)
@@ -1017,6 +1016,7 @@ impl SemanticAnalyzer {
         pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
+        pass!(self, trait_conformance_pass, &mut program);
 
         Ok(program)
     }
