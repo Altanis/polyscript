@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     frontend::ast::{AstNode, AstNodeKind},
     middle::semantic_analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
+        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}},
 };
@@ -568,14 +568,48 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
-    /// Finds a member within an `impl` scope, checking if it matches the static/instance access type.
+    fn is_access_in_impl_of(&self, mut access_scope_id: ScopeId, target_type_id: TypeSymbolId) -> bool {
+        loop {
+            let scope = self.symbol_table.get_scope(access_scope_id).unwrap();
+            if scope.kind == ScopeKind::Impl
+                && let Some(self_symbol) = self.symbol_table.find_type_symbol_in_scope("Self", access_scope_id)
+                && let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind
+                && self_type.get_base_symbol() == target_type_id 
+            {
+                return true;
+            }
+
+            if let Some(parent_id) = scope.parent {
+                access_scope_id = parent_id;
+            } else {
+                break;
+            }
+        }
+        
+        false
+    }
+    
     fn find_member_in_impl_scope(
         &mut self,
         scope_id: ScopeId,
         member_name: &str,
         is_static_access: bool,
+        info: ConstraintInfo,
     ) -> Result<Option<Type>, BoxedError> {
         if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
+            if value_symbol.qualifier == QualifierKind::Private {
+                let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
+                let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
+
+                if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
+                    return Err(self.create_error(
+                        ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
+                        info.span,
+                        &[info.span, value_symbol.span.unwrap()]
+                    ));
+                }
+            }
+            
             let symbol_type = value_symbol.type_id.as_ref().unwrap().clone();
             
             let is_match = match value_symbol.kind {
@@ -602,7 +636,20 @@ impl SemanticAnalyzer {
         }
         
         if is_static_access {
-            if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id) {
+            if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id).cloned() {
+                if type_symbol.qualifier == QualifierKind::Private {
+                    let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
+                    let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
+
+                    if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
+                       return Err(self.create_error(
+                           ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
+                           info.span,
+                           &[info.span, type_symbol.span.unwrap()]
+                       ));
+                   }
+                }
+
                 return Ok(Some(Type::new_base(type_symbol.id)));
             }
         }
@@ -610,17 +657,17 @@ impl SemanticAnalyzer {
         Ok(None)
     }
 
-    /// Finds a member within a set of inherent `impl` blocks for a given type.
     fn find_member_in_inherent_impls(
         &mut self,
         base_type: &Type,
         impls: &[InherentImpl],
         member_name: &str,
         is_static_access: bool,
+        info: ConstraintInfo
     ) -> Result<Option<Type>, BoxedError> {
         for imp in impls {
             if let Some(substitutions) = self.check_impl_applicability(base_type, imp) {
-                if let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access)? {
+                if let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)? {
                     let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                     return Ok(Some(concrete_member_type));
                 }
@@ -630,12 +677,12 @@ impl SemanticAnalyzer {
         Ok(None)
     }
 
-    /// Finds a member within all applicable trait `impl` blocks for a given type.
     fn find_member_in_trait_impls(
         &mut self,
         base_type: &Type,
         member_name: &str,
         is_static_access: bool,
+        info: ConstraintInfo
     ) -> Result<Option<Type>, BoxedError> {
         let base_symbol_id = base_type.get_base_symbol();
         
@@ -646,7 +693,7 @@ impl SemanticAnalyzer {
     
         for trait_impl in all_trait_impls {
             if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl) {
-                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access)? {
+                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)? {
                     let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                     return Ok(Some(concrete_member_type));
                 }
@@ -656,7 +703,6 @@ impl SemanticAnalyzer {
         Ok(None)
     }
 
-    /// Finds a member (field, method, etc.) for a given type.
     fn find_member(
         &mut self,
         base_type: &Type,
@@ -679,13 +725,24 @@ impl SemanticAnalyzer {
             TypeSymbolKind::Struct((scope_id, impls)) => {
                 if !is_static_access {
                     if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).cloned() {
+                        if field_symbol.qualifier == QualifierKind::Private 
+                            && !self.is_access_in_impl_of(info.scope_id, base_symbol_id)
+                        {
+                            let type_name = self.symbol_table.display_type(base_type);
+                            return Err(self.create_error(
+                                ErrorKind::PrivateMemberAccess(member_name.to_string(), type_name),
+                                info.span,
+                                &[info.span, field_symbol.span.unwrap()]
+                            ));
+                        }
+
                         let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
                         let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
                         return Ok(Some(concrete_field_type));
                     }
                 }
 
-                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access)? {
+                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
                     return Ok(Some(ty));
                 }
             },
@@ -694,7 +751,7 @@ impl SemanticAnalyzer {
                     return Ok(Some(base_type.clone()));
                 }
 
-                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access)? {
+                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
                     return Ok(Some(ty));
                 }
             },
@@ -703,7 +760,7 @@ impl SemanticAnalyzer {
                     let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
                     let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
         
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access)? {
+                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access, info)? {
                         let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
                         let substitutions = HashMap::from([(self_in_trait_id, base_type.clone())]);
                         let concrete_member_type = self.apply_substitution(&member_in_trait, &substitutions);
@@ -715,7 +772,7 @@ impl SemanticAnalyzer {
             TypeSymbolKind::TraitSelf => {
                 if is_static_access {
                     let trait_scope_id = base_symbol.scope_id;
-                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, true)? {
+                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, true, info)? {
                         return Ok(Some(member_type));
                     }
                 }
@@ -723,14 +780,13 @@ impl SemanticAnalyzer {
             _ => {}
         }
     
-        if let Some(ty) = self.find_member_in_trait_impls(base_type, member_name, is_static_access)? {
+        if let Some(ty) = self.find_member_in_trait_impls(base_type, member_name, is_static_access, info)? {
             return Ok(Some(ty));
         }
     
         Ok(None)
     }
-    
-    /// Finds a member in a given trait implementation for a given type.
+
     fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
         let type_id = ty.get_base_symbol();
         let trait_id = tr.get_base_symbol();
@@ -754,16 +810,8 @@ impl SemanticAnalyzer {
 
         for trait_impl in all_trait_impls {
             if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl) {
-                let scope_id = trait_impl.impl_scope_id;
-                
-                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
-                    let member_type = value_symbol.type_id.as_ref().unwrap().clone();
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    return Ok(Some(concrete_member_type));
-                }
-                
-                if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id) {
-                    let member_type = Type::new_base(type_symbol.id);
+                // This call now includes the privacy check. Assuming `true` for `is_static_access` as this is for FQPs.
+                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true, info)? {
                     let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
                     return Ok(Some(concrete_member_type));
                 }
@@ -835,6 +883,10 @@ impl SemanticAnalyzer {
 
         while let Some((constraint, info)) = constraints.pop_front() {
             if iterations > limit {
+                if !errors.is_empty() {
+                    break;
+                }
+
                 panic!("incomplete inference: could not resolve constraints likely due to type inference loop");
             }
 
@@ -847,16 +899,18 @@ impl SemanticAnalyzer {
             }
         }
 
-        for symbol in self.symbol_table.type_symbols.values() {
-            if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
-                if !self.unification_context.substitutions.contains_key(&symbol.id) {
-                    let span = symbol.span.unwrap();
-                    
-                    errors.push(*self.create_error(
-                        ErrorKind::TypeAnnotationNeeded,
-                        span,
-                        &[span],
-                    ));
+        if errors.is_empty() {
+            for symbol in self.symbol_table.type_symbols.values() {
+                if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
+                    if !self.unification_context.substitutions.contains_key(&symbol.id) {
+                        let span = symbol.span.unwrap();
+                        
+                        errors.push(*self.create_error(
+                            ErrorKind::TypeAnnotationNeeded,
+                            span,
+                            &[span],
+                        ));
+                    }
                 }
             }
         }

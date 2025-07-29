@@ -1,0 +1,36 @@
+struct Scalar {
+    private inner: int;
+}
+
+impl Scalar {
+    public const DEFAULT_VALUE: int = 0;
+    private const SECRET_NUMBER: int = 42;
+
+    public fn new(inner: int): Self {
+        Scalar { inner }
+    }
+
+    public fn default(): Self {
+        Scalar { inner: Self.DEFAULT_VALUE }
+    }
+
+    public fn get_inner(&this): int {
+        this.inner
+    }
+
+    public fn set_inner(&mut this, inner: int) {
+        this.inner = inner;
+    }
+
+    private fn yes() {}
+    private fn no(&this) {}
+}
+
+let s1 = Scalar.default();
+let s2 = Scalar.new(Scalar.DEFAULT_VALUE);
+// let s3 = Scalar.new(Scalar.SECRET_NUMBER); -> err
+let s = s1.get_inner();
+s2.set_inner(s);
+
+// Scalar.yes(); -> err
+// s2.no(); -> err

@@ -1196,16 +1196,20 @@ impl Parser {
             let mut associated_types = vec![];
 
             while parser.peek().get_token_kind() != TokenKind::CloseBrace {
-                let qualifier = match parser.peek().get_token_kind() {
-                    TokenKind::Keyword(KeywordKind::Public) => {
-                        parser.advance();
-                        QualifierKind::Public
+                let qualifier = if trait_node.is_some() {
+                    QualifierKind::Public
+                } else {
+                    match parser.peek().get_token_kind() {
+                        TokenKind::Keyword(KeywordKind::Public) => {
+                            parser.advance();
+                            QualifierKind::Public
+                        }
+                        TokenKind::Keyword(KeywordKind::Private) => {
+                            parser.advance();
+                            QualifierKind::Private
+                        }
+                        _ => QualifierKind::Public,
                     }
-                    TokenKind::Keyword(KeywordKind::Private) => {
-                        parser.advance();
-                        QualifierKind::Private
-                    }
-                    _ => QualifierKind::Public,
                 };
 
                 match parser.peek().get_token_kind() {

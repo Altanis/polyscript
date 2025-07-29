@@ -56,7 +56,8 @@ pub enum ErrorKind {
     OutsideOfLoop,
     InvalidTypeReference(String, usize, usize),
     MutatingImmutableData(String),
-    ExpectedValue
+    ExpectedValue,
+    PrivateMemberAccess(String, String)
 }
 
 impl ErrorKind {
@@ -174,7 +175,8 @@ impl ErrorKind {
                 format!("type {ty} was given {given} generic parameters but expects {expected} generic parameters")
             },
             ErrorKind::MutatingImmutableData(ident) => format!("cannot mutable immutable data {ident}"),
-            ErrorKind::ExpectedValue => "expected a value".to_string()
+            ErrorKind::ExpectedValue => "expected a value".to_string(),
+            ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty)
         }
     }
 }
