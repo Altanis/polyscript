@@ -1,6 +1,8 @@
+use std::fmt::Write;
+
 // frontend/ast.rs
 use crate::{
-    middle::semantic_analyzer::{ScopeId, SymbolTable, Type, ValueSymbolId},
+    middle::semantic_analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -248,9 +250,9 @@ impl std::fmt::Display for AstNode {
 }
 
 impl AstNode {
-    pub fn fmt_with_indent(
+    pub fn fmt_with_indent<W: Write>(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
+        f: &mut W,
         indent: usize,
         table: Option<&SymbolTable>,
     ) -> std::fmt::Result {
@@ -837,10 +839,18 @@ impl AstNode {
         }
 
         if let (Some(ty), Some(table)) = (&self.type_id, table) {
+            if ty.get_base_symbol() == PrimitiveKind::Void as usize {
+                return Ok(());
+            }
+            
             let type_str = table.display_type(ty);
             write!(f, " {}", format!("<{}>", type_str).cyan())?;
-        } else if let Some(id) = &self.type_id {
-            write!(f, " {}", format_args!("[{}]", id))?;
+        } else if let Some(ty) = &self.type_id {
+            if ty.get_base_symbol() == PrimitiveKind::Void as usize {
+                return Ok(());
+            }
+
+            write!(f, " {}", format_args!("[{}]", ty))?;
         }
 
         if let Some(id) = self.value_id {

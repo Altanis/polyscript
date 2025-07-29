@@ -89,7 +89,10 @@ fn test_main_script() {
             
             if PRINT {
                 println!("--- ANNOTATED AST ---");
-                println!("{}", program);
+                
+                let mut format_str = String::new();
+                let _ = program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
+                println!("{}", format_str);
 
                 println!("--- SEMANTIC ANALYZER ---");
                 println!("{}", analyzer);
