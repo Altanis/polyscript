@@ -1556,6 +1556,91 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    pub fn mutability_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(e) = self.mutability_check_node(statement) {
+                    errors.push(*e);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+        
+        errors
+    }
+
+    fn mutability_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        for child in node.children_mut() {
+            self.mutability_check_node(child)?;
+        }
+
+        match &node.kind {
+            AstNodeKind::BinaryOperation { operator, left, .. } if operator.is_assignment() => {
+                if !self.is_place_expr_and_mutable(left)? {
+                    let name = left.get_name().unwrap_or_default();
+                    return Err(self.create_error(
+                        ErrorKind::MutatingImmutableData(name),
+                        left.span,
+                        &[left.span]
+                    ));
+                }
+            },
+            AstNodeKind::UnaryOperation { operator: Operation::MutableAddressOf, operand } => {
+                 if !self.is_place_expr_and_mutable(operand)? {
+                    let name = operand.get_name().unwrap_or_default();
+                    return Err(self.create_error(
+                        ErrorKind::MutatingImmutableData(name),
+                        operand.span,
+                        &[operand.span]
+                    ));
+                }
+            },
+            _ => {}
+        }
+
+        Ok(())
+    }
+    
+    fn is_place_expr_and_mutable(&mut self, place: &AstNode) -> Result<bool, BoxedError> {
+        match &place.kind {
+            AstNodeKind::Identifier(name) => {
+                if let Some(symbol) = self.symbol_table.find_value_symbol_from_scope(place.scope_id.unwrap(), name) {
+                    if !matches!(symbol.kind, ValueSymbolKind::Variable) {
+                        return Ok(false);
+                    }
+
+                    Ok(symbol.mutable)
+                } else {
+                    Err(self.create_error(ErrorKind::ExpectedValue, place.span, &[place.span]))
+                }
+            },
+            AstNodeKind::FieldAccess { left: base, .. } => {
+                if let AstNodeKind::Identifier(name) = &base.kind {
+                    if self.symbol_table.find_type_symbol_from_scope(base.scope_id.unwrap(), name).is_some() {
+                        return Ok(false);
+                    }
+                }
+
+                let base_type = self.resolve_type(base.type_id.as_ref().unwrap());
+                match &base_type {
+                    Type::MutableReference(_) => Ok(true),
+                    Type::Reference(_) => Ok(false),
+                    Type::Base { .. } => self.is_place_expr_and_mutable(base),
+                }
+            },
+            AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
+                let operand_type = self.resolve_type(operand.type_id.as_ref().unwrap());
+                Ok(matches!(operand_type, Type::MutableReference(_)))
+            },
+            _ => Ok(false)
+        }
+    }
+}
+
+impl SemanticAnalyzer {
     pub fn trait_conformance_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 

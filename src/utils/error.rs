@@ -53,7 +53,9 @@ pub enum ErrorKind {
     DuplicateSymbolsInInherentImpl(String, String),
     InvalidPathQualifier,
     OutsideOfLoop,
-    InvalidTypeReference(String, usize, usize)
+    InvalidTypeReference(String, usize, usize),
+    MutatingImmutableData(String),
+    ExpectedValue
 }
 
 impl ErrorKind {
@@ -168,7 +170,9 @@ impl ErrorKind {
             ErrorKind::OutsideOfLoop => "use of control flow keyword outside of loop".to_string(),
             ErrorKind::InvalidTypeReference(ty, given, expected) => {
                 format!("type {ty} was given {given} generic parameters but expects {expected} generic parameters")
-            }
+            },
+            ErrorKind::MutatingImmutableData(ident) => format!("cannot mutable immutable data {ident}"),
+            ErrorKind::ExpectedValue => "expected a value".to_string()
         }
     }
 }

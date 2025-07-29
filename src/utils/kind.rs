@@ -177,6 +177,24 @@ impl Operation {
         )
     }
 
+    pub fn is_assignment(&self) -> bool {
+        matches!(
+            self,
+            Operation::Assign
+                | Operation::PlusEq
+                | Operation::MinusEq
+                | Operation::MulEq
+                | Operation::ExpEq
+                | Operation::DivEq
+                | Operation::ModEq
+                | Operation::BitwiseAndEq
+                | Operation::BitwiseOrEq
+                | Operation::BitwiseXorEq
+                | Operation::RightBitShiftEq
+                | Operation::LeftBitShiftEq
+        )
+    }
+
     pub fn binding_power(&self) -> (u8, u8) {
         match self {
             Operation::Assign

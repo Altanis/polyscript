@@ -1032,7 +1032,7 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
+         * better error for if nonzero constraints at end of unification
          * privacy is ignored (can access private methods and fields)
          * uninitialized variables
          * shit error messages
@@ -1046,6 +1046,7 @@ impl SemanticAnalyzer {
         pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
+        pass!(self, mutability_check_pass, &mut program);
         pass!(self, trait_conformance_pass, &mut program);
 
         Ok(program)

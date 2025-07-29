@@ -116,9 +116,7 @@ impl SemanticAnalyzer {
             }
             None => match operator {
                 Operation::Assign => {
-                    self.unification_context
-                        .register_constraint(Constraint::Equality(left_type, right_type), info);
-
+                    self.unification_context.register_constraint(Constraint::Equality(left_type, right_type), info);
                     self.unification_context.register_constraint(
                         Constraint::Equality(
                             result_uv,

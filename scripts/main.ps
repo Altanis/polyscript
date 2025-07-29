@@ -1,29 +1,18 @@
-struct Vector2 {
-    public x: int;
-    public y: int;
+const x = 3;
+let y = &mut x;
+x = 4;
+
+struct X {}
+impl X {
+    const Thing: string = "1";
 }
 
-struct Scalar {
-    public value: int;
-}
+X.Thing = "2";
 
-trait Combine<Other> {
-    type Output;
-    fn combine(&this, other: Other): Self.Output;
-}
+struct Point { x: int; }
+let p = Point { x: 0 };
+let q = &p;
+let r = &mut p;
 
-impl Combine<Scalar> for Vector2 {
-    type Output = Vector2;
-
-    fn combine(&this, other: Scalar): Vector2 {
-        return Vector2 {
-            x: this.x * other.value,
-            y: this.y * other.value
-        };
-    }
-}
-
-let v = Vector2 { x: 2, y: 3 };
-let s = Scalar { value: 5 };
-
-let result = v.combine(s); 
+r.x = 0;
+q.x = 0;
