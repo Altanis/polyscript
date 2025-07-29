@@ -1032,7 +1032,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * better error for if nonzero constraints at end of unification
          * privacy is ignored (can access private methods and fields)
          * uninitialized variables
          * shit error messages

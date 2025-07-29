@@ -835,8 +835,7 @@ impl SemanticAnalyzer {
 
         while let Some((constraint, info)) = constraints.pop_front() {
             if iterations > limit {
-                // TODO: locate uvs that still have constraints attached
-                break;
+                panic!("incomplete inference: could not resolve constraints likely due to type inference loop");
             }
 
             iterations += 1;
@@ -845,6 +844,20 @@ impl SemanticAnalyzer {
                 Ok(success) if !success => constraints.push_back((constraint, info)),
                 Err(e) => errors.push(*e),
                 _ => (),
+            }
+        }
+
+        for symbol in self.symbol_table.type_symbols.values() {
+            if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
+                if !self.unification_context.substitutions.contains_key(&symbol.id) {
+                    let span = symbol.span.unwrap();
+                    
+                    errors.push(*self.create_error(
+                        ErrorKind::TypeAnnotationNeeded,
+                        span,
+                        &[span],
+                    ));
+                }
             }
         }
 

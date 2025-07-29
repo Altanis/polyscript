@@ -36,6 +36,7 @@ pub enum ErrorKind {
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
     BadVariableDeclaration,
+    TypeAnnotationNeeded,
     SelfOutsideImpl,
     InvalidThis(&'static str),
     ExpectedIdentifier,
@@ -126,7 +127,8 @@ impl ErrorKind {
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
             ErrorKind::BadVariableDeclaration => {
                 "variable declaration must be annotated with a type or value".to_string()
-            }
+            },
+            ErrorKind::TypeAnnotationNeeded => "cannot infer type for this; a type annotation may be needed".to_string(),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidThis(place) => format!("found \"this\" {place}"),
             ErrorKind::ExpectedIdentifier => {
