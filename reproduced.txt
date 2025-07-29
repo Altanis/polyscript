@@ -4485,6 +4485,37 @@ impl SemanticAnalyzer {
         }
     }
 
+    pub fn delete_uvs(&mut self) {
+        let uvs_to_remove = self.symbol_table.type_symbols
+            .values()
+            .filter_map(|symbol| {
+                if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
+                    Some((symbol.id, symbol.name_id))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+    
+        if uvs_to_remove.is_empty() {
+            return;
+        }
+
+        let uv_symbol_ids_set: HashSet<TypeSymbolId> = uvs_to_remove.iter().map(|(id, _)| *id).collect();
+
+        self.symbol_table.type_symbols.retain(|id, _| !uv_symbol_ids_set.contains(id));
+        for scope in self.symbol_table.scopes.values_mut() {
+            scope.types.retain(|_name_id, symbol_id| !uv_symbol_ids_set.contains(symbol_id));
+        }
+
+        let type_names_interner = &mut self.symbol_table.type_names;
+        for (_, name_id) in uvs_to_remove {
+            let name_to_remove = type_names_interner.vec[name_id].clone();
+            type_names_interner.map.remove(name_to_remove.as_ref());
+            type_names_interner.vec[name_id] = Rc::from("[deleted_uv]");
+        }
+    }
+
     pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
         let lines = Span::get_all_lines(self.lines.clone(), spans);
         Error::from_multiple_errors(kind, primary_span, lines)
@@ -4512,7 +4543,6 @@ impl SemanticAnalyzer {
          */
         
         /* need to fix:
-         * delete uvs from symbol table
          * mutability is ignored (can mutate immutable var, can get mutable ref to const vals)
          * privacy is ignored (can access private methods and fields)
          * uninitialized variables
@@ -8819,6 +8849,8 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.delete_uvs();
+        self.unification_context.substitutions.clear();
     }
 
     fn resolve_final_type(&self, ty: &Type) -> Type {

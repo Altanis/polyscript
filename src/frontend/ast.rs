@@ -1,5 +1,6 @@
+// frontend/ast.rs
 use crate::{
-    middle::semantic_analyzer::{ScopeId, Type, ValueSymbolId},
+    middle::semantic_analyzer::{ScopeId, SymbolTable, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -242,12 +243,17 @@ impl AstNode {
 
 impl std::fmt::Display for AstNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.fmt_with_indent(f, 0)
+        self.fmt_with_indent(f, 0, None)
     }
 }
 
 impl AstNode {
-    fn fmt_with_indent(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+    pub fn fmt_with_indent(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+        table: Option<&SymbolTable>,
+    ) -> std::fmt::Result {
         let indent_str = " ".repeat(indent);
         let child_indent = indent + 4;
 
@@ -260,14 +266,18 @@ impl AstNode {
                 );
                 writeln!(f, "{}", header)?;
                 for node in nodes {
-                    node.fmt_with_indent(f, indent)?;
+                    node.fmt_with_indent(f, indent, table)?;
                     writeln!(f)?;
                 }
             }
             AstNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
             AstNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
-            AstNodeKind::BooleanLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().magenta())?,
-            AstNodeKind::StringLiteral(s) => write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?,
+            AstNodeKind::BooleanLiteral(val) => {
+                write!(f, "{}{}", indent_str, val.to_string().magenta())?
+            }
+            AstNodeKind::StringLiteral(s) => {
+                write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?
+            }
             AstNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
             AstNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
             AstNodeKind::VariableDeclaration {
@@ -284,15 +294,18 @@ impl AstNode {
                 };
                 write!(f, "{} {}", decl_type, name.yellow())?;
                 if let Some(ty) = type_annotation {
-                    write!(f, ": {}", ty)?;
+                    write!(f, ": ")?;
+                    ty.fmt_with_indent(f, 0, table)?;
                 }
                 if let Some(init) = initializer {
-                    write!(f, " = {}", init)?;
+                    write!(f, " = ")?;
+                    init.fmt_with_indent(f, 0, table)?;
                 }
             }
             AstNodeKind::UnaryOperation { operator, operand } => {
                 write!(f, "{}", indent_str)?;
-                write!(f, "{}{}", operator, operand)?
+                write!(f, "{}", operator)?;
+                operand.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::BinaryOperation {
                 operator,
@@ -300,9 +313,9 @@ impl AstNode {
                 right,
             } => {
                 write!(f, "{}(", indent_str)?;
-                left.fmt_with_indent(f, 0)?;
+                left.fmt_with_indent(f, 0, table)?;
                 write!(f, " {} ", operator)?;
-                right.fmt_with_indent(f, 0)?;
+                right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
             AstNodeKind::ConditionalOperation {
@@ -311,24 +324,24 @@ impl AstNode {
                 right,
             } => {
                 write!(f, "{}(", indent_str)?;
-                left.fmt_with_indent(f, 0)?;
+                left.fmt_with_indent(f, 0, table)?;
                 write!(f, " {} ", operator)?;
-                right.fmt_with_indent(f, 0)?;
+                right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
             AstNodeKind::TypeCast { expr, target_type } => {
                 write!(f, "{}(", indent_str)?;
-                expr.fmt_with_indent(f, 0)?;
+                expr.fmt_with_indent(f, 0, table)?;
                 write!(f, " {} ", "as".yellow())?;
-                target_type.fmt_with_indent(f, 0)?;
+                target_type.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
-            },
+            }
             AstNodeKind::PathQualifier { ty, tr } => {
                 write!(f, "{}{}", indent_str, "<".dimmed())?;
-                ty.fmt_with_indent(f, 0)?;
+                ty.fmt_with_indent(f, 0, table)?;
                 if let Some(tr_node) = tr {
                     write!(f, " {} ", "as".yellow())?;
-                    tr_node.fmt_with_indent(f, 0)?;
+                    tr_node.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, "{}", ">".dimmed())?;
             }
@@ -339,7 +352,7 @@ impl AstNode {
                     writeln!(f)?;
                     for node in nodes {
                         write!(f, "{}", " ".repeat(child_indent))?;
-                        node.fmt_with_indent(f, child_indent)?;
+                        node.fmt_with_indent(f, child_indent, table)?;
                         writeln!(f)?;
                     }
                     write!(f, "{}", indent_str)?;
@@ -385,7 +398,7 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
@@ -395,17 +408,18 @@ impl AstNode {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    param.fmt_with_indent(f, 0)?;
+                    param.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, ")")?;
 
                 if let Some(ret_ty) = return_type {
-                    write!(f, ": {}", ret_ty)?;
+                    write!(f, ": ")?;
+                    ret_ty.fmt_with_indent(f, 0, table)?;
                 }
 
                 if let Some(b) = body {
                     write!(f, " ")?;
-                    b.fmt_with_indent(f, indent)?;
+                    b.fmt_with_indent(f, indent, table)?;
                 } else {
                     write!(f, ";")?;
                 }
@@ -426,25 +440,32 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
 
                 if let Some(trait_name) = trait_name {
-                    write!(f, "{} for ", trait_name)?;
+                    trait_name.fmt_with_indent(f, 0, table)?;
+                    write!(f, " for ")?;
                 }
-                write!(f, "{}", name)?;
+                name.fmt_with_indent(f, 0, table)?;
 
                 writeln!(f, " {}", "{".dimmed())?;
                 for type_node in associated_types {
-                    writeln!(f, "    {}", type_node)?;
+                    write!(f, "    ")?;
+                    type_node.fmt_with_indent(f, 0, table)?;
+                    writeln!(f)?;
                 }
                 for constant in associated_constants {
-                    writeln!(f, "    {}", constant)?;
+                    write!(f, "    ")?;
+                    constant.fmt_with_indent(f, 0, table)?;
+                    writeln!(f)?;
                 }
                 for function in associated_functions {
-                    writeln!(f, "    {}", function)?;
+                    write!(f, "    ")?;
+                    function.fmt_with_indent(f, 0, table)?;
+                    writeln!(f)?;
                 }
                 write!(f, "{}", "}".dimmed())?
             }
@@ -466,7 +487,8 @@ impl AstNode {
 
                 write!(f, "type ")?;
                 write!(f, "{}", name.yellow())?;
-                write!(f, " = {}", value)?;
+                write!(f, " = ")?;
+                value.fmt_with_indent(f, 0, table)?;
             }
 
             AstNodeKind::AssociatedConstant {
@@ -489,10 +511,12 @@ impl AstNode {
                 write!(f, "{}", name.yellow())?;
 
                 if let Some(type_annotation) = type_annotation {
-                    write!(f, ": {}", type_annotation)?;
+                    write!(f, ": ")?;
+                    type_annotation.fmt_with_indent(f, 0, table)?;
                 }
 
-                write!(f, " = {}", initializer)?;
+                write!(f, " = ")?;
+                initializer.fmt_with_indent(f, 0, table)?;
             }
 
             AstNodeKind::SelfValue => write!(f, "{}this", indent_str)?,
@@ -513,20 +537,20 @@ impl AstNode {
                 else_branch,
             } => {
                 write!(f, "{}if (", indent_str)?;
-                condition.fmt_with_indent(f, 0)?;
+                condition.fmt_with_indent(f, 0, table)?;
                 write!(f, ") ")?;
-                then_branch.fmt_with_indent(f, indent)?; // Same indent for block
+                then_branch.fmt_with_indent(f, indent, table)?;
 
                 for (cond, branch) in else_if_branches {
                     write!(f, "{}else if (", indent_str)?;
-                    cond.fmt_with_indent(f, 0)?;
+                    cond.fmt_with_indent(f, 0, table)?;
                     write!(f, ") ")?;
-                    branch.fmt_with_indent(f, indent)?; // Same indent for block
+                    branch.fmt_with_indent(f, indent, table)?;
                 }
 
                 if let Some(else_node) = else_branch {
                     write!(f, "{}else ", indent_str)?;
-                    else_node.fmt_with_indent(f, indent)?; // Same indent for block
+                    else_node.fmt_with_indent(f, indent, table)?;
                 }
             }
 
@@ -538,30 +562,30 @@ impl AstNode {
             } => {
                 write!(f, "{}for (", indent_str)?;
                 if let Some(init) = initializer {
-                    init.fmt_with_indent(f, 0)?;
+                    init.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, "; ")?;
                 if let Some(cond) = condition {
-                    cond.fmt_with_indent(f, 0)?;
+                    cond.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, "; ")?;
                 if let Some(inc) = increment {
-                    inc.fmt_with_indent(f, 0)?;
+                    inc.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)? // Same indent for block
+                body.fmt_with_indent(f, indent, table)?
             }
 
             AstNodeKind::WhileLoop { condition, body } => {
                 write!(f, "{}while (", indent_str)?;
-                condition.fmt_with_indent(f, 0)?;
+                condition.fmt_with_indent(f, 0, table)?;
                 write!(f, ") ")?;
-                body.fmt_with_indent(f, indent)? // Same indent for block
+                body.fmt_with_indent(f, indent, table)?
             }
 
             AstNodeKind::Return(Some(expr)) => {
                 write!(f, "{}return ", indent_str)?;
-                expr.fmt_with_indent(f, 0)?
+                expr.fmt_with_indent(f, 0, table)?
             }
             AstNodeKind::Return(None) => write!(f, "{}return", indent_str)?,
             AstNodeKind::Break => write!(f, "{}break", indent_str)?,
@@ -575,11 +599,11 @@ impl AstNode {
                 write!(f, "{}", indent_str)?;
                 write!(
                     f,
-                    "{}{}: {}",
+                    "{}{}: ",
                     if *mutable { "mut ".purple() } else { "".white() },
                     name.yellow(),
-                    type_annotation
                 )?;
+                type_annotation.fmt_with_indent(f, 0, table)?;
             }
 
             AstNodeKind::StructDeclaration {
@@ -595,7 +619,7 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
@@ -603,7 +627,7 @@ impl AstNode {
                 writeln!(f, " {}", "{".dimmed())?;
 
                 for field in fields {
-                    field.fmt_with_indent(f, child_indent)?;
+                    field.fmt_with_indent(f, child_indent, table)?;
                     writeln!(f)?;
                 }
 
@@ -625,7 +649,8 @@ impl AstNode {
                 )?;
 
                 write!(f, "{}", name.yellow())?;
-                write!(f, ": {}", type_annotation)?;
+                write!(f, ": ")?;
+                type_annotation.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
@@ -634,7 +659,7 @@ impl AstNode {
                 for (i, (field_name, expr)) in fields.iter().enumerate() {
                     write!(f, " ")?;
                     write!(f, "{}: ", field_name.yellow())?;
-                    write!(f, "{}", expr)?;
+                    expr.fmt_with_indent(f, 0, table)?;
 
                     write!(f, "{}", if i + 1 < fields.len() { "," } else { " " })?;
                 }
@@ -647,10 +672,11 @@ impl AstNode {
 
                 for (_, (variant, expr)) in variants {
                     write!(f, "{}", " ".repeat(child_indent + 4))?;
-                    write!(f, "{}", variant)?;
+                    variant.fmt_with_indent(f, 0, table)?;
 
                     if let Some(expr) = expr {
-                        write!(f, " = {}", expr)?;
+                        write!(f, " = ")?;
+                        expr.fmt_with_indent(f, 0, table)?;
                     }
                     writeln!(f)?;
                 }
@@ -676,7 +702,7 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
@@ -695,30 +721,30 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
 
                 write!(f, "= ")?;
-                write!(f, "{}", value)?
+                value.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::FieldAccess { left, right } => {
                 write!(f, "{}(", indent_str)?;
-                left.fmt_with_indent(f, 0)?;
+                left.fmt_with_indent(f, 0, table)?;
                 write!(f, ".")?;
-                right.fmt_with_indent(f, 0)?;
+                right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
             AstNodeKind::FunctionCall { function, arguments } => {
                 write!(f, "{}", indent_str)?;
-                function.fmt_with_indent(f, 0)?;
+                function.fmt_with_indent(f, 0, table)?;
                 write!(f, "(")?;
                 for (i, param) in arguments.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    param.fmt_with_indent(f, 0)?;
+                    param.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, ")")?
             }
@@ -736,7 +762,7 @@ impl AstNode {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        param.fmt_with_indent(f, 0)?;
+                        param.fmt_with_indent(f, 0, table)?;
                     }
                     write!(f, "]")?;
                 }
@@ -747,18 +773,18 @@ impl AstNode {
 
                 for type_node in types {
                     write!(f, "{}    ", indent_str)?;
-                    type_node.fmt_with_indent(f, 0)?;
+                    type_node.fmt_with_indent(f, 0, table)?;
                     writeln!(f)?;
                 }
 
                 for constant in constants {
                     write!(f, "{}    ", indent_str)?;
-                    constant.fmt_with_indent(f, 0)?;
+                    constant.fmt_with_indent(f, 0, table)?;
                     writeln!(f)?;
                 }
 
                 for signature in signatures {
-                    signature.fmt_with_indent(f, child_indent)?;
+                    signature.fmt_with_indent(f, child_indent, table)?;
                     writeln!(f)?;
                 }
 
@@ -768,7 +794,8 @@ impl AstNode {
                 name,
                 type_annotation,
             } => {
-                write!(f, "{}const {}: {}", indent_str, name.yellow(), type_annotation)?;
+                write!(f, "{}const {}: ", indent_str, name.yellow())?;
+                type_annotation.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::TraitType(name) => {
                 write!(f, "{}type {}", indent_str, name.bright_blue())?;
@@ -794,21 +821,25 @@ impl AstNode {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    param.fmt_with_indent(f, 0)?;
+                    param.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, ")")?;
 
                 if let Some(return_type) = return_type {
-                    write!(f, ": {}", return_type)?;
+                    write!(f, ": ")?;
+                    return_type.fmt_with_indent(f, 0, table)?;
                 }
-            },
+            }
             AstNodeKind::ExpressionStatement(expr) => {
-                expr.fmt_with_indent(f, indent)?;
+                expr.fmt_with_indent(f, indent, table)?;
                 write!(f, ";")?;
             }
         }
 
-        if let Some(id) = &self.type_id {
+        if let (Some(ty), Some(table)) = (&self.type_id, table) {
+            let type_str = table.display_type(ty);
+            write!(f, " {}", format!("<{}>", type_str).cyan())?;
+        } else if let Some(id) = &self.type_id {
             write!(f, " {}", format_args!("[{}]", id))?;
         }
 
@@ -825,8 +856,15 @@ impl AstNode {
         use AstNodeKind::*;
 
         match &mut self.kind {
-            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_)
-            | Identifier(_) | EnumVariant(_) | SelfValue | SelfType(_) => vec![],
+            IntegerLiteral(_)
+            | FloatLiteral(_)
+            | BooleanLiteral(_)
+            | StringLiteral(_)
+            | CharLiteral(_)
+            | Identifier(_)
+            | EnumVariant(_)
+            | SelfValue
+            | SelfType(_) => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
 
@@ -852,7 +890,7 @@ impl AstNode {
 
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
-            },
+            }
 
             TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
             PathQualifier { ty, tr } => {
@@ -861,7 +899,7 @@ impl AstNode {
                     children.push(trait_node.as_mut());
                 }
                 children
-            },
+            }
 
             Block(statements) => statements.iter_mut().collect(),
 
@@ -962,7 +1000,9 @@ impl AstNode {
                 children
             }
 
-            FunctionParameter { type_annotation, .. } => vec![type_annotation],
+            FunctionParameter {
+                type_annotation, ..
+            } => vec![type_annotation.as_mut()],
 
             StructDeclaration {
                 generic_parameters,
@@ -982,7 +1022,9 @@ impl AstNode {
                 children
             }
 
-            StructField { type_annotation, .. } => vec![type_annotation.as_mut()],
+            StructField {
+                type_annotation, ..
+            } => vec![type_annotation.as_mut()],
 
             StructLiteral { fields, .. } => fields.values_mut().collect(),
 
@@ -1005,7 +1047,7 @@ impl AstNode {
                 type_reference,
                 associated_constants,
                 associated_functions,
-                associated_types
+                associated_types,
             } => {
                 let mut children = vec![];
 
@@ -1079,7 +1121,9 @@ impl AstNode {
                 children
             }
 
-            TraitConstant { type_annotation, .. } => vec![type_annotation.as_mut()],
+            TraitConstant {
+                type_annotation, ..
+            } => vec![type_annotation.as_mut()],
 
             TraitType(_) => vec![],
 
@@ -1102,7 +1146,10 @@ impl AstNode {
 
             FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
 
-            FunctionCall { function, arguments } => {
+            FunctionCall {
+                function,
+                arguments,
+            } => {
                 let mut children = vec![];
                 children.push(function.as_mut());
 
@@ -1114,7 +1161,7 @@ impl AstNode {
             }
 
             GenericParameter { .. } => vec![],
-            ExpressionStatement(expr) => vec![expr.as_mut()]
+            ExpressionStatement(expr) => vec![expr.as_mut()],
         }
     }
 }
