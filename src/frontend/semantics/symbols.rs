@@ -1,7 +1,7 @@
-use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
+use super::analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 use crate::{
-    frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
-    middle::semantic_analyzer::{
+    frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode},
+    frontend::semantics::analyzer::{
         InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId,
     },
     utils::{

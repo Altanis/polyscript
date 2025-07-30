@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 
 use crate::{
     boxed,
-    frontend::ast::BoxedAstNode,
+    frontend::syntax::ast::BoxedAstNode,
     utils::{error::*, kind::*},
 };
 

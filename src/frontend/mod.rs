@@ -1,3 +1,2 @@
-pub(crate) mod ast;
-pub(crate) mod lexer;
-pub(crate) mod token_parser;
+pub(crate) mod syntax;
+pub(crate) mod semantics;

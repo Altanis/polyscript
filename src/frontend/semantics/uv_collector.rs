@@ -4,8 +4,8 @@ use indexmap::IndexMap;
 
 use crate::{
     boxed,
-    frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
-    middle::semantic_analyzer::{
+    frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode},
+    frontend::semantics::analyzer::{
         Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId,
         TypeSymbolKind, ValueSymbolKind,
     },

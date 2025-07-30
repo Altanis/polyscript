@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 // frontend/ast.rs
 use crate::{
-    middle::semantic_analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;

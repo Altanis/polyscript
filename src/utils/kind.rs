@@ -1,7 +1,7 @@
 use colored::*;
 use std::rc::Rc;
 
-use crate::middle::semantic_analyzer::PrimitiveKind;
+use crate::frontend::semantics::analyzer::PrimitiveKind;
 
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';

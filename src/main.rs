@@ -11,9 +11,9 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
-use frontend::ast::AstNode;
-use frontend::token_parser::Parser;
-use middle::semantic_analyzer::SemanticAnalyzer;
+use frontend::syntax::ast::AstNode;
+use frontend::syntax::token_parser::Parser;
+use frontend::semantics::analyzer::SemanticAnalyzer;
 use utils::kind::Token;
 
 mod frontend;
@@ -26,7 +26,7 @@ pub const SEMANTIC_ANALYSIS: bool = true;
 pub const PRINT: bool = true;
 
 fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
-    let mut lexer = frontend::lexer::Lexer::new(program);
+    let mut lexer = frontend::syntax::lexer::Lexer::new(program);
     let tokens = lexer.tokenize();
 
     if let Err(e) = tokens {
@@ -53,7 +53,7 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
     }
 }
 
-fn analyze_tokens(lined_source: Vec<String>, program: frontend::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
+fn analyze_tokens(lined_source: Vec<String>, program: frontend::syntax::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
     let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
     match analyzer.analyze(program) {
         Err(errs) => {

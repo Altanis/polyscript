@@ -1,5 +1,5 @@
 use crate::{
-    frontend::ast::AstNode,
+    frontend::syntax::ast::AstNode,
     utils::{error::*, kind::*},
 };
 use colored::*;
@@ -1019,23 +1019,6 @@ impl SemanticAnalyzer {
                 }
             }};
         }
-
-        /* PASSES
-         * 0: Collects all declared symbols (variables, functions, structs, traits, etc.) into value and type bins.
-         * 1: Associates generic parameters with their trait constraints.
-         * 2: Associates struct fields in declarations with their types.
-         * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
-         * 4: Attributes symbols with unification variables (unresolved type symbols).
-         * 5: Collects constraints on unification symbols.
-         * 6: Detects duplicate symbols across inherent impls.
-         * 7: Resolves unification variables via a unification algorithm.
-         */
-        
-        /* need to fix:
-         * privacy is ignored (can access private methods and fields)
-         * uninitialized variables
-         * shit error messages
-         */
 
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
