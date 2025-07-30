@@ -378,16 +378,17 @@ impl Lexer {
                 }
                 Ok(c) if c == GREATER_THAN_TOKEN => {
                     operator.push(self.consume()?);
-                    if let Ok(c2) = self.peek() {
-                        if c2 == ASSIGNMENT_TOKEN {
-                            operator.push(self.consume()?);
-                            return Ok(Token::new(
-                                operator,
-                                TokenKind::Operator(Operation::RightBitShiftEq),
-                                span.set_end_from_values(self.index, self.line, self.column),
-                            ));
-                        }
+                    if let Ok(c2) = self.peek()
+                        && c2 == ASSIGNMENT_TOKEN
+                    {
+                        operator.push(self.consume()?);
+                        return Ok(Token::new(
+                            operator,
+                            TokenKind::Operator(Operation::RightBitShiftEq),
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
                     }
+                    
                     Ok(Token::new(
                         operator,
                         TokenKind::Operator(Operation::RightBitShift),
@@ -411,16 +412,17 @@ impl Lexer {
                 }
                 Ok(c) if c == LESS_THAN_TOKEN => {
                     operator.push(self.consume()?);
-                    if let Ok(c2) = self.peek() {
-                        if c2 == ASSIGNMENT_TOKEN {
-                            operator.push(self.consume()?);
-                            return Ok(Token::new(
-                                operator,
-                                TokenKind::Operator(Operation::LeftBitShiftEq),
-                                span.set_end_from_values(self.index, self.line, self.column),
-                            ));
-                        }
+                    if let Ok(c2) = self.peek()
+                        && c2 == ASSIGNMENT_TOKEN
+                    {
+                        operator.push(self.consume()?);
+                        return Ok(Token::new(
+                            operator,
+                            TokenKind::Operator(Operation::LeftBitShiftEq),
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
                     }
+
                     Ok(Token::new(
                         operator,
                         TokenKind::Operator(Operation::LeftBitShift),
@@ -619,48 +621,47 @@ impl Lexer {
             end_pos: Position::default(),
         };
 
-        if first_char == '0' {
-            if let Ok(next_char) = self.peek() {
-                if let Some(base) = match next_char.to_ascii_lowercase() {
-                    'b' => Some(2),
-                    'o' => Some(8),
-                    'x' => Some(16),
-                    _ => None,
-                } {
+        if first_char == '0'
+            && let Ok(next_char) = self.peek()
+            && let Some(base) = match next_char.to_ascii_lowercase()
+        {
+            'b' => Some(2),
+            'o' => Some(8),
+            'x' => Some(16),
+            _ => None,
+        } {
+            number_str.push(self.consume()?);
+            let mut has_digits = false;
+
+            while let Ok(c) = self.peek() {
+                if c.is_digit(base) {
                     number_str.push(self.consume()?);
-                    let mut has_digits = false;
-
-                    while let Ok(c) = self.peek() {
-                        if c.is_digit(base) {
-                            number_str.push(self.consume()?);
-                            has_digits = true;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if !has_digits {
-                        let invalid_char = self.peek().unwrap_or('\0');
-                        return Err(self
-                            .generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
-                    }
-
-                    let number_type = match base {
-                        2 => NumberKind::Binary,
-                        8 => NumberKind::Octal,
-                        16 => NumberKind::Hex,
-                        _ => unreachable!(),
-                    };
-
-                    return Ok(Token::new(
-                        number_str,
-                        TokenKind::NumberLiteral(number_type),
-                        span.set_end_from_values(self.index, self.line, self.column),
-                    ));
+                    has_digits = true;
+                } else {
+                    break;
                 }
             }
-        }
 
+            if !has_digits {
+                let invalid_char = self.peek().unwrap_or('\0');
+                return Err(self
+                    .generate_error(ErrorKind::InvalidDigit(invalid_char.to_string()), Some(span)));
+            }
+
+            let number_type = match base {
+                2 => NumberKind::Binary,
+                8 => NumberKind::Octal,
+                16 => NumberKind::Hex,
+                _ => unreachable!(),
+            };
+
+            return Ok(Token::new(
+                number_str,
+                TokenKind::NumberLiteral(number_type),
+                span.set_end_from_values(self.index, self.line, self.column),
+            ));
+        }
+        
         while let Ok(next_char) = self.peek() {
             if next_char.is_ascii_digit() {
                 number_str.push(self.consume()?);
@@ -681,10 +682,10 @@ impl Lexer {
                 has_exponent = true;
                 number_str.push(self.consume()?);
 
-                if let Ok(sign) = self.peek() {
-                    if sign == '+' || sign == '-' {
-                        number_str.push(self.consume()?);
-                    }
+                if let Ok(sign) = self.peek()
+                    && (sign == '+' || sign == '-')
+                {
+                    number_str.push(self.consume()?);
                 }
 
                 let mut exponent_digit_found = false;

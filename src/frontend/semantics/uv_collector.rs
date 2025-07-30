@@ -1131,31 +1131,29 @@ impl SemanticAnalyzer {
             .generate_uv_type(&mut self.symbol_table, span);
 
         let mut is_method_call = false;
-        if let AstNodeKind::FieldAccess { left, .. } = &mut function_node.kind {
-            if let AstNodeKind::Identifier(left_name) = &left.kind {
-                if self
-                    .symbol_table
-                    .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
-                    .is_none()
-                {
-                    is_method_call = true;
+        if let AstNodeKind::FieldAccess { left, .. } = &mut function_node.kind
+            && let AstNodeKind::Identifier(left_name) = &left.kind
+            && self
+                .symbol_table
+                .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
+                .is_none()
+        {
+            is_method_call = true;
 
-                    let instance_type = left
-                        .type_id
-                        .clone()
-                        .expect("instance in method call should have a type");
+            let instance_type = left
+                .type_id
+                .clone()
+                .expect("instance in method call should have a type");
 
-                    self.unification_context.register_constraint(
-                        Constraint::MethodCall(
-                            instance_type,
-                            function_type.clone(),
-                            argument_types.clone(),
-                            return_uv_type.clone(),
-                        ),
-                        info,
-                    );
-                }
-            }
+            self.unification_context.register_constraint(
+                Constraint::MethodCall(
+                    instance_type,
+                    function_type.clone(),
+                    argument_types.clone(),
+                    return_uv_type.clone(),
+                ),
+                info,
+            );
         }
 
         if !is_method_call {
@@ -1205,11 +1203,10 @@ impl SemanticAnalyzer {
             .values()
             .find_map(|type_id| {
                 let symbol = self.symbol_table.get_type_symbol(*type_id).unwrap();
-                if let TypeSymbolKind::Enum((scope, _)) = symbol.kind {
-                    if scope == info.scope_id {
-                        return Some(symbol);
-                    }
+                if let TypeSymbolKind::Enum((scope, _)) = symbol.kind && scope == info.scope_id {
+                    return Some(symbol);
                 }
+                
                 None
             })
             .unwrap();

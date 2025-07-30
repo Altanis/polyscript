@@ -4,7 +4,7 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
-#![feature(let_chains)]
+#![allow(clippy::module_inception)]
 #![feature(if_let_guard)]
 
 use std::fs;
@@ -12,12 +12,14 @@ use std::path::Path;
 use std::rc::Rc;
 
 use frontend::syntax::ast::AstNode;
-use frontend::syntax::token_parser::Parser;
+use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
 use utils::kind::Token;
 
+use crate::backend::codegen::codegen::CodeGen;
+
 mod frontend;
-mod middle;
+mod backend;
 mod utils;
 
 pub const READ_TOKENS: bool = false;
@@ -53,7 +55,7 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
     }
 }
 
-fn analyze_tokens(lined_source: Vec<String>, program: frontend::syntax::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
+fn analyze_ast(lined_source: Vec<String>, program: frontend::syntax::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
     let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
     match analyzer.analyze(program) {
         Err(errs) => {
@@ -65,6 +67,24 @@ fn analyze_tokens(lined_source: Vec<String>, program: frontend::syntax::ast::Ast
             std::process::exit(1);
         }
         Ok(program) => (analyzer, program),
+    }
+}
+
+fn compile_ast(analyzer: &SemanticAnalyzer, mut program: frontend::syntax::ast::AstNode) {
+    let context = inkwell::context::Context::create();
+    let module = context.create_module("my_program");
+    let builder = context.create_builder();
+
+    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
+    let errs = codegen.compile_program(&mut program);
+
+    if !errs.is_empty() {
+        println!("{} errors emitted... printing:", errs.len());
+        for err in errs {
+            eprintln!("{}", err);
+        }
+
+        std::process::exit(1);
     }
 }
 
@@ -85,7 +105,7 @@ fn test_main_script() {
         // println!("{}", program);
 
         if SEMANTIC_ANALYSIS {
-            let (analyzer, program) = analyze_tokens(lined_source, program);
+            let (analyzer, program) = analyze_ast(lined_source, program);
             
             if PRINT {
                 println!("--- ANNOTATED AST ---");
@@ -129,7 +149,9 @@ fn assert_scripts_work() {
 }
 
 fn main() {
-    std::env::set_var("RUST_BACKTRACE", "1");
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
 
     // assert_scripts_work();
     test_main_script();

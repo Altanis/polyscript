@@ -1,11 +1,12 @@
 [package]
 name = "polyscript"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 colored = "3.0.0"
 indexmap = "2.9.0"
+inkwell = { version = "0.6.0", features = ["llvm18-1"] }
 rustc-hash = "2.1.1"
 strum = "0.27.1"
 strum_macros = "0.27.1"

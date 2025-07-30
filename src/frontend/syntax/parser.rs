@@ -548,11 +548,11 @@ impl Parser {
             while !parser.is_at_end() && parser.peek().get_token_kind() != TokenKind::CloseBrace {
                 let checkpoint = parser.current;
                 
-                if let Ok(expr) = parser.parse_expression() {
-                    if parser.peek().get_token_kind() == TokenKind::CloseBrace {
-                        statements.push(expr);
-                        break; 
-                    }
+                if let Ok(expr) = parser.parse_expression()
+                    && parser.peek().get_token_kind() == TokenKind::CloseBrace
+                {
+                    statements.push(expr);
+                    break; 
                 }
                 
                 parser.current = checkpoint;
@@ -826,14 +826,14 @@ impl Parser {
             if allow_this && is_first {
                 let current_token_kind = parser.peek().get_token_kind();
                 if current_token_kind == TokenKind::Operator(Operation::BitwiseAnd) {
-                    let next_token_is_mut = parser.tokens.get(parser.current + 1).map_or(false, |t| {
+                    let next_token_is_mut = parser.tokens.get(parser.current + 1).is_some_and(|t| {
                         t.get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
                     });
-                    let next_token_is_this = parser.tokens.get(parser.current + 1).map_or(false, |t| {
+                    let next_token_is_this = parser.tokens.get(parser.current + 1).is_some_and(|t| {
                         t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
                     });
                     let third_token_is_this = next_token_is_mut
-                        && parser.tokens.get(parser.current + 2).map_or(false, |t| {
+                        && parser.tokens.get(parser.current + 2).is_some_and(|t| {
                             t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
                         });
 

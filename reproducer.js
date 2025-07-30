@@ -1,11 +1,11 @@
 const FILES = [
-    "frontend/ast.rs",
-    "frontend/lexer.rs",
-    "frontend/token_parser.rs",
-    "middle/semantic_analyzer.rs", 
-    "middle/symbols.rs",
-    "middle/uv_collector.rs",
-    "middle/unification.rs",
+    "frontend/syntax/ast.rs",
+    "frontend/syntax/lexer.rs",
+    "frontend/syntax/parser.rs",
+    "frontend/semantics/analyzer.rs", 
+    "frontend/semantics/symbols.rs",
+    "frontend/semantics/uv_collector.rs",
+    "frontend/semantics/unification.rs",
     "utils/error.rs",
     "utils/kind.rs"
 ];

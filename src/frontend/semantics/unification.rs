@@ -456,11 +456,11 @@ impl SemanticAnalyzer {
         let type_id = resolved_type.get_base_symbol();
         let mut impls = vec![];
         
-        if let Some(impls_for_trait) = self.trait_registry.register.get(&trait_id) {
-            if let Some(impls_for_type) = impls_for_trait.get(&type_id) {
-                for imp in impls_for_type {
-                    impls.push(imp.clone());
-                }
+        if let Some(impls_for_trait) = self.trait_registry.register.get(&trait_id)
+            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+        {
+            for imp in impls_for_type {
+                impls.push(imp.clone());
             }
         }
 
@@ -471,12 +471,10 @@ impl SemanticAnalyzer {
         }
         
         let type_symbol = self.symbol_table.get_type_symbol(type_id).unwrap();
-        if let TypeSymbolKind::Generic(constraints) = &type_symbol.kind {
-            if constraints.contains(&trait_id) {
-                return Ok(true);
-            }
+        if let TypeSymbolKind::Generic(constraints) = &type_symbol.kind && constraints.contains(&trait_id) {
+            return Ok(true);
         }
-        
+
         Ok(false)
     }
 
@@ -635,23 +633,23 @@ impl SemanticAnalyzer {
             }
         }
         
-        if is_static_access {
-            if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id).cloned() {
-                if type_symbol.qualifier == QualifierKind::Private {
-                    let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
-                    let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
+        if is_static_access
+            && let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id).cloned()
+        {
+            if type_symbol.qualifier == QualifierKind::Private {
+                let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
+                let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
 
-                    if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
-                       return Err(self.create_error(
-                           ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
-                           info.span,
-                           &[info.span, type_symbol.span.unwrap()]
-                       ));
-                   }
+                if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
+                    return Err(self.create_error(
+                        ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
+                        info.span,
+                        &[info.span, type_symbol.span.unwrap()]
+                    ));
                 }
-
-                return Ok(Some(Type::new_base(type_symbol.id)));
             }
+
+            return Ok(Some(Type::new_base(type_symbol.id)));
         }
         
         Ok(None)
@@ -666,11 +664,11 @@ impl SemanticAnalyzer {
         info: ConstraintInfo
     ) -> Result<Option<Type>, BoxedError> {
         for imp in impls {
-            if let Some(substitutions) = self.check_impl_applicability(base_type, imp) {
-                if let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)? {
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    return Ok(Some(concrete_member_type));
-                }
+            if let Some(substitutions) = self.check_impl_applicability(base_type, imp)
+                && let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)?
+            {
+                let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                return Ok(Some(concrete_member_type));
             }
         }
 
@@ -692,11 +690,11 @@ impl SemanticAnalyzer {
             .cloned().collect();
     
         for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl) {
-                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)? {
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    return Ok(Some(concrete_member_type));
-                }
+            if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl)
+                && let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
+            {
+                let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
+                return Ok(Some(concrete_member_type));
             }
         }
 
@@ -723,23 +721,23 @@ impl SemanticAnalyzer {
         
         match &base_symbol.kind {
             TypeSymbolKind::Struct((scope_id, impls)) => {
-                if !is_static_access {
-                    if let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).cloned() {
-                        if field_symbol.qualifier == QualifierKind::Private 
-                            && !self.is_access_in_impl_of(info.scope_id, base_symbol_id)
-                        {
-                            let type_name = self.symbol_table.display_type(base_type);
-                            return Err(self.create_error(
-                                ErrorKind::PrivateMemberAccess(member_name.to_string(), type_name),
-                                info.span,
-                                &[info.span, field_symbol.span.unwrap()]
-                            ));
-                        }
-
-                        let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
-                        let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
-                        return Ok(Some(concrete_field_type));
+                if !is_static_access
+                    && let Some(field_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).cloned()
+                {
+                    if field_symbol.qualifier == QualifierKind::Private 
+                        && !self.is_access_in_impl_of(info.scope_id, base_symbol_id)
+                    {
+                        let type_name = self.symbol_table.display_type(base_type);
+                        return Err(self.create_error(
+                            ErrorKind::PrivateMemberAccess(member_name.to_string(), type_name),
+                            info.span,
+                            &[info.span, field_symbol.span.unwrap()]
+                        ));
                     }
+
+                    let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
+                    let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
+                    return Ok(Some(concrete_field_type));
                 }
 
                 if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
@@ -901,16 +899,16 @@ impl SemanticAnalyzer {
 
         if errors.is_empty() {
             for symbol in self.symbol_table.type_symbols.values() {
-                if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
-                    if !self.unification_context.substitutions.contains_key(&symbol.id) {
-                        let span = symbol.span.unwrap();
-                        
-                        errors.push(*self.create_error(
-                            ErrorKind::TypeAnnotationNeeded,
-                            span,
-                            &[span],
-                        ));
-                    }
+                if let TypeSymbolKind::UnificationVariable(_) = symbol.kind
+                    && !self.unification_context.substitutions.contains_key(&symbol.id)
+                {
+                    let span = symbol.span.unwrap();
+                    
+                    errors.push(*self.create_error(
+                        ErrorKind::TypeAnnotationNeeded,
+                        span,
+                        &[span],
+                    ));
                 }
             }
         }
@@ -1529,10 +1527,8 @@ impl SemanticAnalyzer {
                 _ => {}
             }
 
-            if was_changed {
-                if let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
-                    symbol.kind = kind_clone;
-                }
+            if was_changed && let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
+                symbol.kind = kind_clone;
             }
         }
 
@@ -1586,35 +1582,35 @@ impl SemanticAnalyzer {
             }
         }
 
-        if let Some(base_type) = &node.type_id {
-            if let Some(symbol_clone) = self.symbol_table.get_type_symbol(base_type.get_base_symbol()).cloned() {
-                let mut new_kind = symbol_clone.kind;
-                let mut was_changed = false;
+        if let Some(base_type) = &node.type_id
+            && let Some(symbol_clone) = self.symbol_table.get_type_symbol(base_type.get_base_symbol()).cloned()
+        {
+            let mut new_kind = symbol_clone.kind;
+            let mut was_changed = false;
 
-                match &mut new_kind {
-                    TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
-                        let new_params = params.iter().map(|p| self.resolve_final_type(p)).collect::<Vec<_>>();
-                        let new_return = self.resolve_final_type(return_type);
-                        
-                        if &new_params != params || &new_return != return_type {
-                            *params = new_params;
-                            *return_type = new_return;
-                            was_changed = true;
-                        }
-                    },
-                    TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
-                        let new_alias = self.resolve_final_type(alias_ty);
-                        if &new_alias != alias_ty {
-                            *alias_ty = new_alias;
-                            was_changed = true;
-                        }
-                    },
-                    _ => {}
-                }
+            match &mut new_kind {
+                TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                    let new_params = params.iter().map(|p| self.resolve_final_type(p)).collect::<Vec<_>>();
+                    let new_return = self.resolve_final_type(return_type);
+                    
+                    if &new_params != params || &new_return != return_type {
+                        *params = new_params;
+                        *return_type = new_return;
+                        was_changed = true;
+                    }
+                },
+                TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
+                    let new_alias = self.resolve_final_type(alias_ty);
+                    if &new_alias != alias_ty {
+                        *alias_ty = new_alias;
+                        was_changed = true;
+                    }
+                },
+                _ => {}
+            }
 
-                if was_changed {
-                    self.symbol_table.get_type_symbol_mut(symbol_clone.id).unwrap().kind = new_kind;
-                }
+            if was_changed {
+                self.symbol_table.get_type_symbol_mut(symbol_clone.id).unwrap().kind = new_kind;
             }
         }
         
@@ -1685,10 +1681,10 @@ impl SemanticAnalyzer {
                 }
             },
             AstNodeKind::FieldAccess { left: base, .. } => {
-                if let AstNodeKind::Identifier(name) = &base.kind {
-                    if self.symbol_table.find_type_symbol_from_scope(base.scope_id.unwrap(), name).is_some() {
+                if let AstNodeKind::Identifier(name) = &base.kind
+                    && self.symbol_table.find_type_symbol_from_scope(base.scope_id.unwrap(), name).is_some()
+                {
                         return Ok(false);
-                    }
                 }
 
                 let base_type = self.resolve_type(base.type_id.as_ref().unwrap());
@@ -1973,25 +1969,25 @@ impl SemanticAnalyzer {
             implementing_type.clone(),
         );
 
-        if let Type::Base { args, .. } = trait_type {
-            if !trait_symbol.generic_parameters.is_empty() {
-                let generic_substitutions = self.create_generic_substitution_map(
-                    &trait_symbol.generic_parameters,
-                    args,
-                );
-                substitution_map.extend(generic_substitutions);
-            }
+        if let Type::Base { args, .. } = trait_type
+            && !trait_symbol.generic_parameters.is_empty()
+        {
+            let generic_substitutions = self.create_generic_substitution_map(
+                &trait_symbol.generic_parameters,
+                args,
+            );
+            substitution_map.extend(generic_substitutions);
         }
 
         for member_name in trait_members.iter() {
-            if let Some(trait_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, trait_scope_id) {
-                if let Some(impl_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, impl_scope_id) {
-                    let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
-                        unreachable!();
-                    };
+            if let Some(trait_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, trait_scope_id)
+                && let Some(impl_type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, impl_scope_id)
+            {
+                let TypeSymbolKind::TypeAlias((_, Some(alias))) = &impl_type_symbol.kind else {
+                    unreachable!();
+                };
 
-                    substitution_map.insert(trait_type_symbol.id, alias.clone());
-                }
+                substitution_map.insert(trait_type_symbol.id, alias.clone());
             }
         }
 

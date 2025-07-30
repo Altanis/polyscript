@@ -1,9 +1,9 @@
-// frontend/ast.rs
+// frontend/syntax/ast.rs
 use std::fmt::Write;
 
 // frontend/ast.rs
 use crate::{
-    middle::semantic_analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -1177,7 +1177,7 @@ impl AstNode {
     }
 }
 
-// frontend/lexer.rs
+// frontend/syntax/lexer.rs
 use crate::utils::{error::*, kind::*};
 
 trait CharClassifier {
@@ -2106,12 +2106,12 @@ impl Lexer {
 }
 
 
-// frontend/token_parser.rs
+// frontend/syntax/parser.rs
 use indexmap::IndexMap;
 
 use crate::{
     boxed,
-    frontend::ast::BoxedAstNode,
+    frontend::syntax::ast::BoxedAstNode,
     utils::{error::*, kind::*},
 };
 
@@ -3305,16 +3305,20 @@ impl Parser {
             let mut associated_types = vec![];
 
             while parser.peek().get_token_kind() != TokenKind::CloseBrace {
-                let qualifier = match parser.peek().get_token_kind() {
-                    TokenKind::Keyword(KeywordKind::Public) => {
-                        parser.advance();
-                        QualifierKind::Public
+                let qualifier = if trait_node.is_some() {
+                    QualifierKind::Public
+                } else {
+                    match parser.peek().get_token_kind() {
+                        TokenKind::Keyword(KeywordKind::Public) => {
+                            parser.advance();
+                            QualifierKind::Public
+                        }
+                        TokenKind::Keyword(KeywordKind::Private) => {
+                            parser.advance();
+                            QualifierKind::Private
+                        }
+                        _ => QualifierKind::Public,
                     }
-                    TokenKind::Keyword(KeywordKind::Private) => {
-                        parser.advance();
-                        QualifierKind::Private
-                    }
-                    _ => QualifierKind::Public,
                 };
 
                 match parser.peek().get_token_kind() {
@@ -3564,9 +3568,9 @@ impl Parser {
 }
 
 
-// middle/semantic_analyzer.rs
+// frontend/semantics/analyzer.rs
 use crate::{
-    frontend::ast::AstNode,
+    frontend::syntax::ast::AstNode,
     utils::{error::*, kind::*},
 };
 use colored::*;
@@ -4587,23 +4591,6 @@ impl SemanticAnalyzer {
             }};
         }
 
-        /* PASSES
-         * 0: Collects all declared symbols (variables, functions, structs, traits, etc.) into value and type bins.
-         * 1: Associates generic parameters with their trait constraints.
-         * 2: Associates struct fields in declarations with their types.
-         * 3: Appends inherent impl scopes to structs/enums and registers trait implementations.
-         * 4: Attributes symbols with unification variables (unresolved type symbols).
-         * 5: Collects constraints on unification symbols.
-         * 6: Detects duplicate symbols across inherent impls.
-         * 7: Resolves unification variables via a unification algorithm.
-         */
-        
-        /* need to fix:
-         * privacy is ignored (can access private methods and fields)
-         * uninitialized variables
-         * shit error messages
-         */
-
         pass!(self, symbol_collector_pass, &mut program);
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, struct_field_type_collector_pass, &mut program);
@@ -5093,11 +5080,11 @@ impl std::fmt::Display for Type {
     }
 }
 
-// middle/symbols.rs
-use super::semantic_analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
+// frontend/semantics/symbols.rs
+use super::analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 use crate::{
-    frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
-    middle::semantic_analyzer::{
+    frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode},
+    frontend::semantics::analyzer::{
         InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId,
     },
     utils::{
@@ -5999,15 +5986,15 @@ impl SemanticAnalyzer {
 }
 
 
-// middle/uv_collector.rs
+// frontend/semantics/uv_collector.rs
 use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
 use crate::{
     boxed,
-    frontend::ast::{AstNode, AstNodeKind, BoxedAstNode},
-    middle::semantic_analyzer::{
+    frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode},
+    frontend::semantics::analyzer::{
         Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId,
         TypeSymbolKind, ValueSymbolKind,
     },
@@ -7431,12 +7418,12 @@ impl SemanticAnalyzer {
     }
 }
 
-// middle/unification.rs
+// frontend/semantics/unification.rs
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    frontend::ast::{AstNode, AstNodeKind},
-    middle::semantic_analyzer::{
+    frontend::syntax::ast::{AstNode, AstNodeKind},
+    frontend::semantics::analyzer::{
         Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
     },
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}},
@@ -8687,7 +8674,6 @@ impl SemanticAnalyzer {
             return Ok(false);
         }
 
-        println!("member access..");
         let member_ty_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;
 
         if let Some(member_ty) = member_ty_opt {
@@ -9712,7 +9698,7 @@ impl std::error::Error for Error {}
 use colored::*;
 use std::rc::Rc;
 
-use crate::middle::semantic_analyzer::PrimitiveKind;
+use crate::frontend::semantics::analyzer::PrimitiveKind;
 
 pub const NOT_TOKEN: char = '!';
 pub const BITWISE_NEGATE_TOKEN: char = '~';
