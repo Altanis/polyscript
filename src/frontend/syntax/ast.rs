@@ -23,7 +23,7 @@ pub enum AstNodeKind {
         name: String,
         mutable: bool,
         type_annotation: Option<BoxedAstNode>,
-        initializer: Option<BoxedAstNode>,
+        initializer: BoxedAstNode,
     },
 
     UnaryOperation {
@@ -299,10 +299,8 @@ impl AstNode {
                     write!(f, ": ")?;
                     ty.fmt_with_indent(f, 0, table)?;
                 }
-                if let Some(init) = initializer {
-                    write!(f, " = ")?;
-                    init.fmt_with_indent(f, 0, table)?;
-                }
+                write!(f, " = ")?;
+                initializer.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::UnaryOperation { operator, operand } => {
                 write!(f, "{}", indent_str)?;
@@ -889,9 +887,7 @@ impl AstNode {
                     children.push(node.as_mut());
                 }
 
-                if let Some(node) = initializer.as_mut() {
-                    children.push(node.as_mut());
-                }
+                children.push(initializer);
 
                 children
             }

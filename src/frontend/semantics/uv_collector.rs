@@ -218,11 +218,7 @@ impl SemanticAnalyzer {
             info,
         );
 
-        let init_type = if let Some(init) = initializer {
-            Some(self.collect_uvs(init)?)
-        } else {
-            None
-        };
+        let init_type = self.collect_uvs(initializer)?;
 
         let symbol_uv = self
             .unification_context
@@ -231,18 +227,10 @@ impl SemanticAnalyzer {
         if let Some(annot) = type_annotation {
             let annot_type = self.collect_uvs(annot)?;
 
-            if let Some(init_type) = init_type {
-                self.unification_context
-                    .register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
-            }
-
-            self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
-        } else if let Some(init_type) = init_type {
-            self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
         } else {
-            return Err(self.create_error(ErrorKind::BadVariableDeclaration, span, &[span]));
+            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
         }
 
         self.symbol_table

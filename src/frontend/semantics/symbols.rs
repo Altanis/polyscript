@@ -95,11 +95,11 @@ impl SemanticAnalyzer {
         name: &str,
         mutable: bool,
         type_annotation: &mut Option<BoxedAstNode>,
-        initializer: &mut Option<BoxedAstNode>,
+        initializer: &mut BoxedAstNode,
         span: Span,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         self.collect_optional_node(type_annotation)?;
-        self.collect_optional_node(initializer)?;
+        self.symbol_collector_check_node(initializer)?;
 
         let value_id = self.symbol_table.add_value_symbol(
             name,

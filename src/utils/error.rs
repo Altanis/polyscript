@@ -14,7 +14,6 @@ pub enum ErrorKind {
     InvalidChar(String),
     UnterminatedChar,
     UnexpectedToken(String, String, String),
-    UninitializedConstant,
     UnknownIdentifier(String),
     UnresolvedType(String),
     AlreadyDeclared(String),
@@ -35,7 +34,6 @@ pub enum ErrorKind {
     MemberNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
-    BadVariableDeclaration,
     TypeAnnotationNeeded,
     SelfOutsideImpl,
     InvalidThis(&'static str),
@@ -75,7 +73,6 @@ impl ErrorKind {
             ErrorKind::UnexpectedToken(symbol, found, expected) => format!(
                 "unexpected token: found \"{symbol}\" of type {found}, expected {expected}"
             ),
-            ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
             ErrorKind::UnknownIdentifier(name) => format!("could not find \"{name}\" in scope"),
             ErrorKind::UnresolvedType(name) => format!(
                 "type for symbol \"{name}\" has not been determined by this line"
@@ -126,9 +123,6 @@ impl ErrorKind {
                 format!("type {type_name} does not comprise fields")
             }
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
-            ErrorKind::BadVariableDeclaration => {
-                "variable declaration must be annotated with a type or value".to_string()
-            },
             ErrorKind::TypeAnnotationNeeded => "cannot infer type for this; a type annotation may be needed".to_string(),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidThis(place) => format!("found \"this\" {place}"),

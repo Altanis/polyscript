@@ -576,16 +576,8 @@ impl Parser {
                 type_annotation = Some(boxed!(parser.parse_type()?));
             }
 
-            let mut initializer = None;
-            if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(boxed!(parser.parse_expression()?));
-            }
-
-            if !mutable && initializer.is_none() {
-                return Err(
-                    parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span())
-                );
-            }
+            parser.consume(TokenKind::Operator(Operation::Assign))?;
+            let initializer = boxed!(parser.parse_expression()?);
 
             parser.consume(TokenKind::Semicolon)?;
 
@@ -593,7 +585,7 @@ impl Parser {
                 mutable,
                 name: var_name,
                 type_annotation,
-                initializer,
+                initializer
             })
         })
     }
@@ -1265,10 +1257,6 @@ impl Parser {
                 } => (name, type_annotation, initializer),
                 _ => unreachable!(),
             };
-
-            let initializer = initializer.ok_or(
-                parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span()),
-            )?;
 
             Ok(AstNodeKind::AssociatedConstant {
                 qualifier,
