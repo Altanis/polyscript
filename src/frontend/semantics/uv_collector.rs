@@ -1287,6 +1287,12 @@ impl SemanticAnalyzer {
                 right,
                 operator,
             } => self.collect_uv_binary_operation(uv_id, left, right, operator, info)?,
+            HeapExpression(inner_expr) => {
+                let inner_type = self.collect_uvs(inner_expr)?;
+                let boxed_type = Type::Reference(Box::new(inner_type));
+                
+                self.unification_context.register_constraint(Constraint::Equality(uv.clone(), boxed_type), info);
+            },
             TypeCast {
                 expr,
                 target_type,
