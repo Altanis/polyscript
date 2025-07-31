@@ -6,6 +6,7 @@ const FILES = [
     "frontend/semantics/symbols.rs",
     "frontend/semantics/uv_collector.rs",
     "frontend/semantics/unification.rs",
+    "backend/codegen/codegen.rs",
     "utils/error.rs",
     "utils/kind.rs"
 ];

@@ -76,16 +76,7 @@ fn compile_ast(analyzer: &SemanticAnalyzer, mut program: frontend::syntax::ast::
     let builder = context.create_builder();
 
     let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
-    let errs = codegen.compile_program(&mut program);
-
-    if !errs.is_empty() {
-        println!("{} errors emitted... printing:", errs.len());
-        for err in errs {
-            eprintln!("{}", err);
-        }
-
-        std::process::exit(1);
-    }
+    codegen.compile_program(&mut program);
 }
 
 fn test_main_script() {
