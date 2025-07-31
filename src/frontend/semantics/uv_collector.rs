@@ -4,11 +4,7 @@ use indexmap::IndexMap;
 
 use crate::{
     boxed,
-    frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode},
-    frontend::semantics::analyzer::{
-        Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId,
-        TypeSymbolKind, ValueSymbolKind,
-    },
+    frontend::{semantics::analyzer::{Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, syntax::ast::{AstNode, AstNodeKind, BoxedAstNode}},
     utils::{
         error::{BoxedError, Error, ErrorKind},
         kind::{Operation, QualifierKind, ReferenceKind, Span},
@@ -20,10 +16,10 @@ impl SemanticAnalyzer {
         self.builtin_types[primitive as usize]
     }
 
-    fn get_type_of_identifier(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<Type, BoxedError> {
+    fn get_type_and_value_tuple(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<(ValueSymbolId, Type), BoxedError> {
         match self.symbol_table.find_value_symbol_from_scope(scope_id, name) {
             Some(value_symbol) => match value_symbol.type_id.clone() {
-                Some(type_id) => Ok(type_id),
+                Some(type_id) => Ok((value_symbol.id, type_id)),
                 None => Err(self.create_error(ErrorKind::UnresolvedType(name.to_string()), span, &[span])),
             },
             None => Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_string()), span, &[span])),
@@ -1288,13 +1284,12 @@ impl SemanticAnalyzer {
                 ),
                 info,
             ),
-            Identifier(string) => self.unification_context.register_constraint(
-                Constraint::Equality(
-                    uv.clone(),
-                    self.get_type_of_identifier(expr.scope_id.unwrap(), string, expr.span)?,
-                ),
-                info,
-            ),
+            Identifier(name) => {
+                let (value_id, ty) = self.get_type_and_value_tuple(expr.scope_id.unwrap(), name, expr.span)?;
+                
+                expr.value_id = Some(value_id);
+                self.unification_context.register_constraint(Constraint::Equality(uv.clone(), ty), info)
+            },
 
             UnaryOperation { operator, operand } => {
                 self.collect_uv_unary_operation(uv_id, operator, operand, info)?

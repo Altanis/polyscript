@@ -1,11 +1,12 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::AddressSpace;
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{NameInterner, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
+use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 
 pub type StringLiteralId = usize;
@@ -26,6 +27,37 @@ pub struct CodeGen<'a, 'ctx> {
     current_function: Option<FunctionValue<'ctx>>,
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    /// Maps a semantic type from the analyzer to a concrete LLVM type.
+    fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
+        match ty {
+            Type::Base { symbol, .. } => {
+                if let Some(llvm_ty) = self.type_map.get(symbol) {
+                    return Some(*llvm_ty);
+                }
+
+                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                let llvm_ty = match &type_symbol.kind {
+                    TypeSymbolKind::Primitive(p) => match p {
+                        PrimitiveKind::Int => self.context.i64_type().as_basic_type_enum(),
+                        PrimitiveKind::Float => self.context.f64_type().as_basic_type_enum(),
+                        PrimitiveKind::Bool => self.context.bool_type().as_basic_type_enum(),
+                        PrimitiveKind::Char => self.context.i8_type().as_basic_type_enum(),
+                        PrimitiveKind::String => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                        PrimitiveKind::Void | PrimitiveKind::Never => return None,
+                    },
+                    _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
+                };
+
+                self.type_map.insert(*symbol, llvm_ty);
+                Some(llvm_ty)
+            },
+            Type::Reference(_) | Type::MutableReference(_) 
+                => Some(self.context.ptr_type(AddressSpace::default()).as_basic_type_enum())
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -81,6 +113,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .const_int(value as u8 as u64, false)
             .as_basic_value_enum()
     }
+
+    fn compile_identifier(&mut self, value_id: ValueSymbolId, ty: &Type) -> BasicValueEnum<'ctx> {
+        if let Some(&ptr) = self.variables.get(&value_id) {
+            let ty = self.map_semantic_type(ty).unwrap();
+            return self.builder.build_load(ty, ptr, "").unwrap();
+        }
+
+        if let Some(func) = self.functions.get(&value_id) {
+            return func.as_global_value().as_basic_value_enum();
+        }
+
+        panic!("unresolved identiifer during codegen");
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -113,6 +158,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::BooleanLiteral(value) => self.compile_bool_literal(*value),
             AstNodeKind::StringLiteral(value) => self.compile_string_literal(value),
             AstNodeKind::CharLiteral(value) => self.compile_char_literal(*value),
+            AstNodeKind::Identifier(_) => self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap()),
             _ => unimplemented!()
         }
     }
