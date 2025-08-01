@@ -6,9 +6,11 @@ const FILES = [
     "frontend/semantics/symbols.rs",
     "frontend/semantics/uv_collector.rs",
     "frontend/semantics/unification.rs",
+    "backend/optimizations/escape_analysis.rs",
     "backend/codegen/codegen.rs",
     "utils/error.rs",
-    "utils/kind.rs"
+    "utils/kind.rs",
+    "main.rs"
 ];
 
 const fs = require("fs");

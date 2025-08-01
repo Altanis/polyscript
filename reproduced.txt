@@ -24,7 +24,7 @@ pub enum AstNodeKind {
         name: String,
         mutable: bool,
         type_annotation: Option<BoxedAstNode>,
-        initializer: Option<BoxedAstNode>,
+        initializer: BoxedAstNode,
     },
 
     UnaryOperation {
@@ -41,6 +41,7 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
+    HeapExpression(BoxedAstNode),
 
     TypeCast {
         expr: BoxedAstNode,
@@ -300,10 +301,8 @@ impl AstNode {
                     write!(f, ": ")?;
                     ty.fmt_with_indent(f, 0, table)?;
                 }
-                if let Some(init) = initializer {
-                    write!(f, " = ")?;
-                    init.fmt_with_indent(f, 0, table)?;
-                }
+                write!(f, " = ")?;
+                initializer.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::UnaryOperation { operator, operand } => {
                 write!(f, "{}", indent_str)?;
@@ -331,6 +330,10 @@ impl AstNode {
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
+            }
+            AstNodeKind::HeapExpression(expr) => {
+                write!(f, "{}heap ", indent_str)?;
+                expr.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::TypeCast { expr, target_type } => {
                 write!(f, "{}(", indent_str)?;
@@ -890,9 +893,7 @@ impl AstNode {
                     children.push(node.as_mut());
                 }
 
-                if let Some(node) = initializer.as_mut() {
-                    children.push(node.as_mut());
-                }
+                children.push(initializer);
 
                 children
             }
@@ -901,7 +902,8 @@ impl AstNode {
 
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
-            }
+            },
+            HeapExpression(expr) => vec![expr.as_mut()],
 
             TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
             PathQualifier { ty, tr } => {
@@ -1775,6 +1777,11 @@ impl Lexer {
                 TokenKind::Operator(Operation::As),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            HEAP_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Heap),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,
@@ -2553,6 +2560,18 @@ impl Parser {
             }
             TokenKind::Keyword(KeywordKind::Fn) => self.parse_function_expression(),
             TokenKind::Keyword(KeywordKind::If) => self.parse_if_expression(),
+            TokenKind::Keyword(KeywordKind::Heap) => {
+                self.advance();
+                let expr = self.parse_binding_power(Operation::Not.binding_power().0)?;
+
+                Ok(AstNode {
+                    kind: AstNodeKind::HeapExpression(boxed!(expr)),
+                    span: span.set_end_from_span(self.previous().get_span()),
+                    type_id: None,
+                    value_id: None,
+                    scope_id: None,
+                })
+            },
             _ => {
                 return Err(self.generate_error(
                     ErrorKind::UnexpectedToken(
@@ -2686,16 +2705,8 @@ impl Parser {
                 type_annotation = Some(boxed!(parser.parse_type()?));
             }
 
-            let mut initializer = None;
-            if parser.match_token(TokenKind::Operator(Operation::Assign)) {
-                initializer = Some(boxed!(parser.parse_expression()?));
-            }
-
-            if !mutable && initializer.is_none() {
-                return Err(
-                    parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span())
-                );
-            }
+            parser.consume(TokenKind::Operator(Operation::Assign))?;
+            let initializer = boxed!(parser.parse_expression()?);
 
             parser.consume(TokenKind::Semicolon)?;
 
@@ -2703,7 +2714,7 @@ impl Parser {
                 mutable,
                 name: var_name,
                 type_annotation,
-                initializer,
+                initializer
             })
         })
     }
@@ -3376,10 +3387,6 @@ impl Parser {
                 _ => unreachable!(),
             };
 
-            let initializer = initializer.ok_or(
-                parser.generate_error(ErrorKind::UninitializedConstant, parser.previous().get_span()),
-            )?;
-
             Ok(AstNodeKind::AssociatedConstant {
                 qualifier,
                 name,
@@ -3745,6 +3752,13 @@ impl Type {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AllocationKind {
+    Stack,
+    Heap,
+    Unresolved
+}
+
 #[derive(Debug, Clone)]
 pub struct ValueSymbol {
     pub id: ValueSymbolId,
@@ -3755,6 +3769,7 @@ pub struct ValueSymbol {
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<Type>,
+    pub allocation_kind: AllocationKind
 }
 
 #[derive(Debug, Clone)]
@@ -4113,6 +4128,7 @@ impl SymbolTable {
             type_id,
             span,
             scope_id,
+            allocation_kind: AllocationKind::Unresolved
         };
         self.value_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
@@ -4646,7 +4662,13 @@ impl SymbolTable {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_value_name(self.symbol.name_id);
                 write!(f, "{}", name.cyan().bold())?;
-                write!(f, " ({})", self.symbol.kind)?;
+                write!(f, " ({}{})", if matches!(self.symbol.kind, ValueSymbolKind::Variable) {
+                    match self.symbol.allocation_kind {
+                        AllocationKind::Stack => "Stack ",
+                        AllocationKind::Heap => "Heap ",
+                        AllocationKind::Unresolved => "?? "
+                    }
+                } else { "" }, self.symbol.kind)?;
                 if self.symbol.mutable {
                     write!(f, " {}", "mut".red())?;
                 }
@@ -5179,11 +5201,11 @@ impl SemanticAnalyzer {
         name: &str,
         mutable: bool,
         type_annotation: &mut Option<BoxedAstNode>,
-        initializer: &mut Option<BoxedAstNode>,
+        initializer: &mut BoxedAstNode,
         span: Span,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         self.collect_optional_node(type_annotation)?;
-        self.collect_optional_node(initializer)?;
+        self.symbol_collector_check_node(initializer)?;
 
         let value_id = self.symbol_table.add_value_symbol(
             name,
@@ -6208,11 +6230,7 @@ impl SemanticAnalyzer {
             info,
         );
 
-        let init_type = if let Some(init) = initializer {
-            Some(self.collect_uvs(init)?)
-        } else {
-            None
-        };
+        let init_type = self.collect_uvs(initializer)?;
 
         let symbol_uv = self
             .unification_context
@@ -6221,18 +6239,10 @@ impl SemanticAnalyzer {
         if let Some(annot) = type_annotation {
             let annot_type = self.collect_uvs(annot)?;
 
-            if let Some(init_type) = init_type {
-                self.unification_context
-                    .register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
-            }
-
-            self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
-        } else if let Some(init_type) = init_type {
-            self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
         } else {
-            return Err(self.create_error(ErrorKind::BadVariableDeclaration, span, &[span]));
+            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
         }
 
         self.symbol_table
@@ -7289,6 +7299,12 @@ impl SemanticAnalyzer {
                 right,
                 operator,
             } => self.collect_uv_binary_operation(uv_id, left, right, operator, info)?,
+            HeapExpression(inner_expr) => {
+                let inner_type = self.collect_uvs(inner_expr)?;
+                let boxed_type = Type::Reference(Box::new(inner_type));
+                
+                self.unification_context.register_constraint(Constraint::Equality(uv.clone(), boxed_type), info);
+            },
             TypeCast {
                 expr,
                 target_type,
@@ -9419,16 +9435,197 @@ impl SemanticAnalyzer {
     }
 }
 
+// backend/optimizations/escape_analysis.rs
+use crate::{frontend::{
+    semantics::analyzer::{AllocationKind, ScopeKind, SemanticAnalyzer, Type, ValueSymbolId, ValueSymbolKind},
+    syntax::ast::{AstNode, AstNodeKind},
+}, utils::kind::Operation};
+
+pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+    loop {
+        if !analysis_pass(analyzer, program) {
+            break;
+        }
+    }
+    
+    for symbol in analyzer.symbol_table.value_symbols.values_mut() {
+        if let ValueSymbolKind::Variable = symbol.kind
+            && symbol.allocation_kind == AllocationKind::Unresolved
+        {
+            symbol.allocation_kind = AllocationKind::Stack;
+        }
+    }
+}
+
+fn scan_and_heapify_locals(
+    analyzer: &mut SemanticAnalyzer,
+    expr: &mut AstNode,
+    scope_context: usize,
+    changed: &mut bool,
+) {
+    let mut worklist = vec![expr];
+
+    while let Some(current) = worklist.pop() {
+        if let Some(id) = get_id_of_referenced_local(analyzer, current, scope_context)
+            && move_to_heap(analyzer, id)
+        {
+            *changed = true;
+        }
+
+        for child in current.children_mut() {
+            worklist.push(child);
+        }
+    }
+}
+
+fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut AstNode) -> bool {
+    let mut changed = false;
+    
+    for child in node.children_mut() {
+        if analysis_pass(analyzer, child) {
+            changed = true;
+        }
+    }
+    
+    let scope_context = node.scope_id.unwrap();
+    
+    match &mut node.kind {
+        AstNodeKind::Return(Some(expr)) => scan_and_heapify_locals(analyzer, expr, scope_context, &mut changed),
+        AstNodeKind::BinaryOperation { operator, left, right } if operator.is_assignment() => {
+            if is_escaping_place(analyzer, left) {
+                scan_and_heapify_locals(analyzer, right, scope_context, &mut changed);
+            }
+        },
+        AstNodeKind::FunctionCall { arguments, .. } => {
+            for arg in arguments {
+                scan_and_heapify_locals(analyzer, arg, scope_context, &mut changed);
+            }
+        },
+        AstNodeKind::VariableDeclaration { initializer, .. } => {
+            let var_id = node.value_id.unwrap();
+            let var_scope = analyzer.symbol_table.get_value_symbol(var_id).unwrap().scope_id;
+            
+            let mut worklist = vec![initializer.as_mut()];
+            while let Some(current) = worklist.pop() {
+                if let Some(init_id) = get_id_of_referenced_local(analyzer, current, scope_context) {
+                    let init_var_scope = analyzer.symbol_table.get_value_symbol(init_id).unwrap().scope_id;
+                    if is_scope_outlived_by(analyzer, init_var_scope, var_scope)
+                        && move_to_heap(analyzer, init_id)
+                    {
+                        changed = true;
+                    }
+                }
+
+                worklist.extend(current.children_mut());
+            }
+        },
+        AstNodeKind::HeapExpression(expr) => {
+            scan_and_heapify_locals(analyzer, expr, scope_context, &mut changed);
+        },
+        _ => {}
+    }
+    
+    changed
+}
+
+
+fn get_id_of_referenced_local(analyzer: &SemanticAnalyzer, expr: &AstNode, current_scope: usize) -> Option<ValueSymbolId> {
+    let operand = if let AstNodeKind::UnaryOperation { operator, operand } = &expr.kind {
+        if *operator == Operation::ImmutableAddressOf || *operator == Operation::MutableAddressOf {
+            operand
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+    
+    if let Some(var_id) = operand.value_id {
+        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+        
+        if !matches!(symbol.kind, ValueSymbolKind::Variable) {
+            return None;
+        }
+        
+        let fn_scope = get_function_scope(analyzer, current_scope)?;
+        if is_in_scope(analyzer, symbol.scope_id, fn_scope) {
+            return Some(var_id);
+        }
+    }
+    None
+}
+
+fn is_escaping_place(analyzer: &SemanticAnalyzer, place: &AstNode) -> bool {
+    match &place.kind {
+        AstNodeKind::Identifier(_) => {
+            let place_id = place.value_id.unwrap();
+            let place_symbol = analyzer.symbol_table.get_value_symbol(place_id).unwrap();
+            place_symbol.allocation_kind == AllocationKind::Heap
+        }
+        AstNodeKind::FieldAccess { left, .. } => {
+            if let Some(ty) = &left.type_id
+                && matches!(ty, Type::Reference(_) | Type::MutableReference(_))
+            {
+                return true;
+            }
+
+            is_escaping_place(analyzer, left)
+        }
+        _ => false,
+    }
+}
+
+fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> bool {
+    let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
+    if symbol.allocation_kind != AllocationKind::Heap {
+        symbol.allocation_kind = AllocationKind::Heap;
+        return true;
+    }
+
+    false
+}
+
+fn get_function_scope(analyzer: &SemanticAnalyzer, scope_id: usize) -> Option<usize> {
+    let mut current_id = Some(scope_id);
+    while let Some(id) = current_id {
+        let scope = analyzer.symbol_table.get_scope(id).unwrap();
+        if scope.kind == ScopeKind::Function {
+            return Some(id);
+        }
+
+        current_id = scope.parent;
+    }
+
+    None
+}
+
+fn is_in_scope(analyzer: &SemanticAnalyzer, descendant_candidate: usize, ancestor_candidate: usize) -> bool {
+    let mut current_id = Some(descendant_candidate);
+    while let Some(id) = current_id {
+        if id == ancestor_candidate {
+            return true;
+        }
+
+        current_id = analyzer.symbol_table.get_scope(id).unwrap().parent;
+    }
+    false
+}
+
+fn is_scope_outlived_by(analyzer: &SemanticAnalyzer, inner_scope: usize, outer_scope: usize) -> bool {
+    is_in_scope(analyzer, inner_scope, outer_scope) && inner_scope != outer_scope
+}
+
 // backend/codegen/codegen.rs
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::AddressSpace;
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{NameInterner, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
-use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
+use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
+use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 
 pub type StringLiteralId = usize;
 
@@ -9448,6 +9645,37 @@ pub struct CodeGen<'a, 'ctx> {
     current_function: Option<FunctionValue<'ctx>>,
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    /// Maps a semantic type from the analyzer to a concrete LLVM type.
+    fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
+        match ty {
+            Type::Base { symbol, .. } => {
+                if let Some(&llvm_ty) = self.type_map.get(symbol) {
+                    return Some(llvm_ty);
+                }
+
+                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                let llvm_ty = match &type_symbol.kind {
+                    TypeSymbolKind::Primitive(p) => match p {
+                        PrimitiveKind::Int => self.context.i64_type().as_basic_type_enum(),
+                        PrimitiveKind::Float => self.context.f64_type().as_basic_type_enum(),
+                        PrimitiveKind::Bool => self.context.bool_type().as_basic_type_enum(),
+                        PrimitiveKind::Char => self.context.i8_type().as_basic_type_enum(),
+                        PrimitiveKind::String => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                        PrimitiveKind::Void | PrimitiveKind::Never => return None,
+                    },
+                    _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
+                };
+
+                self.type_map.insert(*symbol, llvm_ty);
+                Some(llvm_ty)
+            },
+            Type::Reference(_) | Type::MutableReference(_) 
+                => Some(self.context.ptr_type(AddressSpace::default()).as_basic_type_enum())
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -9503,6 +9731,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .const_int(value as u8 as u64, false)
             .as_basic_value_enum()
     }
+
+    fn compile_identifier(&mut self, value_id: ValueSymbolId, ty: &Type) -> BasicValueEnum<'ctx> {
+        if let Some(&ptr) = self.variables.get(&value_id) {
+            let ty = self.map_semantic_type(ty).unwrap();
+            return self.builder.build_load(ty, ptr, "").unwrap();
+        }
+
+        if let Some(func) = self.functions.get(&value_id) {
+            return func.as_global_value().as_basic_value_enum();
+        }
+
+        panic!("unresolved identiifer during codegen");
+    }
+
+    fn compile_variable_declaration(&mut self, initializer: &BoxedAstNode, value_id: ValueSymbolId, ty: &Type) -> Option<BasicValueEnum<'ctx>> {
+        let ty = self.map_semantic_type(ty).unwrap();
+        let alloca = self.builder.build_alloca(ty, "").unwrap();
+        self.variables.insert(value_id, alloca);
+
+        let init_val = self.compile_node(initializer).unwrap();
+        self.builder.build_store(alloca, init_val).unwrap();
+
+        None
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -9528,13 +9780,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_node(&mut self, stmt: &AstNode) -> BasicValueEnum<'ctx> {
+    fn compile_node(&mut self, stmt: &AstNode) -> Option<BasicValueEnum<'ctx>> {
         match &stmt.kind {
-            AstNodeKind::IntegerLiteral(value) => self.compile_integer_literal(*value),
-            AstNodeKind::FloatLiteral(value) => self.compile_float_literal(*value),
-            AstNodeKind::BooleanLiteral(value) => self.compile_bool_literal(*value),
-            AstNodeKind::StringLiteral(value) => self.compile_string_literal(value),
-            AstNodeKind::CharLiteral(value) => self.compile_char_literal(*value),
+            AstNodeKind::IntegerLiteral(value) => Some(self.compile_integer_literal(*value)),
+            AstNodeKind::FloatLiteral(value) => Some(self.compile_float_literal(*value)),
+            AstNodeKind::BooleanLiteral(value) => Some(self.compile_bool_literal(*value)),
+            AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
+            AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
+            AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            AstNodeKind::VariableDeclaration { initializer, .. } =>
+                self.compile_variable_declaration(initializer, stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap()),
             _ => unimplemented!()
         }
     }
@@ -9557,7 +9812,6 @@ pub enum ErrorKind {
     InvalidChar(String),
     UnterminatedChar,
     UnexpectedToken(String, String, String),
-    UninitializedConstant,
     UnknownIdentifier(String),
     UnresolvedType(String),
     AlreadyDeclared(String),
@@ -9578,7 +9832,6 @@ pub enum ErrorKind {
     MemberNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
-    BadVariableDeclaration,
     TypeAnnotationNeeded,
     SelfOutsideImpl,
     InvalidThis(&'static str),
@@ -9618,7 +9871,6 @@ impl ErrorKind {
             ErrorKind::UnexpectedToken(symbol, found, expected) => format!(
                 "unexpected token: found \"{symbol}\" of type {found}, expected {expected}"
             ),
-            ErrorKind::UninitializedConstant => "constant declared but no value assigned".to_string(),
             ErrorKind::UnknownIdentifier(name) => format!("could not find \"{name}\" in scope"),
             ErrorKind::UnresolvedType(name) => format!(
                 "type for symbol \"{name}\" has not been determined by this line"
@@ -9669,9 +9921,6 @@ impl ErrorKind {
                 format!("type {type_name} does not comprise fields")
             }
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
-            ErrorKind::BadVariableDeclaration => {
-                "variable declaration must be annotated with a type or value".to_string()
-            },
             ErrorKind::TypeAnnotationNeeded => "cannot infer type for this; a type annotation may be needed".to_string(),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidThis(place) => format!("found \"this\" {place}"),
@@ -9855,6 +10104,7 @@ pub const TRAIT_KEYWORD: &str = "trait";
 pub const TYPE_KEYWORD: &str = "type";
 pub const MUT_KEYWORD: &str = "mut";
 pub const AS_KEYWORD: &str = "as";
+pub const HEAP_KEYWORD: &str = "heap";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -10284,7 +10534,8 @@ pub enum KeywordKind {
     This,
     Trait,
     Type,
-    Mut
+    Mut,
+    Heap
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -10493,7 +10744,8 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::This => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
-                KeywordKind::Type => "Keyword::Type".purple()
+                KeywordKind::Type => "Keyword::Type".purple(),
+                KeywordKind::Heap => "Keyword::Heap".purple()
             },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),
@@ -10529,4 +10781,162 @@ pub enum ReferenceKind {
     Reference,
     MutableReference,
 }
+
+// main.rs
+#![allow(dead_code)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(non_upper_case_globals)]
+#![allow(clippy::needless_return)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::module_inception)]
+#![feature(if_let_guard)]
+
+use std::fs;
+use std::path::Path;
+use std::rc::Rc;
+
+use frontend::syntax::ast::AstNode;
+use frontend::syntax::parser::Parser;
+use frontend::semantics::analyzer::SemanticAnalyzer;
+use inkwell::context::Context;
+use utils::kind::Token;
+
+use crate::backend::codegen::codegen::CodeGen;
+use crate::backend::optimizations::escape_analysis;
+use crate::frontend::syntax::lexer::Lexer;
+
+mod frontend;
+mod backend;
+mod utils;
+
+pub const READ_TOKENS: bool = false;
+pub const PARSE_TOKENS: bool = true;
+pub const SEMANTIC_ANALYSIS: bool = true;
+pub const PRINT: bool = true;
+
+fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
+    let mut lexer = Lexer::new(program);
+    let tokens = lexer.tokenize();
+
+    if let Err(e) = tokens {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+
+    lexer.extract()
+}
+
+fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
+    let mut parser = Parser::new(lined_source, tokens);
+
+    match parser.parse() {
+        Err(errs) => {
+            println!("{} errors emitted... printing:", errs.len());
+            for err in errs {
+                eprintln!("{}", err);
+            }
+
+            std::process::exit(1);
+        }
+        Ok(program) => program,
+    }
+}
+
+fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, SemanticAnalyzer) {
+    let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
+    match analyzer.analyze(program) {
+        Err(errs) => {
+            println!("{} errors emitted... printing:", errs.len());
+            for err in errs {
+                eprintln!("{}", err);
+            }
+
+            std::process::exit(1);
+        }
+        Ok(program) => (program, analyzer),
+    }
+}
+
+fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+    escape_analysis::init(program, analyzer);
+}
+
+fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
+    let context = Context::create();
+    let module = context.create_module("a");
+    let builder = context.create_builder();
+
+    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
+    codegen.compile_program(&program);
+}
+
+fn test_main_script() {
+    let program = fs::read_to_string("scripts/main.ps").expect("Invalid source file.");
+    let (lined_source, tokens) = generate_tokens(program);
+
+    if READ_TOKENS {
+        println!("Reading tokens...");
+        for token in tokens.iter() {
+            println!("{}", token);
+        }
+    }
+
+    if PARSE_TOKENS {
+        let program = parse_tokens(lined_source.clone(), tokens);
+
+        if SEMANTIC_ANALYSIS {
+            let (mut program, mut analyzer) = analyze_ast(lined_source, program);
+            optimize(&mut program, &mut analyzer);
+            
+            if PRINT {
+                println!("--- ANNOTATED AST ---");
+                
+                let mut format_str = String::new();
+                let _ = program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
+                println!("{}", format_str);
+
+                println!("--- SEMANTIC ANALYZER ---");
+                println!("{}", analyzer);
+            }
+        }
+    }
+}
+
+fn assert_scripts_work() {
+    let mut paths = vec![];
+    let path = Path::new("scripts/tests");
+
+    if let Ok(entries) = fs::read_dir(path) {
+        paths.extend(
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file()),
+        );
+    }
+
+    for path in paths {
+        println!("Asserting {} compiles well...", path.display());
+
+        let program = fs::read_to_string(&path).expect("Invalid source file.");
+        let (lined_source, tokens) = generate_tokens(program);
+        let program_node = parse_tokens(lined_source.clone(), tokens);
+        // let (_, program) = analyze_tokens(lined_source, program_node);
+
+        // println!("{}", program);
+    }
+
+    println!("All files checked.");
+}
+
+fn main() {
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+
+    // assert_scripts_work();
+    test_main_script();
+}
+
 

@@ -173,6 +173,13 @@ impl Type {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AllocationKind {
+    Stack,
+    Heap,
+    Unresolved
+}
+
 #[derive(Debug, Clone)]
 pub struct ValueSymbol {
     pub id: ValueSymbolId,
@@ -183,6 +190,7 @@ pub struct ValueSymbol {
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<Type>,
+    pub allocation_kind: AllocationKind
 }
 
 #[derive(Debug, Clone)]
@@ -541,6 +549,7 @@ impl SymbolTable {
             type_id,
             span,
             scope_id,
+            allocation_kind: AllocationKind::Unresolved
         };
         self.value_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
@@ -1074,7 +1083,13 @@ impl SymbolTable {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_value_name(self.symbol.name_id);
                 write!(f, "{}", name.cyan().bold())?;
-                write!(f, " ({})", self.symbol.kind)?;
+                write!(f, " ({}{})", if matches!(self.symbol.kind, ValueSymbolKind::Variable) {
+                    match self.symbol.allocation_kind {
+                        AllocationKind::Stack => "Stack ",
+                        AllocationKind::Heap => "Heap ",
+                        AllocationKind::Unresolved => "?? "
+                    }
+                } else { "" }, self.symbol.kind)?;
                 if self.symbol.mutable {
                     write!(f, " {}", "mut".red())?;
                 }

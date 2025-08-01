@@ -1,2 +1,11 @@
-let x = 1;
-let y = heap 1;
+struct RefHolder {
+    public value: &int;
+}
+
+fn test_heap_struct_storage(): RefHolder {
+    let g = 70;
+    let h = RefHolder { value: &g };
+    return h;
+}
+
+test_heap_struct_storage();

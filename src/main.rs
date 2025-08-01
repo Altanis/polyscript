@@ -14,9 +14,12 @@ use std::rc::Rc;
 use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
+use inkwell::context::Context;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
+use crate::backend::optimizations::escape_analysis;
+use crate::frontend::syntax::lexer::Lexer;
 
 mod frontend;
 mod backend;
@@ -28,7 +31,7 @@ pub const SEMANTIC_ANALYSIS: bool = true;
 pub const PRINT: bool = true;
 
 fn generate_tokens(program: String) -> (Vec<String>, Vec<Token>) {
-    let mut lexer = frontend::syntax::lexer::Lexer::new(program);
+    let mut lexer = Lexer::new(program);
     let tokens = lexer.tokenize();
 
     if let Err(e) = tokens {
@@ -55,7 +58,7 @@ fn parse_tokens(lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
     }
 }
 
-fn analyze_ast(lined_source: Vec<String>, program: frontend::syntax::ast::AstNode) -> (SemanticAnalyzer, AstNode) {
+fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, SemanticAnalyzer) {
     let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
     match analyzer.analyze(program) {
         Err(errs) => {
@@ -66,17 +69,21 @@ fn analyze_ast(lined_source: Vec<String>, program: frontend::syntax::ast::AstNod
 
             std::process::exit(1);
         }
-        Ok(program) => (analyzer, program),
+        Ok(program) => (program, analyzer),
     }
 }
 
-fn compile_ast(analyzer: &SemanticAnalyzer, mut program: frontend::syntax::ast::AstNode) {
-    let context = inkwell::context::Context::create();
-    let module = context.create_module("my_program");
+fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+    escape_analysis::init(program, analyzer);
+}
+
+fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
+    let context = Context::create();
+    let module = context.create_module("a");
     let builder = context.create_builder();
 
     let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
-    codegen.compile_program(&mut program);
+    codegen.compile_program(&program);
 }
 
 fn test_main_script() {
@@ -92,11 +99,10 @@ fn test_main_script() {
 
     if PARSE_TOKENS {
         let program = parse_tokens(lined_source.clone(), tokens);
-        // dbg!(&program);
-        // println!("{}", program);
 
         if SEMANTIC_ANALYSIS {
-            let (analyzer, program) = analyze_ast(lined_source, program);
+            let (mut program, mut analyzer) = analyze_ast(lined_source, program);
+            optimize(&mut program, &mut analyzer);
             
             if PRINT {
                 println!("--- ANNOTATED AST ---");

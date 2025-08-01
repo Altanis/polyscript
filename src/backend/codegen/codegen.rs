@@ -7,7 +7,7 @@ use inkwell::AddressSpace;
 use std::collections::HashMap;
 
 use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
-use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
+use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 
 pub type StringLiteralId = usize;
 
@@ -34,8 +34,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
         match ty {
             Type::Base { symbol, .. } => {
-                if let Some(llvm_ty) = self.type_map.get(symbol) {
-                    return Some(*llvm_ty);
+                if let Some(&llvm_ty) = self.type_map.get(symbol) {
+                    return Some(llvm_ty);
                 }
 
                 let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
@@ -126,6 +126,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         panic!("unresolved identiifer during codegen");
     }
+
+    fn compile_variable_declaration(&mut self, initializer: &BoxedAstNode, value_id: ValueSymbolId, ty: &Type) -> Option<BasicValueEnum<'ctx>> {
+        let ty = self.map_semantic_type(ty).unwrap();
+        let alloca = self.builder.build_alloca(ty, "").unwrap();
+        self.variables.insert(value_id, alloca);
+
+        let init_val = self.compile_node(initializer).unwrap();
+        self.builder.build_store(alloca, init_val).unwrap();
+
+        None
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -151,14 +162,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_node(&mut self, stmt: &AstNode) -> BasicValueEnum<'ctx> {
+    fn compile_node(&mut self, stmt: &AstNode) -> Option<BasicValueEnum<'ctx>> {
         match &stmt.kind {
-            AstNodeKind::IntegerLiteral(value) => self.compile_integer_literal(*value),
-            AstNodeKind::FloatLiteral(value) => self.compile_float_literal(*value),
-            AstNodeKind::BooleanLiteral(value) => self.compile_bool_literal(*value),
-            AstNodeKind::StringLiteral(value) => self.compile_string_literal(value),
-            AstNodeKind::CharLiteral(value) => self.compile_char_literal(*value),
-            AstNodeKind::Identifier(_) => self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap()),
+            AstNodeKind::IntegerLiteral(value) => Some(self.compile_integer_literal(*value)),
+            AstNodeKind::FloatLiteral(value) => Some(self.compile_float_literal(*value)),
+            AstNodeKind::BooleanLiteral(value) => Some(self.compile_bool_literal(*value)),
+            AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
+            AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
+            AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            AstNodeKind::VariableDeclaration { initializer, .. } =>
+                self.compile_variable_declaration(initializer, stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap()),
             _ => unimplemented!()
         }
     }
