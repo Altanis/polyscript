@@ -7301,7 +7301,7 @@ impl SemanticAnalyzer {
             } => self.collect_uv_binary_operation(uv_id, left, right, operator, info)?,
             HeapExpression(inner_expr) => {
                 let inner_type = self.collect_uvs(inner_expr)?;
-                let boxed_type = Type::Reference(Box::new(inner_type));
+                let boxed_type = Type::MutableReference(Box::new(inner_type));
                 
                 self.unification_context.register_constraint(Constraint::Equality(uv.clone(), boxed_type), info);
             },
@@ -9436,10 +9436,16 @@ impl SemanticAnalyzer {
 }
 
 // backend/optimizations/escape_analysis.rs
-use crate::{frontend::{
-    semantics::analyzer::{AllocationKind, ScopeKind, SemanticAnalyzer, Type, ValueSymbolId, ValueSymbolKind},
-    syntax::ast::{AstNode, AstNodeKind},
-}, utils::kind::Operation};
+// backend/optimizations/escape_analysis.rs
+use crate::{
+    frontend::{
+        semantics::analyzer::{
+            AllocationKind, ScopeKind, SemanticAnalyzer, ValueSymbolId, ValueSymbolKind,
+        },
+        syntax::ast::{AstNode, AstNodeKind},
+    },
+    utils::kind::Operation,
+};
 
 pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
     loop {
@@ -9447,7 +9453,7 @@ pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
             break;
         }
     }
-    
+
     for symbol in analyzer.symbol_table.value_symbols.values_mut() {
         if let ValueSymbolKind::Variable = symbol.kind
             && symbol.allocation_kind == AllocationKind::Unresolved
@@ -9457,120 +9463,138 @@ pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
     }
 }
 
-fn scan_and_heapify_locals(
-    analyzer: &mut SemanticAnalyzer,
-    expr: &mut AstNode,
-    scope_context: usize,
-    changed: &mut bool,
-) {
-    let mut worklist = vec![expr];
-
-    while let Some(current) = worklist.pop() {
-        if let Some(id) = get_id_of_referenced_local(analyzer, current, scope_context)
-            && move_to_heap(analyzer, id)
-        {
-            *changed = true;
-        }
-
-        for child in current.children_mut() {
-            worklist.push(child);
-        }
-    }
-}
-
 fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut AstNode) -> bool {
     let mut changed = false;
-    
+
     for child in node.children_mut() {
         if analysis_pass(analyzer, child) {
             changed = true;
         }
     }
-    
-    let scope_context = node.scope_id.unwrap();
-    
+
     match &mut node.kind {
-        AstNodeKind::Return(Some(expr)) => scan_and_heapify_locals(analyzer, expr, scope_context, &mut changed),
+        AstNodeKind::Return(Some(expr)) => {
+            let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+            find_and_heapify_escaping_exprs(analyzer, expr, function_scope, &mut changed);
+        }
+
+        AstNodeKind::Function { body: Some(body_node), .. } => {
+            if let AstNodeKind::Block(statements) = &mut body_node.kind
+                && let Some(last_expr) = statements.last_mut()
+                && !matches!(last_expr.kind, AstNodeKind::ExpressionStatement(_))
+            {
+                let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+                find_and_heapify_escaping_exprs(analyzer, last_expr, function_scope, &mut changed);
+            }
+        }
+
         AstNodeKind::BinaryOperation { operator, left, right } if operator.is_assignment() => {
             if is_escaping_place(analyzer, left) {
-                scan_and_heapify_locals(analyzer, right, scope_context, &mut changed);
+                let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+                find_and_heapify_escaping_exprs(analyzer, right, function_scope, &mut changed);
             }
-        },
-        AstNodeKind::FunctionCall { arguments, .. } => {
-            for arg in arguments {
-                scan_and_heapify_locals(analyzer, arg, scope_context, &mut changed);
-            }
-        },
-        AstNodeKind::VariableDeclaration { initializer, .. } => {
-            let var_id = node.value_id.unwrap();
-            let var_scope = analyzer.symbol_table.get_value_symbol(var_id).unwrap().scope_id;
-            
-            let mut worklist = vec![initializer.as_mut()];
-            while let Some(current) = worklist.pop() {
-                if let Some(init_id) = get_id_of_referenced_local(analyzer, current, scope_context) {
-                    let init_var_scope = analyzer.symbol_table.get_value_symbol(init_id).unwrap().scope_id;
-                    if is_scope_outlived_by(analyzer, init_var_scope, var_scope)
-                        && move_to_heap(analyzer, init_id)
-                    {
-                        changed = true;
-                    }
-                }
+        }
 
-                worklist.extend(current.children_mut());
+        AstNodeKind::FunctionCall { arguments, .. } => {
+            let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+            for arg in arguments {
+                find_and_heapify_escaping_exprs(analyzer, arg, function_scope, &mut changed);
             }
-        },
-        AstNodeKind::HeapExpression(expr) => {
-            scan_and_heapify_locals(analyzer, expr, scope_context, &mut changed);
-        },
+        }
+
+        AstNodeKind::VariableDeclaration { initializer, .. } => {
+            let destination_scope = node.scope_id.unwrap();
+            find_and_heapify_escaping_exprs(analyzer, initializer, destination_scope, &mut changed);
+
+            let var_id = node.value_id.unwrap();
+            let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap().clone();
+
+            if let AstNodeKind::HeapExpression(inner_expr) = &mut initializer.kind {
+                if move_to_heap(analyzer, var_id) {
+                    changed = true;
+                }
+                let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+                find_and_heapify_escaping_exprs(analyzer, inner_expr, function_scope, &mut changed);
+            }
+
+            if symbol.allocation_kind == AllocationKind::Heap {
+                let function_scope = get_function_scope(analyzer, node.scope_id.unwrap()).unwrap();
+                find_and_heapify_escaping_exprs(analyzer, initializer, function_scope, &mut changed);
+            }
+        }
         _ => {}
     }
-    
+
     changed
 }
 
+fn find_and_heapify_escaping_exprs(
+    analyzer: &mut SemanticAnalyzer,
+    expr: &mut AstNode,
+    destination_scope: usize,
+    changed: &mut bool,
+) {
+    let mut worklist = vec![expr];
 
-fn get_id_of_referenced_local(analyzer: &SemanticAnalyzer, expr: &AstNode, current_scope: usize) -> Option<ValueSymbolId> {
-    let operand = if let AstNodeKind::UnaryOperation { operator, operand } = &expr.kind {
-        if *operator == Operation::ImmutableAddressOf || *operator == Operation::MutableAddressOf {
-            operand
-        } else {
-            return None;
+    while let Some(current) = worklist.pop() {
+        if let AstNodeKind::UnaryOperation { operator, operand } = &current.kind
+            && (*operator == Operation::ImmutableAddressOf || *operator == Operation::MutableAddressOf)
+            && let Some(var_id) = get_base_variable(operand)
+        {
+            let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+            if matches!(symbol.kind, ValueSymbolKind::Variable)
+                && is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
+                && move_to_heap(analyzer, var_id)
+            {
+                *changed = true;
+            }
         }
-    } else {
-        return None;
-    };
-    
-    if let Some(var_id) = operand.value_id {
-        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
-        
-        if !matches!(symbol.kind, ValueSymbolKind::Variable) {
-            return None;
+
+        if let AstNodeKind::Identifier(_) = &current.kind
+            && let Some(var_id) = current.value_id
+        {
+            let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+            if matches!(symbol.kind, ValueSymbolKind::Variable)
+                && is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
+                && move_to_heap(analyzer, var_id)
+            {
+                    *changed = true;
+            }
         }
-        
-        let fn_scope = get_function_scope(analyzer, current_scope)?;
-        if is_in_scope(analyzer, symbol.scope_id, fn_scope) {
-            return Some(var_id);
-        }
+
+        worklist.extend(current.children_mut());
     }
-    None
+}
+
+fn get_base_variable(place: &AstNode) -> Option<ValueSymbolId> {
+    match &place.kind {
+        AstNodeKind::Identifier(_) => place.value_id,
+        AstNodeKind::FieldAccess { left, .. } => get_base_variable(left),
+        AstNodeKind::UnaryOperation { operator, .. } if *operator == Operation::Dereference => None,
+        _ => None,
+    }
 }
 
 fn is_escaping_place(analyzer: &SemanticAnalyzer, place: &AstNode) -> bool {
     match &place.kind {
         AstNodeKind::Identifier(_) => {
-            let place_id = place.value_id.unwrap();
-            let place_symbol = analyzer.symbol_table.get_value_symbol(place_id).unwrap();
-            place_symbol.allocation_kind == AllocationKind::Heap
+            if let Some(place_id) = place.value_id {
+                let place_symbol = analyzer.symbol_table.get_value_symbol(place_id).unwrap();
+                place_symbol.allocation_kind == AllocationKind::Heap
+            } else {
+                false
+            }
         }
         AstNodeKind::FieldAccess { left, .. } => {
-            if let Some(ty) = &left.type_id
-                && matches!(ty, Type::Reference(_) | Type::MutableReference(_))
-            {
-                return true;
+            if let Some(left_id) = left.value_id {
+                let left_symbol = analyzer.symbol_table.get_value_symbol(left_id).unwrap();
+                if left_symbol.allocation_kind == AllocationKind::Heap {
+                    return true;
+                }
             }
-
             is_escaping_place(analyzer, left)
         }
+        AstNodeKind::UnaryOperation { operator, .. } if *operator == Operation::Dereference => true,
         _ => false,
     }
 }
@@ -9581,7 +9605,6 @@ fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> bool 
         symbol.allocation_kind = AllocationKind::Heap;
         return true;
     }
-
     false
 }
 
@@ -9592,27 +9615,27 @@ fn get_function_scope(analyzer: &SemanticAnalyzer, scope_id: usize) -> Option<us
         if scope.kind == ScopeKind::Function {
             return Some(id);
         }
-
         current_id = scope.parent;
     }
-
     None
 }
 
-fn is_in_scope(analyzer: &SemanticAnalyzer, descendant_candidate: usize, ancestor_candidate: usize) -> bool {
-    let mut current_id = Some(descendant_candidate);
+fn is_child_scope_of(
+    analyzer: &SemanticAnalyzer,
+    child_candidate: usize,
+    parent_candidate: usize,
+) -> bool {
+    if child_candidate == parent_candidate {
+        return false;
+    }
+    let mut current_id = analyzer.symbol_table.get_scope(child_candidate).unwrap().parent;
     while let Some(id) = current_id {
-        if id == ancestor_candidate {
+        if id == parent_candidate {
             return true;
         }
-
         current_id = analyzer.symbol_table.get_scope(id).unwrap().parent;
     }
     false
-}
-
-fn is_scope_outlived_by(analyzer: &SemanticAnalyzer, inner_scope: usize, outer_scope: usize) -> bool {
-    is_in_scope(analyzer, inner_scope, outer_scope) && inner_scope != outer_scope
 }
 
 // backend/codegen/codegen.rs
@@ -10796,6 +10819,7 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
+use colored::Colorize;
 use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
@@ -10930,13 +10954,127 @@ fn assert_scripts_work() {
     println!("All files checked.");
 }
 
+fn test_escape_analysis() {
+    let code = r#"fn test1() {
+            let outer_ref = {
+                let f = 60;
+                &f
+            };
+
+            const val = *outer_ref;
+        }
+
+        struct Point { x: int; }
+        fn test2() {
+            let p2 = Point { x: 2 };
+            let x = p2.x;
+        }
+
+        fn create_point(): Point {
+            let p3 = Point { x: 1 };
+            return p3;
+        }
+
+        fn create_ref_point(): &Point {
+            let p4 = Point { x: 1 };
+            &p4
+        }
+
+
+        struct Inner { public val: int; }
+        struct Outer { public data: Inner; }
+        fn test5() {
+            let outer_instance = heap Outer { data: Inner { val: 0 } };
+            let local_inner = Inner { val: 100 };
+            outer_instance.data = local_inner;
+        }
+
+        struct Config { public setting: bool; }
+        fn helper_test6(c: &Config) {}
+        fn test6() {
+            let my_config = Config { setting: true };
+            helper_test6(&my_config);
+        }
+
+        struct Message { public content: string; }
+        fn test7(): Message {
+            if (true) {
+                let m = Message { content: "hello" };
+                return m;
+            };
+            
+            return Message { content: "world" };
+        }
+
+        struct A { public b: B; }
+        struct B { public c: C; }
+        struct C { public val: int; }
+        fn test8(): C {
+            let my_a = A { b: B { c: C { val: 1 } } };
+            let my_b = my_a.b;
+            let my_c = my_b.c;
+            return my_c;
+        }"#;
+
+    let (lined_source, tokens) = generate_tokens(code.to_string());
+    let program = parse_tokens(lined_source.clone(), tokens);
+    let (mut program, mut analyzer) = analyze_ast(lined_source, program);
+    optimize(&mut program, &mut analyzer);
+
+    let expected = [
+        // ── test1 ────────────────────────────────────────────────────────────────
+        ("f",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
+        ("outer_ref",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
+
+        // ── test2 ────────────────────────────────────────────────────────────────
+        ("p2",             crate::frontend::semantics::analyzer::AllocationKind::Stack),
+        ("x",              crate::frontend::semantics::analyzer::AllocationKind::Stack),
+
+        // ── create_point ─────────────────────────────────────────────────────────
+        ("p3",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
+
+        // ── create_ref_point ─────────────────────────────────────────────────────
+        ("p4",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
+
+        // ── test5 ────────────────────────────────────────────────────────────────
+        ("outer_instance", crate::frontend::semantics::analyzer::AllocationKind::Heap), // explicit `heap` keyword
+        ("local_inner",    crate::frontend::semantics::analyzer::AllocationKind::Stack),
+
+        // ── test6 ────────────────────────────────────────────────────────────────
+        ("my_config",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
+
+        // ── test7 ────────────────────────────────────────────────────────────────
+        ("m",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
+
+        // ── test8 ────────────────────────────────────────────────────────────────
+        ("my_a",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
+        ("my_b",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
+        ("my_c",           crate::frontend::semantics::analyzer::AllocationKind::Heap),
+    ];
+    
+    for (name, alloc_type) in expected {
+        for (&id, _) in analyzer.symbol_table.scopes.iter() {
+            if let Some(symbol) = analyzer.symbol_table.find_value_symbol_in_scope(name, id) {
+                if symbol.allocation_kind == alloc_type {
+                    println!("{}", format!("{name} allocates properly [expected {:?} but found {:?}]!", alloc_type, symbol.allocation_kind).green());
+                } else {
+                    println!("{}", format!("{name} does not allocate properly [expected {:?} but found {:?}]...", alloc_type, symbol.allocation_kind).red());
+                }
+
+                break;
+            }
+        }
+
+    }
+}
+
 fn main() {
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
     // assert_scripts_work();
-    test_main_script();
+    // test_main_script();
+    test_escape_analysis();
 }
-
 
