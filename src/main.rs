@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::rc::Rc;
 
 use colored::Colorize;
@@ -16,6 +17,8 @@ use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
 use inkwell::context::Context;
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
@@ -85,6 +88,34 @@ fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
 
     let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
     codegen.compile_program(&program);
+
+    let path = Path::new("bin/output.ll");
+    module.print_to_file(path).expect("couldn't write to output.ll");
+
+    Target::initialize_all(&InitializationConfig::default());
+
+    let target_triple = TargetTriple::create("arm64-apple-darwin");
+    module.set_triple(&target_triple);
+
+    let target = Target::from_triple(&target_triple).expect("Target not found");
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "apple-m2",
+            "",
+            OptimizationLevel::None,
+            RelocMode::Default,
+            CodeModel::Default,
+        )
+        .expect("Failed to create target machine");
+
+    let asm_path = Path::new("bin/output_macos.s");
+    target_machine.write_to_file(&module, FileType::Assembly, asm_path).expect("Failed to write assembly");
+
+    Command::new("clang")
+        .args(["bin/output_macos.s", "-o", "bin/a"])
+        .status()
+        .expect("Failed to run clang");
 }
 
 fn test_main_script() {

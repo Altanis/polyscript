@@ -7,7 +7,6 @@ use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
-use std::thread::panicking;
 
 use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
@@ -569,9 +568,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_while_loop(&mut self, condition: &BoxedAstNode, body: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
-        let cond_block = self.context.append_basic_block(function, "while.cond");
-        let body_block = self.context.append_basic_block(function, "while.body");
-        let after_block = self.context.append_basic_block(function, "while.after");
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
 
         self.continue_blocks.push(cond_block);
         self.break_blocks.push(after_block);
@@ -609,10 +608,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.compile_node(init);
         }
 
-        let cond_block = self.context.append_basic_block(function, "for.cond");
-        let body_block = self.context.append_basic_block(function, "for.body");
-        let inc_block = self.context.append_basic_block(function, "for.inc");
-        let after_block = self.context.append_basic_block(function, "for.after");
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let inc_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
 
         self.continue_blocks.push(inc_block);
         self.break_blocks.push(after_block);
@@ -734,7 +733,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_type = self.context.i32_type().fn_type(&[], false);
         let main_fn = self.module.add_function("main", fn_type, None);
         self.current_function = Some(main_fn);
-        let entry = self.context.append_basic_block(main_fn, "entry");
+        let entry = self.context.append_basic_block(main_fn, "");
         self.builder.position_at_end(entry);
 
         let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
