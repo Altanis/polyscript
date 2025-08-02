@@ -1,4 +1,3 @@
-// backend/optimizations/escape_analysis.rs
 use crate::{
     frontend::{
         semantics::analyzer::{
@@ -172,6 +171,7 @@ fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> bool 
         symbol.allocation_kind = AllocationKind::Heap;
         return true;
     }
+
     false
 }
 
@@ -182,8 +182,10 @@ fn get_function_scope(analyzer: &SemanticAnalyzer, scope_id: usize) -> Option<us
         if scope.kind == ScopeKind::Function {
             return Some(id);
         }
+
         current_id = scope.parent;
     }
+
     None
 }
 
@@ -195,6 +197,7 @@ fn is_scope_or_descendant(
     if child_candidate == parent_candidate {
         return true;
     }
+
     is_child_scope_of(analyzer, child_candidate, parent_candidate)
 }
 
@@ -208,7 +211,9 @@ fn is_child_scope_of(
         if id == parent_candidate {
             return true;
         }
+
         current_id = analyzer.symbol_table.get_scope(id).unwrap().parent;
     }
+    
     false
 }
