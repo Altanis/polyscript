@@ -133,6 +133,7 @@ pub enum ScopeKind {
     Impl,
     Trait,
     Type,
+    ForLoop
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -72,6 +72,16 @@ impl SemanticAnalyzer {
                 generic_parameters,
                 value
             } => self.collect_type_symbols(name, generic_parameters, value, node.span),
+            ForLoop { initializer, condition, increment, body } => {
+                self.symbol_table.enter_scope(ScopeKind::ForLoop);
+                self.collect_optional_node(initializer)?;
+                self.collect_optional_node(condition)?;
+                self.collect_optional_node(increment)?;
+                self.symbol_collector_check_node(body)?;
+                self.symbol_table.exit_scope();
+
+                Ok((None, None))
+            },
             Block(_) => self.collect_block_symbols(node),
             _ => {
                 for child in node.children_mut() {

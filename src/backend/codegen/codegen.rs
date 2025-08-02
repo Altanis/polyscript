@@ -1,3 +1,4 @@
+// backend/codegen/codegen.rs
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
@@ -207,28 +208,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let ty = symbol.type_id.as_ref().unwrap();
 
-        match symbol.allocation_kind {
+        let ptr = match symbol.allocation_kind {
             AllocationKind::Stack => {
                 let ty = self.map_semantic_type(ty).unwrap();
-                let alloca = self.builder.build_alloca(ty, "").unwrap();
-                self.variables.insert(value_id, alloca);
-
-                let init_val = self.compile_node(initializer).unwrap();
-                self.builder.build_store(alloca, init_val).unwrap();
+                self.builder.build_alloca(ty, "").unwrap()
+            },
+            AllocationKind::Heap if matches!(initializer.kind, AstNodeKind::HeapExpression(_)) => {
+                let ty = self.map_semantic_type(ty).unwrap();
+                self.builder.build_alloca(ty, "").unwrap()
             },
             AllocationKind::Heap => {
                 let llvm_ty = self.map_semantic_type(ty).unwrap();
                 let size = llvm_ty.size_of().unwrap();
-
-                let ptr = self.build_malloc(size);
-
-                self.variables.insert(value_id, ptr);
-
-                let init_val = self.compile_node(initializer).unwrap();
-                self.builder.build_store(ptr, init_val).unwrap();
+                self.build_malloc(size)
             },
-            _ => unreachable!()
-        }
+            _ => unreachable!(),
+        };
+
+        self.variables.insert(value_id, ptr);
+
+        let init_val = self.compile_node(initializer).unwrap();
+        self.builder.build_store(ptr, init_val).unwrap();
 
         None
     }
@@ -451,6 +451,205 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
     }
+
+    fn compile_heap_expression(&mut self, inner_expr: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+        let inner_type = inner_expr.type_id.as_ref().unwrap();
+        let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
+
+        let size = llvm_inner_type.size_of().unwrap();
+        let raw_ptr = self.build_malloc(size);
+
+        let inner_value = self.compile_node(inner_expr).unwrap();
+        self.builder.build_store(raw_ptr, inner_value).unwrap();
+
+        Some(raw_ptr.as_basic_value_enum())
+    }
+
+    fn compile_block(&mut self, stmts: &[AstNode]) -> Option<BasicValueEnum<'ctx>> {
+        let mut last_val = None;
+
+        for stmt in stmts {
+            last_val = self.compile_node(stmt);
+        }
+
+        last_val
+    }
+
+    fn compile_if_statement(
+        &mut self,
+        condition: &BoxedAstNode,
+        then_branch: &BoxedAstNode,
+        else_if_branches: &[(BoxedAstNode, BoxedAstNode)],
+        else_branch: &Option<BoxedAstNode>,
+        return_type: Option<&Type>,
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let function = self.current_function.unwrap();
+        
+        let merge_block = self.context.append_basic_block(function, "");
+        
+        let mut incoming_phis = Vec::new();
+
+        let cond_val = self.compile_node(condition).unwrap().into_int_value();
+        let then_block = self.context.append_basic_block(function, "");
+        
+        let mut last_else_block = self.context.append_basic_block(function, "");
+        self.builder.build_conditional_branch(cond_val, then_block, last_else_block).unwrap();
+
+        self.builder.position_at_end(then_block);
+        let then_val = self.compile_node(then_branch);
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            self.builder.build_unconditional_branch(merge_block).unwrap();
+        }
+        if let Some(val) = then_val {
+            incoming_phis.push((val, self.builder.get_insert_block().unwrap()));
+        }
+
+        for (else_if_cond, elseif_branch) in else_if_branches.iter() {
+            self.builder.position_at_end(last_else_block);
+            
+            let elseif_then_block = self.context.append_basic_block(function, "");
+            let next_else_block = self.context.append_basic_block(function, "");
+
+            let elseif_cond_val = self.compile_node(else_if_cond).unwrap().into_int_value();
+            self.builder.build_conditional_branch(elseif_cond_val, elseif_then_block, next_else_block).unwrap();
+            
+            self.builder.position_at_end(elseif_then_block);
+            let elseif_val = self.compile_node(elseif_branch);
+            if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+                self.builder.build_unconditional_branch(merge_block).unwrap();
+            }
+            if let Some(val) = elseif_val {
+                incoming_phis.push((val, self.builder.get_insert_block().unwrap()));
+            }
+            
+            last_else_block = next_else_block;
+        }
+
+        self.builder.position_at_end(last_else_block);
+        if let Some(else_node) = else_branch {
+            let else_val = self.compile_node(else_node);
+            if let Some(val) = else_val {
+                incoming_phis.push((val, self.builder.get_insert_block().unwrap()));
+            }
+        }
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            self.builder.build_unconditional_branch(merge_block).unwrap();
+        }
+
+        self.builder.position_at_end(merge_block);
+
+        if let Some(ty) = return_type
+            && !matches!(self.analyzer.symbol_table.get_type_symbol(ty.get_base_symbol()).unwrap().kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never))
+            && !incoming_phis.is_empty()
+        {
+            let llvm_type = self.map_semantic_type(ty).unwrap();
+            let phi = self.builder.build_phi(llvm_type, "").unwrap();
+
+            for (val, block) in incoming_phis {
+                phi.add_incoming(&[(&val, block)]);
+            }
+
+            return Some(phi.as_basic_value());
+        }
+        
+        None
+    }
+    
+    fn compile_while_loop(&mut self, condition: &BoxedAstNode, body: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+        let function = self.current_function.unwrap();
+
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
+
+        self.builder.build_unconditional_branch(cond_block).unwrap();
+
+        self.builder.position_at_end(cond_block);
+        let cond_val = self.compile_node(condition).unwrap().into_int_value();
+        self.builder.build_conditional_branch(cond_val, body_block, after_block).unwrap();
+
+        self.builder.position_at_end(body_block);
+        self.compile_node(body);
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            self.builder.build_unconditional_branch(cond_block).unwrap();
+        }
+
+        self.builder.position_at_end(after_block);
+        None
+    }
+    
+    fn compile_for_loop(
+        &mut self,
+        initializer: &Option<BoxedAstNode>,
+        condition: &Option<BoxedAstNode>,
+        increment: &Option<BoxedAstNode>,
+        body: &BoxedAstNode,
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let function = self.current_function.unwrap();
+
+        if let Some(init) = initializer {
+            self.compile_node(init);
+        }
+
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
+
+        self.builder.build_unconditional_branch(cond_block).unwrap();
+
+        self.builder.position_at_end(cond_block);
+        let cond_val = if let Some(cond) = condition {
+            self.compile_node(cond).unwrap().into_int_value()
+        } else {
+            self.context.bool_type().const_int(1, false)
+        };
+        self.builder.build_conditional_branch(cond_val, body_block, after_block).unwrap();
+
+        self.builder.position_at_end(body_block);
+        self.compile_node(body);
+        if let Some(inc) = increment {
+            self.compile_node(inc);
+        }
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            self.builder.build_unconditional_branch(cond_block).unwrap();
+        }
+
+        self.builder.position_at_end(after_block);
+        None
+    }
+    
+    fn compile_type_cast(&mut self, expr: &BoxedAstNode, target_type: &Type) -> Option<BasicValueEnum<'ctx>> {
+        let source_val = self.compile_node(expr).unwrap();
+        let source_type = expr.type_id.as_ref().unwrap();
+
+        let llvm_target_type = self.map_semantic_type(target_type).unwrap();
+
+        let source_prim = if let Type::Base { symbol, .. } = source_type {
+            if let TypeSymbolKind::Primitive(p) = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind { Some(p) } else { None }
+        } else { None };
+
+        let target_prim = if let Type::Base { symbol, .. } = target_type {
+            if let TypeSymbolKind::Primitive(p) = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind { Some(p) } else { None }
+        } else { None };
+
+        match (source_prim, target_prim) {
+            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Float)) => {
+                Some(self.builder.build_signed_int_to_float(source_val.into_int_value(), llvm_target_type.into_float_type(), "").unwrap().into())
+            },
+            (Some(PrimitiveKind::Float), Some(PrimitiveKind::Int)) => {
+                Some(self.builder.build_float_to_signed_int(source_val.into_float_value(), llvm_target_type.into_int_type(), "").unwrap().into())
+            },
+            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Int)) |
+            (Some(PrimitiveKind::Char), Some(PrimitiveKind::Int)) |
+            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Char)) => {
+                Some(self.builder.build_int_cast_sign_flag(source_val.into_int_value(), llvm_target_type.into_int_type(), true, "").unwrap().into())
+            },
+            (Some(PrimitiveKind::Float), Some(PrimitiveKind::Float)) => {
+                Some(self.builder.build_float_cast(source_val.into_float_value(), llvm_target_type.into_float_type(), "").unwrap().into())
+            },
+            _ => panic!("cannot cast {:?} to {:?}", source_prim, target_prim)
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -470,9 +669,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub fn compile_program(&mut self, program: &AstNode) {
+        let fn_type = self.context.i32_type().fn_type(&[], false);
+        let main_fn = self.module.add_function("main", fn_type, None);
+        self.current_function = Some(main_fn);
+        let entry = self.context.append_basic_block(main_fn, "entry");
+        self.builder.position_at_end(entry);
+
         let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
         for stmt in stmts.iter() {
             self.compile_node(stmt);
+        }
+
+        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+            self.builder.build_return(Some(&self.context.i32_type().const_int(0, false))).unwrap();
         }
     }
 
@@ -492,6 +701,33 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 => self.compile_binary_operation(*operator, left, right),
             AstNodeKind::ConditionalOperation { operator, left, right }
                 => self.compile_conditional_operation(*operator, left, right),
+            AstNodeKind::HeapExpression(expr) => self.compile_heap_expression(expr),
+            AstNodeKind::Block(stmts) => self.compile_block(stmts),
+            AstNodeKind::ExpressionStatement(expr) => {
+                self.compile_node(expr);
+                None
+            },
+            AstNodeKind::Return(opt_expr) => {
+                if let Some(expr) = opt_expr {
+                    let value = self.compile_node(expr).unwrap();
+                    self.builder.build_return(Some(&value)).unwrap();
+                } else {
+                    self.builder.build_return(None).unwrap();
+                }
+
+                None
+            },
+            AstNodeKind::IfStatement {
+                condition,
+                then_branch,
+                else_if_branches,
+                else_branch,
+            } => self.compile_if_statement(condition, then_branch, else_if_branches, else_branch, stmt.type_id.as_ref()),
+            AstNodeKind::WhileLoop { condition, body } => self.compile_while_loop(condition, body),
+            AstNodeKind::ForLoop { initializer, condition, increment, body }
+                => self.compile_for_loop(initializer, condition, increment, body),
+            AstNodeKind::TypeCast { expr, .. }
+                => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
             _ => unimplemented!()
         }
     }
