@@ -7,6 +7,7 @@ use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
+use std::thread::panicking;
 
 use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
@@ -23,6 +24,7 @@ pub struct CodeGen<'a, 'ctx> {
 
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
     functions: HashMap<ValueSymbolId, FunctionValue<'ctx>>,
+    constants: HashMap<ValueSymbolId, BasicValueEnum<'ctx>>,
 
     string_interner: NameInterner,
     string_literals: HashMap<StringLiteralId, PointerValue<'ctx>>,
@@ -119,6 +121,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         llvm_struct.set_body(&field_types, false);
                         llvm_struct.as_basic_type_enum()
                     },
+                    // Values of an enum type are integers.
+                    TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
+                    TypeSymbolKind::FunctionSignature { .. }
+                        => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                    TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
                     _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
                 };
 
@@ -674,6 +681,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             _ => panic!("cannot cast {:?} to {:?}", source_prim, target_prim)
         }
     }
+
+    fn compile_struct_declaration(&mut self, struct_node: &AstNode) {
+        let struct_type = struct_node.type_id.as_ref().unwrap();
+        self.map_semantic_type(struct_type);
+    }
+
+    fn compile_enum_declaration(&mut self, enum_node: &AstNode) {
+        let AstNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
+
+        let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id.unwrap(), name).unwrap();
+        let enum_llvm_type = self.map_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
+
+        let TypeSymbolKind::Enum((scope_id, _)) = enum_type_symbol.kind else { unreachable!(); };
+
+        let mut current_discriminant: i64 = 0;
+
+        for (variant_name, (_variant_node, initializer_opt)) in variants.iter() {
+            if let Some(initializer) = initializer_opt && let AstNodeKind::IntegerLiteral(val) = initializer.kind {
+                current_discriminant = val;
+            }
+
+            let variant_symbol = self.analyzer.symbol_table.find_value_symbol_in_scope(variant_name, scope_id).unwrap();
+            let const_val = enum_llvm_type.const_int(current_discriminant as u64, false);
+
+            self.constants.insert(variant_symbol.id, const_val.into());
+            current_discriminant += 1;
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -685,6 +720,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             analyzer,
             variables: HashMap::new(),
             functions: HashMap::new(),
+            constants: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
             continue_blocks: vec![],
@@ -764,6 +800,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             AstNodeKind::TypeCast { expr, .. }
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
+            AstNodeKind::StructDeclaration { .. } => {
+                self.compile_struct_declaration(stmt);
+                None
+            },
+            AstNodeKind::EnumDeclaration { .. } => {
+                self.compile_enum_declaration(stmt);
+                None
+            },
             _ => unimplemented!()
         }
     }
