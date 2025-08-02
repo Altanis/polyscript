@@ -1,3 +1,4 @@
+use inkwell::basic_block::BasicBlock;
 // backend/codegen/codegen.rs
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -26,6 +27,9 @@ pub struct CodeGen<'a, 'ctx> {
     string_interner: NameInterner,
     string_literals: HashMap<StringLiteralId, PointerValue<'ctx>>,
     
+    continue_blocks: Vec<BasicBlock<'ctx>>,
+    break_blocks: Vec<BasicBlock<'ctx>>,
+
     current_function: Option<FunctionValue<'ctx>>,
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
@@ -554,13 +558,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         None
     }
-    
+
     fn compile_while_loop(&mut self, condition: &BoxedAstNode, body: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
-        let cond_block = self.context.append_basic_block(function, "");
-        let body_block = self.context.append_basic_block(function, "");
-        let after_block = self.context.append_basic_block(function, "");
+        let cond_block = self.context.append_basic_block(function, "while.cond");
+        let body_block = self.context.append_basic_block(function, "while.body");
+        let after_block = self.context.append_basic_block(function, "while.after");
+
+        self.continue_blocks.push(cond_block);
+        self.break_blocks.push(after_block);
 
         self.builder.build_unconditional_branch(cond_block).unwrap();
 
@@ -575,9 +582,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         self.builder.position_at_end(after_block);
+        
+        self.continue_blocks.pop();
+        self.break_blocks.pop();
+
         None
     }
-    
+
     fn compile_for_loop(
         &mut self,
         initializer: &Option<BoxedAstNode>,
@@ -591,9 +602,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.compile_node(init);
         }
 
-        let cond_block = self.context.append_basic_block(function, "");
-        let body_block = self.context.append_basic_block(function, "");
-        let after_block = self.context.append_basic_block(function, "");
+        let cond_block = self.context.append_basic_block(function, "for.cond");
+        let body_block = self.context.append_basic_block(function, "for.body");
+        let inc_block = self.context.append_basic_block(function, "for.inc");
+        let after_block = self.context.append_basic_block(function, "for.after");
+
+        self.continue_blocks.push(inc_block);
+        self.break_blocks.push(after_block);
 
         self.builder.build_unconditional_branch(cond_block).unwrap();
 
@@ -607,6 +622,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.position_at_end(body_block);
         self.compile_node(body);
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            self.builder.build_unconditional_branch(inc_block).unwrap();
+        }
+
+        self.builder.position_at_end(inc_block);
         if let Some(inc) = increment {
             self.compile_node(inc);
         }
@@ -615,9 +635,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         self.builder.position_at_end(after_block);
+        
+        self.continue_blocks.pop();
+        self.break_blocks.pop();
+        
         None
     }
-    
+
     fn compile_type_cast(&mut self, expr: &BoxedAstNode, target_type: &Type) -> Option<BasicValueEnum<'ctx>> {
         let source_val = self.compile_node(expr).unwrap();
         let source_type = expr.type_id.as_ref().unwrap();
@@ -663,6 +687,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             functions: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
+            continue_blocks: vec![],
+            break_blocks: vec![],
             current_function: None,
             type_map: HashMap::new(),
         }
@@ -726,6 +752,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::WhileLoop { condition, body } => self.compile_while_loop(condition, body),
             AstNodeKind::ForLoop { initializer, condition, increment, body }
                 => self.compile_for_loop(initializer, condition, increment, body),
+            AstNodeKind::Break => {
+                let break_block = self.break_blocks.last().unwrap();
+                self.builder.build_unconditional_branch(*break_block).unwrap();
+                None
+            },
+            AstNodeKind::Continue => {
+                let continue_block = self.continue_blocks.last().unwrap();
+                self.builder.build_unconditional_branch(*continue_block).unwrap();
+                None
+            },
             AstNodeKind::TypeCast { expr, .. }
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
             _ => unimplemented!()
