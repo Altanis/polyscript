@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    frontend::{semantics::analyzer::{Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, syntax::ast::{AstNode, AstNodeKind}},
+    frontend::{semantics::analyzer::{Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbol, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, syntax::ast::{AstNode, AstNodeKind}},
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}},
 };
 
@@ -1448,6 +1448,144 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    fn collect_all_type_ids_from_type(&self, ty: &Type, used_ids: &mut HashSet<TypeSymbolId>) {
+        match ty {
+            Type::Base { symbol, args } => {
+                used_ids.insert(*symbol);
+                for arg in args {
+                    self.collect_all_type_ids_from_type(arg, used_ids);
+                }
+
+                // Also check the definition of the symbol itself for more dependencies
+                if let Some(type_symbol) = self.symbol_table.get_type_symbol(*symbol).cloned() {
+                    self.collect_all_type_ids_from_symbol(&type_symbol, used_ids);
+                }
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.collect_all_type_ids_from_type(inner, used_ids);
+            }
+        }
+    }
+
+    fn collect_all_type_ids_from_symbol(&self, symbol: &TypeSymbol, used_ids: &mut HashSet<TypeSymbolId>) {
+        for &generic_param in &symbol.generic_parameters {
+            used_ids.insert(generic_param);
+        }
+
+        match &symbol.kind {
+            TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                for p in params {
+                    self.collect_all_type_ids_from_type(p, used_ids);
+                }
+
+                self.collect_all_type_ids_from_type(return_type, used_ids);
+            },
+            TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => {
+                self.collect_all_type_ids_from_type(aliased_type, used_ids);
+            },
+            TypeSymbolKind::Struct((scope_id, impls)) => {
+                let scope = self.symbol_table.get_scope(*scope_id).unwrap();
+                for field_id in scope.values.values() {
+                    let field_symbol = self.symbol_table.get_value_symbol(*field_id).unwrap();
+                    if let Some(field_type) = &field_symbol.type_id {
+                        self.collect_all_type_ids_from_type(field_type, used_ids);
+                    }
+                }
+
+                for imp in impls {
+                    imp.specialization.iter().for_each(|id| { used_ids.insert(*id); });
+                    imp.generic_params.iter().for_each(|id| { used_ids.insert(*id); });
+                }
+            },
+            TypeSymbolKind::Enum((_, impls)) => {
+                 for imp in impls {
+                    imp.specialization.iter().for_each(|id| { used_ids.insert(*id); });
+                    imp.generic_params.iter().for_each(|id| { used_ids.insert(*id); });
+                }
+            }
+            TypeSymbolKind::OpaqueTypeProjection { ty, tr, .. } => {
+                self.collect_all_type_ids_from_type(ty, used_ids);
+                self.collect_all_type_ids_from_type(tr, used_ids);
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_used_types_from_ast(&self, node: &AstNode, used_ids: &mut HashSet<TypeSymbolId>) {
+        if let Some(ty) = &node.type_id {
+            self.collect_all_type_ids_from_type(ty, used_ids);
+        }
+
+        if let Some(value_id) = node.value_id
+            && let Some(value_symbol) = self.symbol_table.get_value_symbol(value_id)
+            && let Some(ty) = &value_symbol.type_id
+        {
+            self.collect_all_type_ids_from_type(ty, used_ids);
+        }
+
+        for child in node.children() {
+            self.collect_used_types_from_ast(child, used_ids);
+        }
+    }
+
+    fn collect_used_types_from_trait_registry(&self, used_ids: &mut HashSet<TypeSymbolId>) {
+        for &trait_id in self.trait_registry.default_traits.values() {
+            used_ids.insert(trait_id);
+        }
+
+        for (&trait_id, impls_for_trait) in &self.trait_registry.register {
+            used_ids.insert(trait_id);
+
+            for (&type_id, impl_details_vec) in impls_for_trait {
+                used_ids.insert(type_id);
+                
+                for impl_detail in impl_details_vec {
+                    impl_detail.impl_generic_params.iter().for_each(|id| { used_ids.insert(*id); });
+                    impl_detail.trait_generic_specialization.iter().for_each(|id| { used_ids.insert(*id); });
+                    impl_detail.type_specialization.iter().for_each(|id| { used_ids.insert(*id); });
+                }
+            }
+        }
+    }
+
+    fn cleanup_unused_types(&mut self, program: &AstNode) {
+        let mut used_type_ids: HashSet<TypeSymbolId> = self.builtin_types.iter().cloned().collect();
+
+        self.collect_used_types_from_ast(program, &mut used_type_ids);
+        self.collect_used_types_from_trait_registry(&mut used_type_ids);
+
+        let mut prev_len = 0;
+        while used_type_ids.len() != prev_len {
+            prev_len = used_type_ids.len();
+            let current_used: Vec<_> = used_type_ids.iter().cloned().collect();
+            for type_id in current_used {
+                if let Some(symbol) = self.symbol_table.get_type_symbol(type_id).cloned() {
+                    self.collect_all_type_ids_from_symbol(&symbol, &mut used_type_ids);
+                }
+            }
+        }
+
+        let all_type_ids: HashSet<TypeSymbolId> = self.symbol_table.type_symbols.keys().cloned().collect();
+        let unused_ids: Vec<_> = all_type_ids.difference(&used_type_ids).cloned().collect();
+
+        if unused_ids.is_empty() {
+            return;
+        }
+
+        let mut name_ids_to_remove = vec![];
+        for unused_id in unused_ids {
+            if let Some(removed_symbol) = self.symbol_table.type_symbols.remove(&unused_id) {
+                name_ids_to_remove.push(removed_symbol.name_id);
+            }
+        }
+
+        for scope in self.symbol_table.scopes.values_mut() {
+            scope.types.retain(|_, &mut symbol_id| used_type_ids.contains(&symbol_id));
+        }
+
+        self.symbol_table.type_names.purge_names(&name_ids_to_remove);
+    }
+
     pub fn substitution_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
@@ -1462,6 +1600,7 @@ impl SemanticAnalyzer {
         }
 
         self.traverse_symbol_table();
+        self.cleanup_unused_types(program);
 
         errors
     }

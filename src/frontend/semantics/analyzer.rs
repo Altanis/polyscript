@@ -50,6 +50,16 @@ impl NameInterner {
     pub fn get_id(&self, s: &str) -> Option<usize> {
         self.map.get(s).copied()
     }
+
+    pub fn purge_names(&mut self, names: &[usize]) {
+        for &name in names.iter() {
+            if name < self.vec.len() {
+                let name_to_remove = self.vec[name].clone();
+                self.map.remove(name_to_remove.as_ref());
+                self.vec[name] = Rc::from("[deleted_type]");
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -246,8 +256,8 @@ pub struct Scope {
 pub struct SymbolTable {
     pub value_symbols: HashMap<ValueSymbolId, ValueSymbol>,
     pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>,
-    value_names: NameInterner,
-    type_names: NameInterner,
+    pub value_names: NameInterner,
+    pub type_names: NameInterner,
 
     pub default_trait_impl_scopes: HashMap<(TypeSymbolId, TypeSymbolId), ScopeId>,
 

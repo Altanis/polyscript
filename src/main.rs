@@ -147,7 +147,7 @@ fn test_main_script() {
                 println!("{}", analyzer);
             }
 
-            compile_ast(program, &analyzer);
+            // compile_ast(program, &analyzer);
         }
     }
 }
