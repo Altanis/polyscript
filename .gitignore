@@ -1,2 +1,5 @@
 /target
 /bin
+.vscode
+reproducer.js
+reproduced.txt
