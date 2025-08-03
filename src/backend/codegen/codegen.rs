@@ -121,6 +121,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                     // Values of an enum type are integers.
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
+                    TypeSymbolKind::Generic(_) => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::FunctionSignature { .. }
                         => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
@@ -162,6 +163,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             _ => false
         }
+    }
+
+    fn box_if_needed(&mut self, value: BasicValueEnum<'ctx>, from_type: &Type, to_type: &Type) -> BasicValueEnum<'ctx> {
+        let to_symbol = self.analyzer.symbol_table.get_type_symbol(to_type.get_base_symbol()).unwrap();
+
+        if let TypeSymbolKind::Generic(_) = to_symbol.kind {
+            let from_symbol = self.analyzer.symbol_table.get_type_symbol(from_type.get_base_symbol()).unwrap();
+            if !matches!(from_symbol.kind, TypeSymbolKind::Generic(_)) {
+                let llvm_type = value.get_type();
+                if !llvm_type.is_pointer_type() {
+                    let size = llvm_type.size_of().unwrap();
+                    let ptr = self.build_malloc(size);
+                    self.builder.build_store(ptr, value).unwrap();
+                    return ptr.as_basic_value_enum();
+                }
+            }
+        }
+
+        value
     }
 }
 
@@ -907,23 +927,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         arguments: &[AstNode],
         return_type: Option<&Type>,
     ) -> Option<BasicValueEnum<'ctx>> {
+        let callee_type = function_node.type_id.as_ref().unwrap();
+        let Type::Base { symbol: fn_symbol_id, .. } = callee_type else { unreachable!() };
+        let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
+        let TypeSymbolKind::FunctionSignature { params: param_types, return_type: fn_return_type, .. } = &fn_symbol.kind else { unreachable!() };
+
         let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
-        
-        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind {
-            let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
-            
-            if let ValueSymbolKind::Function(scope_id) = member_symbol.kind {
-                let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                
-                if fn_scope.receiver_kind.is_some() {
-                    let instance_value = self.compile_node(left).unwrap();
-                    compiled_args.push(instance_value);
-                }
+        let mut param_type_iter = param_types.iter();
+
+        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
+            && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
+            && let ValueSymbolKind::Function(scope_id) = member_symbol.kind
+        {
+            let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+            if fn_scope.receiver_kind.is_some() {
+                let instance_value = self.compile_node(left).unwrap();
+                let param_type = param_type_iter.next().unwrap();
+                compiled_args.push(self.box_if_needed(instance_value, left.type_id.as_ref().unwrap(), param_type));
             }
         }
         
-        for arg in arguments {
-            compiled_args.push(self.compile_node(arg).unwrap());
+        for arg_node in arguments {
+            let arg_value = self.compile_node(arg_node).unwrap();
+            let param_type = param_type_iter.next().unwrap();
+            compiled_args.push(self.box_if_needed(arg_value, arg_node.type_id.as_ref().unwrap(), param_type));
         }
         
         let callee = self.compile_node(function_node).unwrap().into_pointer_value();
@@ -939,7 +966,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(ret_type) = return_type {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
             if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
-                return Some(call.try_as_basic_value().left().unwrap());
+                let mut result_val = call.try_as_basic_value().left().unwrap();
+                
+                let fn_return_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_return_type.get_base_symbol()).unwrap();
+                if let TypeSymbolKind::Generic(_) = fn_return_type_symbol.kind
+                    && !matches!(type_symbol.kind, TypeSymbolKind::Generic(_))
+                {
+                    let ptr = result_val.into_pointer_value();
+                    let llvm_type = self.map_semantic_type(ret_type).unwrap();
+                    result_val = self.builder.build_load(llvm_type, ptr, "").unwrap();
+                    // todo memory management
+                }
+
+                return Some(result_val);
             }
         }
         
