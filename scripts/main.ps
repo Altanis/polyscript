@@ -1,35 +1,3 @@
-let a = 1;
-let b = 1.0;
-let c = true;
-let d = 'a';
-let e = "f";
-let f = e;
-let g = heap e;
-let h = 2 + 3;
-let i = -2;
-let j = true || false;
-let k = {
-    let y = 4;
-    y
-};
-
-let l = if (true) {
-    4
-} else {
-    3
-};
-
-let m = 0;
-for (let i = 0; i < 5; i += 1) {
-    m += 1;
-}
-
-while (m < 0) {
-    m -= 1;
-}
-
-let x: float = 5 as float;
-
 struct Vector2D {
     x: int;
     y: int;
@@ -41,7 +9,19 @@ enum Difficulty {
     Hard
 }
 
-let p1 = Vector2D {
-    x: 1,
-    y: 2
-};
+impl Vector2D {
+    const DIMENSIONS: int = 2;
+    const DIFFICULTY: Difficulty = Difficulty.Medium;
+
+    fn new(x: int, y: int): Self {
+        Vector2D {
+            x,
+            y
+        }
+    }
+}
+
+let p1 = Vector2D.new(0, 0);
+let p2 = Vector2D { x: 4, y: 4 };
+let p3 = Vector2D.new(p1.x + p2.x, p1.y + p2.y);
+let difficulty = Difficulty.Hard;

@@ -1,10 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    frontend::syntax::ast::{AstNode, AstNodeKind},
-    frontend::semantics::analyzer::{
-        Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind
-    },
+    frontend::{semantics::analyzer::{Constraint, ConstraintInfo, InherentImpl, PrimitiveKind, Scope, ScopeId, ScopeKind, SemanticAnalyzer, SymbolTable, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, syntax::ast::{AstNode, AstNodeKind}},
     utils::{error::{BoxedError, Error, ErrorKind}, kind::{Operation, QualifierKind, Span}},
 };
 
@@ -1615,6 +1612,121 @@ impl SemanticAnalyzer {
         }
         
         Ok(())
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn member_resolution_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+        if let AstNodeKind::Program(stmts) = &mut program.kind {
+            for stmt in stmts {
+                if let Err(e) = self.resolve_members(stmt) {
+                    errors.push(*e);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+        errors
+    }
+
+    fn resolve_members(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        for child in node.children_mut() {
+            self.resolve_members(child)?;
+        }
+
+        if let AstNodeKind::FieldAccess { left, right } = &mut node.kind {
+            let member_name = right.get_name().unwrap();
+
+            let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {
+                self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
+            } else {
+                false
+            };
+
+            let base_type = left.type_id.as_ref().unwrap();
+            let lookup_type = if !is_static_access {
+                match base_type {
+                    Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+                    _ => base_type.clone(),
+                }
+            } else {
+                base_type.clone()
+            };
+    
+            let member_symbol_id = self.find_member_symbol_id(&lookup_type, &member_name, is_static_access, node.span)?;
+            
+            right.value_id = Some(member_symbol_id);
+            node.value_id = Some(member_symbol_id);
+        }
+        
+        Ok(())
+    }
+
+    fn find_member_symbol_id(&self, base_type: &Type, member_name: &str, is_static: bool, access_span: Span) -> Result<ValueSymbolId, BoxedError> {
+        let base_symbol_id = base_type.get_base_symbol();
+        let base_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap();
+
+        let search_scopes = |scope_id: ScopeId| -> Option<ValueSymbolId> {
+            self.symbol_table.find_value_symbol_in_scope(member_name, scope_id)
+                .and_then(|symbol| {
+                    let fn_scope = if let ValueSymbolKind::Function(id) = symbol.kind {
+                        Some(self.symbol_table.get_scope(id).unwrap())
+                    } else { None };
+
+                    let symbol_is_static = 
+                        matches!(symbol.kind, ValueSymbolKind::Variable | ValueSymbolKind::EnumVariant) || 
+                        (fn_scope.is_some() && fn_scope.unwrap().receiver_kind.is_none());
+
+                    if (is_static && symbol_is_static) || (!is_static && !symbol_is_static) {
+                        Some(symbol.id)
+                    } else {
+                        None
+                    }
+                })
+        };
+        
+        match &base_symbol.kind {
+            TypeSymbolKind::Struct((scope_id, impls)) => {
+                if !is_static && let Some(field) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id) {
+                    return Ok(field.id);
+                }
+
+                for imp in impls {
+                    if let Some(id) = search_scopes(imp.scope_id) { 
+                        return Ok(id); 
+                    }
+                }
+            },
+            TypeSymbolKind::Enum((scope_id, impls)) => {
+                if is_static && let Some(variant) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id) {
+                    return Ok(variant.id);
+                }
+
+                for imp in impls {
+                    if let Some(id) = search_scopes(imp.scope_id) {
+                        return Ok(id);
+                    }
+                }
+            },
+            _ => {}
+        }
+        
+        for impls_for_trait in self.trait_registry.register.values() {
+            if let Some(impls_for_type) = impls_for_trait.get(&base_symbol_id) {
+                for imp in impls_for_type {
+                    if let Some(id) = search_scopes(imp.impl_scope_id) {
+                        return Ok(id);
+                    }
+                }
+            }
+        }
+
+        Err(self.create_error(
+            ErrorKind::MemberNotFound(member_name.to_string(), self.symbol_table.display_type(base_type)),
+            access_span,
+            &[access_span]
+        ))
     }
 }
 

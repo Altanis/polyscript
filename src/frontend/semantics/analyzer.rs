@@ -1038,6 +1038,7 @@ impl SemanticAnalyzer {
         pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
+        pass!(self, member_resolution_pass, &mut program);
         pass!(self, mutability_check_pass, &mut program);
         pass!(self, trait_conformance_pass, &mut program);
 

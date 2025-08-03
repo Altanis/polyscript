@@ -3,12 +3,12 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{BasicType, BasicTypeEnum};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId};
+use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 use crate::utils::kind::Operation;
 
@@ -136,6 +136,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    fn map_semantic_fn_type(&mut self, ty: &Type) -> FunctionType<'ctx> {
+        let Type::Base { symbol, .. } = ty else { unreachable!(); };
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &type_symbol.kind else { unreachable!(); };
+
+        let llvm_params: Vec<_> = params
+            .iter()
+            .map(|p| self.map_semantic_type(p).unwrap().into())
+            .collect();
+
+        let llvm_return = self.map_semantic_type(return_type);
+
+        if let Some(ret_type) = llvm_return {
+            ret_type.fn_type(&llvm_params, false)
+        } else {
+            self.context.void_type().fn_type(&llvm_params, false)
+        }
+    }
+
     fn is_primitive(&self, ty: &Type) -> bool {
         match ty {
             Type::Base { symbol, .. } => {
@@ -254,6 +273,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let inner_ptr_type = self.map_semantic_type(node.type_id.as_ref().unwrap()).unwrap();
                 Some(self.builder.build_load(inner_ptr_type, ptr_to_ptr, "").unwrap().into_pointer_value())
             },
+            AstNodeKind::FieldAccess { left, right } => {
+                let struct_ptr = self.compile_place_expression(left)?;
+    
+                let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+                let member_scope = self.analyzer.symbol_table.get_scope(member_symbol.scope_id).unwrap();
+    
+                let mut sorted_field_symbols: Vec<_> = member_scope.values.values()
+                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                    .collect();
+                sorted_field_symbols.sort_by_key(|s| s.span.unwrap().start);
+                let field_index = sorted_field_symbols
+                    .iter()
+                    .position(|s| s.id == member_symbol.id)
+                    .unwrap() as u32;
+    
+                let left_type = left.type_id.as_ref().unwrap();
+                let base_type = if let Type::Reference(inner) | Type::MutableReference(inner) = left_type {
+                    &**inner
+                } else {
+                    left_type
+                };
+                
+                let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
+                let field_ptr = self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, "").unwrap();
+                Some(field_ptr)
+            }
             _ => panic!("Expression is not a valid place expression for codegen: {:?}", node.kind),
         }
     }
@@ -709,72 +754,53 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_function(&mut self, parameters: &[AstNode], body: &Option<BoxedAstNode>, value_id: ValueSymbolId) {
+    fn compile_function_declaration(&mut self, node: &AstNode) {
+        let value_id = node.value_id.unwrap();
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let fn_type = fn_symbol.type_id.as_ref().unwrap();
 
-        let (param_types, return_type_opt) =
-            if let Type::Base { symbol, .. } = fn_type {
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &type_symbol.kind {
-                    let llvm_params: Vec<_> = params
-                        .iter()
-                        .map(|p| self.map_semantic_type(p).unwrap().into())
-                        .collect();
-                    
-                    let llvm_return = self.map_semantic_type(return_type);
-                    (llvm_params, llvm_return)
-                } else {
-                    unreachable!();
-                }
-            } else {
-                unreachable!();
-            };
-
-        let llvm_fn_type = if let Some(ret_type) = return_type_opt {
-            ret_type.fn_type(&param_types, false)
-        } else {
-            self.context.void_type().fn_type(&param_types, false)
-        };
-
+        let llvm_fn_type = self.map_semantic_fn_type(fn_type);
         let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
         let function = self.module.add_function(fn_name, llvm_fn_type, None);
+
         self.functions.insert(value_id, function);
+    }
 
-        if let Some(body_node) = body {
-            let old_fn = self.current_function.take();
-            let old_vars = self.variables.clone();
+    fn compile_function_body(&mut self, node: &AstNode) {
+        let AstNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
+        let function = self.functions[&node.value_id.unwrap()];
 
-            self.current_function = Some(function);
-            self.variables.clear();
+        let old_fn = self.current_function.take();
+        let old_vars = self.variables.clone();
+        self.variables.clear();
+        self.current_function = Some(function);
 
-            let entry = self.context.append_basic_block(function, "entry");
-            self.builder.position_at_end(entry);
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
 
-            for (i, param_node) in parameters.iter().enumerate() {
-                let param_value = function.get_nth_param(i as u32).unwrap();
-                let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
-                let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
-                param_value.set_name(param_name);
+        for (i, param_node) in parameters.iter().enumerate() {
+            let param_value = function.get_nth_param(i as u32).unwrap();
+            let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
+            let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
+            param_value.set_name(param_name);
 
-                let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
-                self.builder.build_store(alloca, param_value).unwrap();
-                self.variables.insert(param_node.value_id.unwrap(), alloca);
-            }
-
-            let body_val = self.compile_node(body_node);
-
-            if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
-                if return_type_opt.is_some() {
-                    self.builder.build_return(Some(&body_val.unwrap())).unwrap();
-                } else {
-                    self.builder.build_return(None).unwrap();
-                }
-            }
-            
-            self.current_function = old_fn;
-            self.variables = old_vars;
+            let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
+            self.builder.build_store(alloca, param_value).unwrap();
+            self.variables.insert(param_node.value_id.unwrap(), alloca);
         }
+
+        let body_val = self.compile_node(body.as_ref().unwrap());
+
+        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+            if function.get_type().get_return_type().is_some() {
+                self.builder.build_return(Some(&body_val.unwrap())).unwrap();
+            } else {
+                self.builder.build_return(None).unwrap();
+            }
+        }
+        
+        self.current_function = old_fn;
+        self.variables = old_vars;
     }
 
     fn compile_struct_literal(&mut self, struct_type: &Type, fields: &indexmap::IndexMap<String, AstNode>) -> Option<BasicValueEnum<'ctx>> {
@@ -812,6 +838,85 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         Some(aggregate.into())
     }
+
+    fn compile_field_access(&mut self, left: &BoxedAstNode, right: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+        let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+
+        match member_symbol.kind {
+            ValueSymbolKind::EnumVariant | ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
+            ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
+            ValueSymbolKind::StructField => {
+                let struct_ptr = self.compile_place_expression(left).unwrap();
+
+                let member_scope = self.analyzer.symbol_table.get_scope(member_symbol.scope_id).unwrap();
+                let mut sorted_field_symbols: Vec<_> = member_scope.values.values()
+                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                    .collect();
+                sorted_field_symbols.sort_by_key(|s| s.span.unwrap().start);
+                
+                let field_index = sorted_field_symbols
+                    .iter()
+                    .position(|s| s.id == member_symbol.id)
+                    .unwrap() as u32;
+
+                let base_type = match left.type_id.as_ref().unwrap() {
+                    Type::Reference(inner) | Type::MutableReference(inner) => &**inner,
+                    _ => left.type_id.as_ref().unwrap(),
+                };
+                let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
+                
+                let field_ptr = self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, "").unwrap();
+                let field_type = self.map_semantic_type(member_symbol.type_id.as_ref().unwrap()).unwrap();
+                
+                Some(self.builder.build_load(field_type, field_ptr, "").unwrap())
+            }
+        }
+    }
+
+    fn compile_function_call(
+        &mut self,
+        function_node: &BoxedAstNode,
+        arguments: &[AstNode],
+        return_type: Option<&Type>,
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
+        
+        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind {
+            let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+            
+            if let ValueSymbolKind::Function(scope_id) = member_symbol.kind {
+                let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                
+                if fn_scope.receiver_kind.is_some() {
+                    let instance_value = self.compile_node(left).unwrap();
+                    compiled_args.push(instance_value);
+                }
+            }
+        }
+        
+        for arg in arguments {
+            compiled_args.push(self.compile_node(arg).unwrap());
+        }
+        
+        let callee = self.compile_node(function_node).unwrap().into_pointer_value();
+        let fn_type = self.map_semantic_fn_type(function_node.type_id.as_ref().unwrap());
+        
+        let call = self.builder.build_indirect_call(
+            fn_type,
+            callee,
+            &compiled_args.iter().map(|v| (*v).into()).collect::<Vec<_>>(),
+            "",
+        ).unwrap();
+
+        if let Some(ret_type) = return_type {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
+            if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
+                return Some(call.try_as_basic_value().left().unwrap());
+            }
+        }
+        
+        None
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -836,22 +941,66 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_program(&mut self, program: &AstNode) {
         let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
 
-        self.compile_declared_functions(stmts);
-        self.compile_synthetic_main_function(stmts);
+        self.compile_declarations_pass(stmts);
+        self.compile_executable_code_pass(stmts);
     }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_synthetic_main_function(&mut self, stmts: &[AstNode]) {
-        let fn_type = self.context.i32_type().fn_type(&[], false);
-        let main_fn = self.module.add_function("main", fn_type, None);
+    fn compile_declarations_pass(&mut self, stmts: &[AstNode]) {
+        for stmt in stmts.iter() {
+            match &stmt.kind {
+                AstNodeKind::Function { .. } => self.compile_function_declaration(stmt),
+                AstNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
+                AstNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
+                AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. } => {
+                    for const_node in associated_constants {
+                        let init_val = self.compile_node(const_node).unwrap();
+                        self.constants.insert(const_node.value_id.unwrap(), init_val);
+                    }
+
+                    for func_node in associated_functions {
+                        self.compile_function_declaration(func_node);
+                    }
+                },
+                AstNodeKind::VariableDeclaration { mutable: false, .. } => {
+                    let init_val = self.compile_node(stmt).unwrap();
+                    self.constants.insert(stmt.value_id.unwrap(), init_val);
+                },
+                _ => {}
+            }
+        }
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_executable_code_pass(&mut self, stmts: &[AstNode]) {
+        for stmt in stmts.iter() {
+            if let AstNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
+                self.compile_function_body(stmt);
+            }
+
+            if let AstNodeKind::ImplDeclaration { associated_functions, .. } = &stmt.kind {
+                for func_node in associated_functions {
+                    self.compile_function_body(func_node);
+                }
+            }
+        }
+
+        let main_fn_type = self.context.i32_type().fn_type(&[], false);
+        let main_fn = self.module.add_function("main", main_fn_type, None);
         self.current_function = Some(main_fn);
-        let entry = self.context.append_basic_block(main_fn, "");
+        let entry = self.context.append_basic_block(main_fn, "entry");
         self.builder.position_at_end(entry);
 
         for stmt in stmts.iter() {
-            if !matches!(stmt.kind, AstNodeKind::Function { .. }) {
-                self.compile_node(stmt);
+            match &stmt.kind {
+                AstNodeKind::Function {..} | AstNodeKind::StructDeclaration {..} |
+                AstNodeKind::EnumDeclaration {..} | AstNodeKind::ImplDeclaration {..} |
+                AstNodeKind::VariableDeclaration { mutable: false, .. } => {},
+                _ => {
+                    self.compile_node(stmt);
+                }
             }
         }
 
@@ -868,7 +1017,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
             AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
             AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
-            AstNodeKind::VariableDeclaration { initializer, .. }
+            AstNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
+                let init_val = self.compile_node(initializer).unwrap();
+                self.constants.insert(stmt.value_id.unwrap(), init_val);
+                Some(init_val)
+            },
+            AstNodeKind::VariableDeclaration { initializer, mutable: true, .. }
                 => self.compile_variable_declaration(initializer, stmt.value_id.unwrap()),
             AstNodeKind::UnaryOperation { operator, operand }
                 => self.compile_unary_operation(*operator, operand),
@@ -913,31 +1067,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             AstNodeKind::TypeCast { expr, .. }
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
-            AstNodeKind::StructDeclaration { .. } => {
-                self.compile_struct_declaration(stmt);
-                None
-            },
-            AstNodeKind::EnumDeclaration { .. } => {
-                self.compile_enum_declaration(stmt);
-                None
-            },
-            AstNodeKind::Function { parameters, body, .. } => {
-                self.compile_function(parameters, body, stmt.value_id.unwrap());
-                None
-            },
             AstNodeKind::StructLiteral { fields, .. }
                 => self.compile_struct_literal(stmt.type_id.as_ref().unwrap(), fields),
+            AstNodeKind::AssociatedConstant { initializer, .. } => {
+                let init_val = self.compile_node(initializer).unwrap();
+                self.constants.insert(stmt.value_id.unwrap(), init_val);
+                Some(init_val)
+            },
+            AstNodeKind::FieldAccess { left, right } => self.compile_field_access(left, right),
+            AstNodeKind::FunctionCall { function, arguments }
+                => self.compile_function_call(function, arguments, stmt.type_id.as_ref()),
+            AstNodeKind::Function { .. } => None,
             _ => unimplemented!()
-        }
-    }
-}
-
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_declared_functions(&mut self, stmts: &[AstNode]) {
-        for stmt in stmts.iter() {
-            if matches!(stmt.kind, AstNodeKind::Function { .. }) {
-                self.compile_node(stmt);
-            }
         }
     }
 }
