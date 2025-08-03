@@ -776,6 +776,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.variables = old_vars;
         }
     }
+
+    fn compile_struct_literal(&mut self, struct_type: &Type, fields: &indexmap::IndexMap<String, AstNode>) -> Option<BasicValueEnum<'ctx>> {
+        let llvm_struct_type = self.map_semantic_type(struct_type).unwrap().into_struct_type();
+        let mut aggregate = llvm_struct_type.get_undef();
+
+        let Type::Base { symbol, .. } = struct_type else { unreachable!() };
+        let struct_type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let TypeSymbolKind::Struct((scope_id, _)) = struct_type_symbol.kind else { unreachable!() };
+
+        let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+        let mut sorted_field_symbols: Vec<_> = scope.values.values()
+            .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+            .collect();
+        sorted_field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+        let field_name_to_index: HashMap<String, u32> = sorted_field_symbols
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let name = self.analyzer.symbol_table.get_value_name(s.name_id);
+                (name.to_string(), i as u32)
+            })
+            .collect();
+
+        for (field_name, field_expr) in fields.iter() {
+            let field_val = self.compile_node(field_expr).unwrap();
+            let field_index = *field_name_to_index.get(field_name).unwrap();
+
+            aggregate = self.builder
+                .build_insert_value(aggregate, field_val, field_index, "")
+                .unwrap()
+                .into_struct_value();
+        }
+        
+        Some(aggregate.into())
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -889,6 +925,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_function(parameters, body, stmt.value_id.unwrap());
                 None
             },
+            AstNodeKind::StructLiteral { fields, .. }
+                => self.compile_struct_literal(stmt.type_id.as_ref().unwrap(), fields),
             _ => unimplemented!()
         }
     }
