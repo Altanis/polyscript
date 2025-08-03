@@ -1,199 +1,42 @@
-struct Dog {}
-struct Cat {}
+let a = 1;
+let b = 1.0;
+let c = true;
+let d = 'a';
+let e = "f";
+let f = e;
+let g = heap e;
+let h = 2 + 3;
+let i = -2;
+let j = true || false;
+let k = {
+    let y = 4;
+    y
+};
 
-trait Animal {
-    type FormOfSpeech;
-    const Speech: Self.FormOfSpeech;
-
-    fn speak(&this): Self.FormOfSpeech;
-}
-
-impl Animal for Dog {
-    type FormOfSpeech = string;
-    const Speech: string = "bark";
-
-    fn speak(&this): int {
-        return 3;
-    }
-}
-
-impl Animal for Cat {
-    type FormOfSpeech = string;
-    const Speech: string = "meow";
-
-    fn speak(&this): Self.FormOfSpeech {
-        return Self.Speech;
-    }
-}
-
-
-let x = 1;
-if (x == 1) {
-    let x = "4";
-} else if (x == 2) {
-    let x = "5";
+let l = if (true) {
+    4
 } else {
-    let x = "6";
-}
-
-type Integer = int;
-
-fn add<T: Add>(a: T, b: T): T {
-    return a + b;
-}
-
-struct Point<T> {
-    public x: T;
-    public y: T;
-}
-
-trait VectorLike<T> {
-    type Thingy;
-    const EUCLIDEAN_DEFINITION: string;
-
-    fn new(): Self;
-    fn operation(&this, other: &Self, op: fn(T, T): T): Integer;
-}
-
-impl VectorLike<Integer> for Point<Integer> {
-    type Thingy = Integer;
-    const EUCLIDEAN_DEFINITION = "";
-
-    fn new(): Point<Integer> {
-        return Point { x: 0, y: 0 };
-    }
-
-    fn operation(&this, other: &Point<Integer>, op: fn(Integer, Integer): Integer): Integer {
-        return op(this.x, other.y);
-    }
-}
-
-let point_1 = Point { x: 0, y: 0 };
-let point_2 = Point { x: 0, y: 0 };
-
-let result = point_1.operation(&point_2, add);
-
-impl Point<Integer> {
-    public fn t1(): Self {
-        return Point { x: 0, y: 0 };
-    }
-
-    public fn t2(this) {}
-    public fn t3(&this) {}
-    public fn t4(&mut this) {}
-}
-
-
-
-
-
-
-
-
-struct Point<T> {
-    public x: T;
-    public y: T;
-}
-
-impl Point<int> {
-    public fn new(): Self {
-        return Self {
-            x: 0,
-            y: 0
-        };
-    }
-}
-
-impl<T> Point<T> {
-    public fn new(x: T, y: T): Self {
-        return Self { x, y };
-    }
-
-    public fn operation(&this, other: Self): Self {
-        return this + other;
-    }
-}
-
-trait Vector {
-    fn get_x(&this): int;
-    fn get_y(&this): int;
-}
-
-impl Vector for Point<int> {
-    fn get_x(&this): int {
-        return this.x;
-    }
-
-    fn get_y(&this): int {
-        return this.y;
-    }
-}
-
-impl Add for Point<int> {
-    type Output = Self;
-
-    fn add(this, rhs: Self): Self {
-        return Point {
-            x: this.get_x() + rhs.get_x(),
-            y: this.get_y() + rhs.get_y()
-        };
-    }
-}
-
-
-
-
-
-
-
-
-
-struct Point<T> {
-    public x: T;
-    public y: T;
-}
-
-impl Add for Point<int> {
-    type Output = Point<int>;
-
-    fn add(this, other: Self): Self.Output {
-        return Point {
-            x: self.x + other.x,
-            y: self.y + other.y
-        };
-    }
-}
-
-impl Add for Point<float> {
-    type Output = Point<float>;
-
-    fn add(this, other: Self): Self.Output {
-        return Point {
-            x: self.x + other.x,
-            y: self.y + other.y
-        };
-    }
-}
-
-impl Add<Point<int>> for Point<float> {
-    type Output = Point<float>;
-
-    fn add(this, other: Point<int>): Self.Output {
-        return Point {
-            x: self.x + other.x,
-            y: self.y + other.y
-        };
-    }
-}
-
-let p1 = Point {
-    x: 5,
-    y: 4
+    3
 };
 
-let p2 = Point {
-    x: 5.0,
-    y: 4.0
-};
+let m = 0;
+for (let i = 0; i < 5; i += 1) {
+    m += 1;
+}
 
-let resultant = p1.add(p2);
+while (m < 0) {
+    m -= 1;
+}
+
+let x: float = 5 as float;
+
+struct Vector2D {
+    x: int;
+    y: int;
+}
+
+enum Difficulty {
+    Easy,
+    Medium = 3,
+    Hard
+}

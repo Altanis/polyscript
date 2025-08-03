@@ -229,8 +229,12 @@ impl SemanticAnalyzer {
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Enum);
 
-        for (variant_name, (variant_node, _)) in variants {
+        for (variant_name, (variant_node, variant_value)) in variants {
             self.symbol_collector_check_node(variant_node)?;
+            if let Some(variant_value) = variant_value {
+                self.symbol_collector_check_node(variant_value)?;
+            }
+
             let variant_id = self.symbol_table.add_value_symbol(
                 variant_name,
                 ValueSymbolKind::EnumVariant,

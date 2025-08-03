@@ -1176,4 +1176,316 @@ impl AstNode {
             ExpressionStatement(expr) => vec![expr.as_mut()],
         }
     }
+
+    pub fn children(&self) -> Vec<&AstNode> {
+        use AstNodeKind::*;
+
+        match &self.kind {
+            IntegerLiteral(_)
+            | FloatLiteral(_)
+            | BooleanLiteral(_)
+            | StringLiteral(_)
+            | CharLiteral(_)
+            | Identifier(_)
+            | EnumVariant(_)
+            | SelfValue
+            | SelfType(_) => vec![],
+
+            Program(statements) => statements.iter().collect(),
+
+            VariableDeclaration {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                if let Some(node) = type_annotation.as_ref() {
+                    children.push(node.as_ref());
+                }
+
+                children.push(initializer);
+
+                children
+            }
+
+            UnaryOperation { operand, .. } => vec![operand.as_ref()],
+
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
+                vec![left.as_ref(), right.as_ref()]
+            },
+            HeapExpression(expr) => vec![expr.as_ref()],
+
+            TypeCast { expr, target_type } => vec![expr.as_ref(), target_type.as_ref()],
+            PathQualifier { ty, tr } => {
+                let mut children = vec![ty.as_ref()];
+                if let Some(trait_node) = tr.as_ref() {
+                    children.push(trait_node.as_ref());
+                }
+                children
+            }
+
+            Block(statements) => statements.iter().collect(),
+
+            IfStatement {
+                condition,
+                then_branch,
+                else_if_branches,
+                else_branch,
+            } => {
+                let mut children = vec![];
+
+                children.push(condition.as_ref());
+                children.push(then_branch.as_ref());
+
+                for (elif_cond, elif_branch) in else_if_branches.iter() {
+                    children.push(elif_cond.as_ref());
+                    children.push(elif_branch.as_ref());
+                }
+
+                if let Some(else_node) = else_branch.as_ref() {
+                    children.push(else_node.as_ref());
+                }
+
+                children
+            }
+
+            ForLoop {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => {
+                let mut children = vec![];
+
+                if let Some(init) = initializer.as_ref() {
+                    children.push(init.as_ref());
+                }
+
+                if let Some(cond) = condition.as_ref() {
+                    children.push(cond.as_ref());
+                }
+
+                if let Some(inc) = increment.as_ref() {
+                    children.push(inc.as_ref());
+                }
+
+                children.push(body.as_ref());
+
+                children
+            }
+
+            WhileLoop { condition, body } => vec![condition.as_ref(), body.as_ref()],
+
+            Return(opt_expr) => {
+                if let Some(expr) = opt_expr.as_ref() {
+                    vec![expr.as_ref()]
+                } else {
+                    vec![]
+                }
+            }
+
+            Break | Continue => vec![],
+
+            Function {
+                generic_parameters,
+                parameters,
+                return_type,
+                body,
+                ..
+            } => {
+                let mut children = vec![];
+
+                children.extend(generic_parameters.iter());
+                children.extend(parameters.iter());
+
+                if let Some(rt) = return_type.as_ref() {
+                    children.push(rt.as_ref());
+                }
+
+                if let Some(b) = body.as_ref() {
+                    children.push(b.as_ref());
+                }
+
+                children
+            }
+
+            FunctionPointer { params, return_type } => {
+                let mut children = vec![];
+
+                for p in params.iter() {
+                    children.push(p);
+                }
+
+                if let Some(ret) = return_type.as_ref() {
+                    children.push(ret.as_ref());
+                }
+
+                children
+            }
+
+            FunctionParameter {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            StructDeclaration {
+                generic_parameters,
+                fields,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                for field_node in fields.iter() {
+                    children.push(field_node);
+                }
+
+                children
+            }
+
+            StructField {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            StructLiteral { fields, .. } => fields.values().collect(),
+
+            EnumDeclaration { variants, .. } => {
+                let mut children = vec![];
+
+                for (_, (variant_node, opt_payload)) in variants.iter() {
+                    children.push(variant_node);
+                    if let Some(payload) = opt_payload.as_ref() {
+                        children.push(payload);
+                    }
+                }
+
+                children
+            }
+
+            ImplDeclaration {
+                generic_parameters,
+                trait_node,
+                type_reference,
+                associated_constants,
+                associated_functions,
+                associated_types,
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                if let Some(tn) = trait_node.as_ref() {
+                    children.push(tn.as_ref());
+                }
+
+                children.push(type_reference.as_ref());
+
+                for const_node in associated_constants.iter() {
+                    children.push(const_node);
+                }
+
+                for func_node in associated_functions.iter() {
+                    children.push(func_node);
+                }
+
+                for type_node in associated_types.iter() {
+                    children.push(type_node);
+                }
+
+                children
+            }
+
+            AssociatedConstant {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                if let Some(ta) = type_annotation.as_ref() {
+                    children.push(ta.as_ref());
+                }
+
+                children.push(initializer.as_ref());
+                children
+            }
+
+            AssociatedType { value, .. } => vec![value.as_ref()],
+
+            TraitDeclaration {
+                generic_parameters,
+                types,
+                constants,
+                signatures,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                for t in types.iter() {
+                    children.push(t);
+                }
+
+                for c in constants.iter() {
+                    children.push(c);
+                }
+
+                for s in signatures.iter() {
+                    children.push(s);
+                }
+
+                children
+            }
+
+            TraitConstant {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            TraitType(_) => vec![],
+
+            TypeReference { generic_types, .. } => generic_types.iter().collect(),
+
+            TypeDeclaration {
+                generic_parameters,
+                value,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                children.push(value.as_ref());
+                children
+            }
+
+            FieldAccess { left, right } => vec![left.as_ref(), right.as_ref()],
+
+            FunctionCall {
+                function,
+                arguments,
+            } => {
+                let mut children = vec![];
+                children.push(function.as_ref());
+
+                for arg in arguments.iter() {
+                    children.push(arg);
+                }
+
+                children
+            }
+
+            GenericParameter { .. } => vec![],
+            ExpressionStatement(expr) => vec![expr.as_ref()],
+        }
+    }
 }

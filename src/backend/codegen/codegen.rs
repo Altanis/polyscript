@@ -708,6 +708,74 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             current_discriminant += 1;
         }
     }
+
+    fn compile_function(&mut self, parameters: &[AstNode], body: &Option<BoxedAstNode>, value_id: ValueSymbolId) {
+        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+        let fn_type = fn_symbol.type_id.as_ref().unwrap();
+
+        let (param_types, return_type_opt) =
+            if let Type::Base { symbol, .. } = fn_type {
+                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &type_symbol.kind {
+                    let llvm_params: Vec<_> = params
+                        .iter()
+                        .map(|p| self.map_semantic_type(p).unwrap().into())
+                        .collect();
+                    
+                    let llvm_return = self.map_semantic_type(return_type);
+                    (llvm_params, llvm_return)
+                } else {
+                    unreachable!();
+                }
+            } else {
+                unreachable!();
+            };
+
+        let llvm_fn_type = if let Some(ret_type) = return_type_opt {
+            ret_type.fn_type(&param_types, false)
+        } else {
+            self.context.void_type().fn_type(&param_types, false)
+        };
+
+        let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
+        let function = self.module.add_function(fn_name, llvm_fn_type, None);
+        self.functions.insert(value_id, function);
+
+        if let Some(body_node) = body {
+            let old_fn = self.current_function.take();
+            let old_vars = self.variables.clone();
+
+            self.current_function = Some(function);
+            self.variables.clear();
+
+            let entry = self.context.append_basic_block(function, "entry");
+            self.builder.position_at_end(entry);
+
+            for (i, param_node) in parameters.iter().enumerate() {
+                let param_value = function.get_nth_param(i as u32).unwrap();
+                let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
+                let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
+                param_value.set_name(param_name);
+
+                let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
+                self.builder.build_store(alloca, param_value).unwrap();
+                self.variables.insert(param_node.value_id.unwrap(), alloca);
+            }
+
+            let body_val = self.compile_node(body_node);
+
+            if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+                if return_type_opt.is_some() {
+                    self.builder.build_return(Some(&body_val.unwrap())).unwrap();
+                } else {
+                    self.builder.build_return(None).unwrap();
+                }
+            }
+            
+            self.current_function = old_fn;
+            self.variables = old_vars;
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -730,15 +798,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub fn compile_program(&mut self, program: &AstNode) {
+        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
+
+        self.compile_declared_functions(stmts);
+        self.compile_synthetic_main_function(stmts);
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_synthetic_main_function(&mut self, stmts: &[AstNode]) {
         let fn_type = self.context.i32_type().fn_type(&[], false);
         let main_fn = self.module.add_function("main", fn_type, None);
         self.current_function = Some(main_fn);
         let entry = self.context.append_basic_block(main_fn, "");
         self.builder.position_at_end(entry);
 
-        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
         for stmt in stmts.iter() {
-            self.compile_node(stmt);
+            if !matches!(stmt.kind, AstNodeKind::Function { .. }) {
+                self.compile_node(stmt);
+            }
         }
 
         if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
@@ -807,7 +885,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_enum_declaration(stmt);
                 None
             },
+            AstNodeKind::Function { parameters, body, .. } => {
+                self.compile_function(parameters, body, stmt.value_id.unwrap());
+                None
+            },
             _ => unimplemented!()
+        }
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_declared_functions(&mut self, stmts: &[AstNode]) {
+        for stmt in stmts.iter() {
+            if matches!(stmt.kind, AstNodeKind::Function { .. }) {
+                self.compile_node(stmt);
+            }
         }
     }
 }

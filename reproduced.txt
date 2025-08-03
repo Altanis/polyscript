@@ -1177,6 +1177,318 @@ impl AstNode {
             ExpressionStatement(expr) => vec![expr.as_mut()],
         }
     }
+
+    pub fn children(&self) -> Vec<&AstNode> {
+        use AstNodeKind::*;
+
+        match &self.kind {
+            IntegerLiteral(_)
+            | FloatLiteral(_)
+            | BooleanLiteral(_)
+            | StringLiteral(_)
+            | CharLiteral(_)
+            | Identifier(_)
+            | EnumVariant(_)
+            | SelfValue
+            | SelfType(_) => vec![],
+
+            Program(statements) => statements.iter().collect(),
+
+            VariableDeclaration {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                if let Some(node) = type_annotation.as_ref() {
+                    children.push(node.as_ref());
+                }
+
+                children.push(initializer);
+
+                children
+            }
+
+            UnaryOperation { operand, .. } => vec![operand.as_ref()],
+
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
+                vec![left.as_ref(), right.as_ref()]
+            },
+            HeapExpression(expr) => vec![expr.as_ref()],
+
+            TypeCast { expr, target_type } => vec![expr.as_ref(), target_type.as_ref()],
+            PathQualifier { ty, tr } => {
+                let mut children = vec![ty.as_ref()];
+                if let Some(trait_node) = tr.as_ref() {
+                    children.push(trait_node.as_ref());
+                }
+                children
+            }
+
+            Block(statements) => statements.iter().collect(),
+
+            IfStatement {
+                condition,
+                then_branch,
+                else_if_branches,
+                else_branch,
+            } => {
+                let mut children = vec![];
+
+                children.push(condition.as_ref());
+                children.push(then_branch.as_ref());
+
+                for (elif_cond, elif_branch) in else_if_branches.iter() {
+                    children.push(elif_cond.as_ref());
+                    children.push(elif_branch.as_ref());
+                }
+
+                if let Some(else_node) = else_branch.as_ref() {
+                    children.push(else_node.as_ref());
+                }
+
+                children
+            }
+
+            ForLoop {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => {
+                let mut children = vec![];
+
+                if let Some(init) = initializer.as_ref() {
+                    children.push(init.as_ref());
+                }
+
+                if let Some(cond) = condition.as_ref() {
+                    children.push(cond.as_ref());
+                }
+
+                if let Some(inc) = increment.as_ref() {
+                    children.push(inc.as_ref());
+                }
+
+                children.push(body.as_ref());
+
+                children
+            }
+
+            WhileLoop { condition, body } => vec![condition.as_ref(), body.as_ref()],
+
+            Return(opt_expr) => {
+                if let Some(expr) = opt_expr.as_ref() {
+                    vec![expr.as_ref()]
+                } else {
+                    vec![]
+                }
+            }
+
+            Break | Continue => vec![],
+
+            Function {
+                generic_parameters,
+                parameters,
+                return_type,
+                body,
+                ..
+            } => {
+                let mut children = vec![];
+
+                children.extend(generic_parameters.iter());
+                children.extend(parameters.iter());
+
+                if let Some(rt) = return_type.as_ref() {
+                    children.push(rt.as_ref());
+                }
+
+                if let Some(b) = body.as_ref() {
+                    children.push(b.as_ref());
+                }
+
+                children
+            }
+
+            FunctionPointer { params, return_type } => {
+                let mut children = vec![];
+
+                for p in params.iter() {
+                    children.push(p);
+                }
+
+                if let Some(ret) = return_type.as_ref() {
+                    children.push(ret.as_ref());
+                }
+
+                children
+            }
+
+            FunctionParameter {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            StructDeclaration {
+                generic_parameters,
+                fields,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                for field_node in fields.iter() {
+                    children.push(field_node);
+                }
+
+                children
+            }
+
+            StructField {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            StructLiteral { fields, .. } => fields.values().collect(),
+
+            EnumDeclaration { variants, .. } => {
+                let mut children = vec![];
+
+                for (_, (variant_node, opt_payload)) in variants.iter() {
+                    children.push(variant_node);
+                    if let Some(payload) = opt_payload.as_ref() {
+                        children.push(payload);
+                    }
+                }
+
+                children
+            }
+
+            ImplDeclaration {
+                generic_parameters,
+                trait_node,
+                type_reference,
+                associated_constants,
+                associated_functions,
+                associated_types,
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                if let Some(tn) = trait_node.as_ref() {
+                    children.push(tn.as_ref());
+                }
+
+                children.push(type_reference.as_ref());
+
+                for const_node in associated_constants.iter() {
+                    children.push(const_node);
+                }
+
+                for func_node in associated_functions.iter() {
+                    children.push(func_node);
+                }
+
+                for type_node in associated_types.iter() {
+                    children.push(type_node);
+                }
+
+                children
+            }
+
+            AssociatedConstant {
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                let mut children = vec![];
+
+                if let Some(ta) = type_annotation.as_ref() {
+                    children.push(ta.as_ref());
+                }
+
+                children.push(initializer.as_ref());
+                children
+            }
+
+            AssociatedType { value, .. } => vec![value.as_ref()],
+
+            TraitDeclaration {
+                generic_parameters,
+                types,
+                constants,
+                signatures,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                for t in types.iter() {
+                    children.push(t);
+                }
+
+                for c in constants.iter() {
+                    children.push(c);
+                }
+
+                for s in signatures.iter() {
+                    children.push(s);
+                }
+
+                children
+            }
+
+            TraitConstant {
+                type_annotation, ..
+            } => vec![type_annotation.as_ref()],
+
+            TraitType(_) => vec![],
+
+            TypeReference { generic_types, .. } => generic_types.iter().collect(),
+
+            TypeDeclaration {
+                generic_parameters,
+                value,
+                ..
+            } => {
+                let mut children = vec![];
+
+                for gp in generic_parameters.iter() {
+                    children.push(gp);
+                }
+
+                children.push(value.as_ref());
+                children
+            }
+
+            FieldAccess { left, right } => vec![left.as_ref(), right.as_ref()],
+
+            FunctionCall {
+                function,
+                arguments,
+            } => {
+                let mut children = vec![];
+                children.push(function.as_ref());
+
+                for arg in arguments.iter() {
+                    children.push(arg);
+                }
+
+                children
+            }
+
+            GenericParameter { .. } => vec![],
+            ExpressionStatement(expr) => vec![expr.as_ref()],
+        }
+    }
 }
 
 // frontend/syntax/lexer.rs
@@ -5336,8 +5648,12 @@ impl SemanticAnalyzer {
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Enum);
 
-        for (variant_name, (variant_node, _)) in variants {
+        for (variant_name, (variant_node, variant_value)) in variants {
             self.symbol_collector_check_node(variant_node)?;
+            if let Some(variant_value) = variant_value {
+                self.symbol_collector_check_node(variant_value)?;
+            }
+
             let variant_id = self.symbol_table.add_value_symbol(
                 variant_name,
                 ValueSymbolKind::EnumVariant,
@@ -9693,6 +10009,7 @@ pub struct CodeGen<'a, 'ctx> {
 
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
     functions: HashMap<ValueSymbolId, FunctionValue<'ctx>>,
+    constants: HashMap<ValueSymbolId, BasicValueEnum<'ctx>>,
 
     string_interner: NameInterner,
     string_literals: HashMap<StringLiteralId, PointerValue<'ctx>>,
@@ -9789,6 +10106,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         llvm_struct.set_body(&field_types, false);
                         llvm_struct.as_basic_type_enum()
                     },
+                    // Values of an enum type are integers.
+                    TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
+                    TypeSymbolKind::FunctionSignature { .. }
+                        => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                    TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
                     _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
                 };
 
@@ -10232,9 +10554,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_while_loop(&mut self, condition: &BoxedAstNode, body: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
-        let cond_block = self.context.append_basic_block(function, "while.cond");
-        let body_block = self.context.append_basic_block(function, "while.body");
-        let after_block = self.context.append_basic_block(function, "while.after");
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
 
         self.continue_blocks.push(cond_block);
         self.break_blocks.push(after_block);
@@ -10272,10 +10594,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.compile_node(init);
         }
 
-        let cond_block = self.context.append_basic_block(function, "for.cond");
-        let body_block = self.context.append_basic_block(function, "for.body");
-        let inc_block = self.context.append_basic_block(function, "for.inc");
-        let after_block = self.context.append_basic_block(function, "for.after");
+        let cond_block = self.context.append_basic_block(function, "");
+        let body_block = self.context.append_basic_block(function, "");
+        let inc_block = self.context.append_basic_block(function, "");
+        let after_block = self.context.append_basic_block(function, "");
 
         self.continue_blocks.push(inc_block);
         self.break_blocks.push(after_block);
@@ -10344,6 +10666,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             _ => panic!("cannot cast {:?} to {:?}", source_prim, target_prim)
         }
     }
+
+    fn compile_struct_declaration(&mut self, struct_node: &AstNode) {
+        let struct_type = struct_node.type_id.as_ref().unwrap();
+        self.map_semantic_type(struct_type);
+    }
+
+    fn compile_enum_declaration(&mut self, enum_node: &AstNode) {
+        let AstNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
+
+        let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id.unwrap(), name).unwrap();
+        let enum_llvm_type = self.map_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
+
+        let TypeSymbolKind::Enum((scope_id, _)) = enum_type_symbol.kind else { unreachable!(); };
+
+        let mut current_discriminant: i64 = 0;
+
+        for (variant_name, (_variant_node, initializer_opt)) in variants.iter() {
+            if let Some(initializer) = initializer_opt && let AstNodeKind::IntegerLiteral(val) = initializer.kind {
+                current_discriminant = val;
+            }
+
+            let variant_symbol = self.analyzer.symbol_table.find_value_symbol_in_scope(variant_name, scope_id).unwrap();
+            let const_val = enum_llvm_type.const_int(current_discriminant as u64, false);
+
+            self.constants.insert(variant_symbol.id, const_val.into());
+            current_discriminant += 1;
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -10355,6 +10705,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             analyzer,
             variables: HashMap::new(),
             functions: HashMap::new(),
+            constants: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
             continue_blocks: vec![],
@@ -10365,13 +10716,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub fn compile_program(&mut self, program: &AstNode) {
+        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
+
+        self.compile_declared_functions(stmts);
+        self.compile_synthetic_main_function(stmts);
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_declared_functions(&mut self, stmts: &[AstNode]) {
+        for stmt in stmts.iter() {
+            if matches!(stmt.kind, AstNodeKind::Function { .. }) {
+                self.compile_node(stmt);
+            }
+
+            for child in stmt.children() {
+                if matches!(stmt.kind, AstNodeKind::Function { .. }) {
+                    self.compile_node(child);
+                }
+            }
+        }
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_synthetic_main_function(&mut self, stmts: &[AstNode]) {
         let fn_type = self.context.i32_type().fn_type(&[], false);
         let main_fn = self.module.add_function("main", fn_type, None);
         self.current_function = Some(main_fn);
-        let entry = self.context.append_basic_block(main_fn, "entry");
+        let entry = self.context.append_basic_block(main_fn, "");
         self.builder.position_at_end(entry);
 
-        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
         for stmt in stmts.iter() {
             self.compile_node(stmt);
         }
@@ -10434,6 +10809,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             AstNodeKind::TypeCast { expr, .. }
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
+            AstNodeKind::StructDeclaration { .. } => {
+                self.compile_struct_declaration(stmt);
+                None
+            },
+            AstNodeKind::EnumDeclaration { .. } => {
+                self.compile_enum_declaration(stmt);
+                None
+            },
             _ => unimplemented!()
         }
     }
@@ -11438,6 +11821,7 @@ pub enum ReferenceKind {
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::rc::Rc;
 
 use colored::Colorize;
@@ -11445,6 +11829,8 @@ use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
 use inkwell::context::Context;
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
@@ -11514,6 +11900,34 @@ fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
 
     let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
     codegen.compile_program(&program);
+
+    let path = Path::new("bin/output.ll");
+    module.print_to_file(path).expect("couldn't write to output.ll");
+
+    Target::initialize_all(&InitializationConfig::default());
+
+    let target_triple = TargetTriple::create("arm64-apple-darwin");
+    module.set_triple(&target_triple);
+
+    let target = Target::from_triple(&target_triple).expect("Target not found");
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "apple-m2",
+            "",
+            OptimizationLevel::None,
+            RelocMode::Default,
+            CodeModel::Default,
+        )
+        .expect("Failed to create target machine");
+
+    let asm_path = Path::new("bin/output_macos.s");
+    target_machine.write_to_file(&module, FileType::Assembly, asm_path).expect("Failed to write assembly");
+
+    Command::new("clang")
+        .args(["bin/output_macos.s", "-o", "bin/a"])
+        .status()
+        .expect("Failed to run clang");
 }
 
 fn test_main_script() {
@@ -11545,7 +11959,7 @@ fn test_main_script() {
                 println!("{}", analyzer);
             }
 
-            compile_ast(program, &analyzer);
+            // compile_ast(program, &analyzer);
         }
     }
 }
