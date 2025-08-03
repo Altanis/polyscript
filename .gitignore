@@ -3,3 +3,4 @@
 .vscode
 reproducer.js
 reproduced.txt
+.DS_Store
