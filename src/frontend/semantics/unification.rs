@@ -1810,6 +1810,14 @@ impl SemanticAnalyzer {
                 let operand_type = self.resolve_type(operand.type_id.as_ref().unwrap());
                 Ok(matches!(operand_type, Type::MutableReference(_)))
             },
+            AstNodeKind::SelfValue => {
+                let ty = self.resolve_type(place.type_id.as_ref().unwrap());
+                match ty {
+                    Type::MutableReference(_) => Ok(true),
+                    Type::Reference(_) => Ok(false),
+                    Type::Base { .. } => Ok(true)
+                }
+            },
             _ => Ok(false)
         }
     }

@@ -19,6 +19,10 @@ impl Vector2D {
             y
         }
     }
+
+    fn add(&this, other: &Self): Self {
+        Vector2D.new(this.x + other.x, this.y + other.y)
+    }
 }
 
 let p1 = Vector2D.new(0, 0);

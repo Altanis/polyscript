@@ -1335,7 +1335,13 @@ impl SemanticAnalyzer {
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
             TraitConstant { .. } => self.collect_uv_trait_const(uv_id, expr, expr.span, info)?,
-            SelfValue => self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?,
+            SelfValue => {
+                if let Some(symbol) = self.symbol_table.find_value_symbol_from_scope(info.scope_id, "this") {
+                    expr.value_id = Some(symbol.id);
+                }
+                
+                self.collect_uv_self_value(uv_id, expr.scope_id.unwrap(), expr.span, info)?
+            },
             SelfType(reference_kind) => {
                 self.collect_uv_self_type(uv_id, expr.scope_id.unwrap(), *reference_kind, expr.span, info)?
             }

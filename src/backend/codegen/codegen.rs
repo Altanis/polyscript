@@ -1,5 +1,4 @@
 use inkwell::basic_block::BasicBlock;
-// backend/codegen/codegen.rs
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
@@ -268,6 +267,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
+            AstNodeKind::SelfValue => {
+                let var_id = node.value_id.unwrap();
+                self.variables.get(&var_id).copied()
+            },
             AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let ptr_to_ptr = self.compile_node(operand).unwrap().into_pointer_value();
                 let inner_ptr_type = self.map_semantic_type(node.type_id.as_ref().unwrap()).unwrap();
@@ -298,7 +301,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
                 let field_ptr = self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, "").unwrap();
                 Some(field_ptr)
-            }
+            },
             _ => panic!("Expression is not a valid place expression for codegen: {:?}", node.kind),
         }
     }
@@ -714,7 +717,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     TypeSymbolKind::Primitive(PrimitiveKind::Int) => Some(CastableKind::Int),
                     TypeSymbolKind::Primitive(PrimitiveKind::Float) => Some(CastableKind::Float),
                     TypeSymbolKind::Primitive(PrimitiveKind::Char) => Some(CastableKind::Char),
-                    TypeSymbolKind::Enum(_) => Some(CastableKind::Enum), // Recognize Enum
+                    TypeSymbolKind::Enum(_) => Some(CastableKind::Enum),
                     _ => None,
                 };
             }
@@ -725,21 +728,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let target_kind = get_kind(target_type);
 
         match (source_kind, target_kind) {
-            (Some(CastableKind::Int), Some(CastableKind::Float)) => {
-                Some(self.builder.build_signed_int_to_float(source_val.into_int_value(), llvm_target_type.into_float_type(), "").unwrap().into())
-            },
-            (Some(CastableKind::Float), Some(CastableKind::Int)) => {
-                Some(self.builder.build_float_to_signed_int(source_val.into_float_value(), llvm_target_type.into_int_type(), "").unwrap().into())
-            },
+            (Some(CastableKind::Int), Some(CastableKind::Float)) => Some(self.builder.build_signed_int_to_float(
+                source_val.into_int_value(), 
+                llvm_target_type.into_float_type(), 
+                ""
+            ).unwrap().into()),
+            (Some(CastableKind::Float), Some(CastableKind::Int)) => Some(self.builder.build_float_to_signed_int(
+                source_val.into_float_value(), 
+                llvm_target_type.into_int_type(), 
+                ""
+            ).unwrap().into()),
             (Some(CastableKind::Int), Some(CastableKind::Int)) |
             (Some(CastableKind::Char), Some(CastableKind::Int)) |
             (Some(CastableKind::Int), Some(CastableKind::Char)) |
-            (Some(CastableKind::Enum), Some(CastableKind::Int)) => {
-                Some(self.builder.build_int_cast_sign_flag(source_val.into_int_value(), llvm_target_type.into_int_type(), true, "").unwrap().into())
-            },
-            (Some(CastableKind::Float), Some(CastableKind::Float)) => {
-                Some(self.builder.build_float_cast(source_val.into_float_value(), llvm_target_type.into_float_type(), "").unwrap().into())
-            },
+            (Some(CastableKind::Enum), Some(CastableKind::Int)) => Some(self.builder.build_int_cast_sign_flag(
+                source_val.into_int_value(),
+                llvm_target_type.into_int_type(), 
+                true, ""
+            ).unwrap().into()),
+            (Some(CastableKind::Float), Some(CastableKind::Float)) => Some(self.builder.build_float_cast(
+                source_val.into_float_value(),
+                llvm_target_type.into_float_type(), ""
+            ).unwrap().into()),
             (s, t) => panic!("codegen cannot handle cast from {:?} to {:?}", s, t)
         }
     }
@@ -1035,6 +1045,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
             AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
             AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            AstNodeKind::SelfValue => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
             AstNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
                 let init_val = self.compile_node(initializer).unwrap();
                 self.constants.insert(stmt.value_id.unwrap(), init_val);
