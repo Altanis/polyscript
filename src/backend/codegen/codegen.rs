@@ -699,30 +699,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let llvm_target_type = self.map_semantic_type(target_type).unwrap();
 
-        let source_prim = if let Type::Base { symbol, .. } = source_type {
-            if let TypeSymbolKind::Primitive(p) = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind { Some(p) } else { None }
-        } else { None };
+        #[derive(Debug)]
+        enum CastableKind {
+            Int,
+            Float,
+            Char,
+            Enum,
+        }
 
-        let target_prim = if let Type::Base { symbol, .. } = target_type {
-            if let TypeSymbolKind::Primitive(p) = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind { Some(p) } else { None }
-        } else { None };
+        let get_kind = |ty: &Type| {
+            if let Type::Base { symbol, .. } = ty {
+                let sym = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                return match sym.kind {
+                    TypeSymbolKind::Primitive(PrimitiveKind::Int) => Some(CastableKind::Int),
+                    TypeSymbolKind::Primitive(PrimitiveKind::Float) => Some(CastableKind::Float),
+                    TypeSymbolKind::Primitive(PrimitiveKind::Char) => Some(CastableKind::Char),
+                    TypeSymbolKind::Enum(_) => Some(CastableKind::Enum), // Recognize Enum
+                    _ => None,
+                };
+            }
+            None
+        };
 
-        match (source_prim, target_prim) {
-            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Float)) => {
+        let source_kind = get_kind(source_type);
+        let target_kind = get_kind(target_type);
+
+        match (source_kind, target_kind) {
+            (Some(CastableKind::Int), Some(CastableKind::Float)) => {
                 Some(self.builder.build_signed_int_to_float(source_val.into_int_value(), llvm_target_type.into_float_type(), "").unwrap().into())
             },
-            (Some(PrimitiveKind::Float), Some(PrimitiveKind::Int)) => {
+            (Some(CastableKind::Float), Some(CastableKind::Int)) => {
                 Some(self.builder.build_float_to_signed_int(source_val.into_float_value(), llvm_target_type.into_int_type(), "").unwrap().into())
             },
-            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Int)) |
-            (Some(PrimitiveKind::Char), Some(PrimitiveKind::Int)) |
-            (Some(PrimitiveKind::Int), Some(PrimitiveKind::Char)) => {
+            (Some(CastableKind::Int), Some(CastableKind::Int)) |
+            (Some(CastableKind::Char), Some(CastableKind::Int)) |
+            (Some(CastableKind::Int), Some(CastableKind::Char)) |
+            (Some(CastableKind::Enum), Some(CastableKind::Int)) => {
                 Some(self.builder.build_int_cast_sign_flag(source_val.into_int_value(), llvm_target_type.into_int_type(), true, "").unwrap().into())
             },
-            (Some(PrimitiveKind::Float), Some(PrimitiveKind::Float)) => {
+            (Some(CastableKind::Float), Some(CastableKind::Float)) => {
                 Some(self.builder.build_float_cast(source_val.into_float_value(), llvm_target_type.into_float_type(), "").unwrap().into())
             },
-            _ => panic!("cannot cast {:?} to {:?}", source_prim, target_prim)
+            (s, t) => panic!("codegen cannot handle cast from {:?} to {:?}", s, t)
         }
     }
 
