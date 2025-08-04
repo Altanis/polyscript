@@ -1013,6 +1013,8 @@ impl SemanticAnalyzer {
         match &mut left.kind {
             AstNodeKind::PathQualifier { ty, tr } => {
                 let type_val = self.collect_uvs(ty)?;
+                left.type_id = Some(type_val.clone());
+
                 let trait_val = if let Some(trait_node) = tr {
                     Some(self.collect_uvs(trait_node)?)
                 } else {

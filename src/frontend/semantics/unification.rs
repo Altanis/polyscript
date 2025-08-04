@@ -1775,6 +1775,49 @@ impl SemanticAnalyzer {
         }
 
         if let AstNodeKind::FieldAccess { left, right } = &mut node.kind {
+            if let AstNodeKind::PathQualifier { ty, tr } = &left.kind {
+                let member_name = right.get_name().unwrap();
+                let base_type = ty.type_id.as_ref().unwrap();
+
+                let member_symbol_id = if let Some(trait_node) = tr {
+                    let trait_type = trait_node.type_id.as_ref().unwrap();
+                    let trait_id = trait_type.get_base_symbol();
+                    let type_id = base_type.get_base_symbol();
+
+                    let mut applicable_impl = None;
+                    if let Some(impls_for_trait) = self.trait_registry.register.get(&trait_id).cloned()
+                        && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+                    {
+                        for imp in impls_for_type {
+                            if self.check_trait_impl_applicability(base_type, imp).is_some() {
+                                applicable_impl = Some(imp.clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    let applicable_impl = applicable_impl.ok_or_else(|| {
+                        self.create_error(
+                            ErrorKind::UnimplementedTrait(
+                                self.symbol_table.display_type(trait_type),
+                                self.symbol_table.display_type(base_type)
+                            ),
+                            node.span,
+                            &[node.span]
+                        )
+                    })?;
+
+                    self.symbol_table.find_value_symbol_in_scope(&member_name, applicable_impl.impl_scope_id).unwrap().id
+                } else {
+                    self.find_member_symbol_id(base_type, &member_name, true, node.span)?
+                };
+
+                right.value_id = Some(member_symbol_id);
+                node.value_id = Some(member_symbol_id);
+
+                return Ok(());
+            }
+
             let member_name = right.get_name().unwrap();
 
             let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {

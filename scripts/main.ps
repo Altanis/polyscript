@@ -1,6 +1,6 @@
-fn identity<T>(x: T): T {
-    return x;
+struct Vector2D {}
+impl Vector2D {
+    type Inner = int;
 }
 
-let x = identity(4);
-let y = identity("7");
+let v: Vector2D.Inner = 1;

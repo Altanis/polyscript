@@ -888,6 +888,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_field_access(&mut self, left: &BoxedAstNode, right: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+        if let AstNodeKind::PathQualifier { .. } = &left.kind {
+            let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+            return match member_symbol.kind {
+                ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
+                ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
+                _ => unreachable!()
+            };
+        }
+
         let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
 
         match member_symbol.kind {
