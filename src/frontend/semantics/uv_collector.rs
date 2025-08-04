@@ -1041,6 +1041,8 @@ impl SemanticAnalyzer {
                                 let self_type = self.get_type_from_type_name(info.scope_id, "Self", left.span)?;
                                 let trait_type = Type::new_base(trait_id);
 
+                                left.type_id = Some(self_type.clone());
+
                                 self.unification_context.register_constraint(
                                     Constraint::FullyQualifiedAccess(
                                         Type::new_base(uv_id),

@@ -1621,10 +1621,16 @@ impl SemanticAnalyzer {
         let type_symbol_ids: Vec<TypeSymbolId> = self.symbol_table.type_symbols.keys().cloned().collect();
 
         for id in type_symbol_ids {
-            let mut kind_clone = self.symbol_table.type_symbols[&id].kind.clone();
-            let mut was_changed = false;
+            let mut symbol_clone = self.symbol_table.type_symbols[&id].clone();
+            let new_generics: Vec<usize> = symbol_clone.generic_parameters.iter()
+                .map(|&p| self.resolve_final_type(&Type::new_base(p)).get_base_symbol())
+                .collect();
 
-            match &mut kind_clone {
+            let mut was_changed = symbol_clone.generic_parameters != new_generics;
+
+            symbol_clone.generic_parameters = new_generics;
+
+            match &mut symbol_clone.kind {
                 TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
                     let new_params: Vec<Type> = params.iter().map(|p| self.resolve_final_type(p)).collect();
                     let new_return = self.resolve_final_type(return_type);
@@ -1654,7 +1660,7 @@ impl SemanticAnalyzer {
             }
 
             if was_changed && let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
-                symbol.kind = kind_clone;
+                *symbol = symbol_clone;
             }
         }
 

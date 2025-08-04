@@ -1,27 +1,3 @@
-struct Point<T> {
-    x: T;
-}
-
-impl Point<int> {
-    const precise: bool = false;
-    type Implementor = int;
-
-    fn default(): Self {
-        Point { x: 1 }
-    }
-}
-
-impl Point<float> {
-    const precise: bool = true;
-    type Implementor = float;
-
-    fn default(): Self {
-        Point { x: 1.0 }
-    }
-}
-
-let val = [Point<int>].precise;
-let val2: [Point<float>].Implementor = 3.0;
-
-let p1: Point<int> = [Point<int>].default();
-let p2: Point<float> = [Point<float>].default();
+struct S<T> {x:T;}
+fn identity<X>(x: S<X>): S<X> { x }
+let x: S<int> = identity(S{x:1});

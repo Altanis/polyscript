@@ -1149,7 +1149,11 @@ impl SymbolTable {
                         .symbol
                         .generic_parameters
                         .iter()
-                        .map(|id| self.table.get_type_name(self.table.type_symbols[id].name_id))
+                        .map(|id| if let Some(symbol) = self.table.type_symbols.get(id) {
+                            self.table.get_type_name(symbol.name_id)
+                        } else {
+                            "[deleted_symbol]"
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     write!(f, "<{}>", params)?;
