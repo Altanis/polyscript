@@ -986,11 +986,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     result_val = self.builder.build_load(llvm_type, ptr, "").unwrap();
                     // todo memory management
                 }
-
                 return Some(result_val);
             }
         }
-        
+
         None
     }
 }
@@ -1154,7 +1153,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::FieldAccess { left, right } => self.compile_field_access(left, right),
             AstNodeKind::FunctionCall { function, arguments }
                 => self.compile_function_call(function, arguments, stmt.type_id.as_ref()),
-            AstNodeKind::Function { .. } => None,
+            AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,
             _ => unimplemented!()
         }
     }

@@ -1,3 +1,18 @@
-struct S<T> {x:T;}
-fn identity<X>(x: S<X>): S<X> { x }
-let x: S<int> = identity(S{x:1});
+struct MyStruct {}
+
+trait Printable {
+    fn print(&this);
+}
+
+impl Printable for MyStruct {
+    fn print(&this) {}
+}
+
+impl MyStruct {
+    fn print(&this) {}
+}
+
+fn main() {
+    let s: MyStruct = MyStruct {};
+    [MyStruct as Printable].print(&s);
+}
