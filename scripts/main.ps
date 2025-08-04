@@ -1,31 +1,27 @@
-trait Animal {
-    type SpeechEmission;
-
-    fn speak(&this): Self.SpeechEmission;
+struct Point<T> {
+    x: T;
 }
 
-struct Dog {}
-struct Cat {}
+impl Point<int> {
+    const precise: bool = false;
+    type Implementor = int;
 
-impl Animal for Dog {
-    type SpeechEmission = char;
-    fn speak(&this): Self.SpeechEmission {
-        return 'b';
+    fn default(): Self {
+        Point { x: 1 }
     }
 }
 
-impl Animal for Cat {
-    type SpeechEmission = string;
-    fn speak(&this): Self.SpeechEmission {
-        return "meow";
+impl Point<float> {
+    const precise: bool = true;
+    type Implementor = float;
+
+    fn default(): Self {
+        Point { x: 1.0 }
     }
 }
 
-impl Dog {
-    type SpeechEmission = float;
-}
+let val = [Point<int>].precise;
+let val2: [Point<float>].Implementor = 3.0;
 
-let dog = Dog {};
-let cat = Cat {};
-
-let emission1: Dog.SpeechEmission = dog.speak();
+let p1: Point<int> = [Point<int>].default();
+let p2: Point<float> = [Point<float>].default();

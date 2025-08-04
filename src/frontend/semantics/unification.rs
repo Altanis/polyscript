@@ -12,6 +12,11 @@ enum CanonicalType {
     Generic(usize),
 }
 
+enum MemberResolution {
+    Value(Type, ValueSymbolId),
+    Type(Type),
+}
+
 impl SemanticAnalyzer {
     pub fn inherent_impl_deduplication_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
@@ -525,8 +530,12 @@ impl SemanticAnalyzer {
                         return Ok(());
                     }
 
-                    if let Some(resolved_member_type) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
-                        self.unify(concrete_ty, resolved_member_type, info)?;
+                    if let Some(resolution) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
+                        match resolution {
+                            MemberResolution::Type(resolved_member_type)
+                                => self.unify(concrete_ty, resolved_member_type, info)?,
+                            MemberResolution::Value(_, _) => unreachable!()
+                        };
                     } else {
                         return Err(self.create_error(
                             ErrorKind::UnimplementedTrait(
@@ -583,14 +592,14 @@ impl SemanticAnalyzer {
         
         false
     }
-    
+
     fn find_member_in_impl_scope(
         &mut self,
         scope_id: ScopeId,
         member_name: &str,
         is_static_access: bool,
         info: ConstraintInfo,
-    ) -> Result<Option<Type>, BoxedError> {
+    ) -> Result<Option<MemberResolution>, BoxedError> {
         if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
             if value_symbol.qualifier == QualifierKind::Private {
                 let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
@@ -626,7 +635,7 @@ impl SemanticAnalyzer {
             };
             
             if is_match {
-                return Ok(Some(symbol_type));
+                return Ok(Some(MemberResolution::Value(symbol_type, value_symbol.id)));
             }
         }
         
@@ -645,8 +654,9 @@ impl SemanticAnalyzer {
                     ));
                 }
             }
-
-            return Ok(Some(Type::new_base(type_symbol.id)));
+            
+            let resolved_type = self.resolve_type(&Type::new_base(type_symbol.id));
+            return Ok(Some(MemberResolution::Type(resolved_type)));
         }
         
         Ok(None)
@@ -659,13 +669,21 @@ impl SemanticAnalyzer {
         member_name: &str,
         is_static_access: bool,
         info: ConstraintInfo
-    ) -> Result<Option<Type>, BoxedError> {
+    ) -> Result<Option<MemberResolution>, BoxedError> {
         for imp in impls {
             if let Some(substitutions) = self.check_impl_applicability(base_type, imp)
-                && let Some(member_type) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)?
+                && let Some(resolution) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)?
             {
-                let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                return Ok(Some(concrete_member_type));
+                let concrete_resolution = match resolution {
+                    MemberResolution::Value(member_type, member_id) => {
+                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                    }
+                    MemberResolution::Type(member_type) => {
+                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                    }
+                };
+                
+                return Ok(Some(concrete_resolution));
             }
         }
 
@@ -678,7 +696,7 @@ impl SemanticAnalyzer {
         member_name: &str,
         is_static_access: bool,
         info: ConstraintInfo
-    ) -> Result<Option<Type>, BoxedError> {
+    ) -> Result<Option<MemberResolution>, BoxedError> {
         let base_symbol_id = base_type.get_base_symbol();
         
         let all_trait_impls: Vec<_> = self.trait_registry.register.values()
@@ -688,10 +706,18 @@ impl SemanticAnalyzer {
     
         for trait_impl in all_trait_impls {
             if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl)
-                && let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
+                && let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
             {
-                let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                return Ok(Some(concrete_member_type));
+                let concrete_resolution = match resolution {
+                    MemberResolution::Value(member_type, member_id) => {
+                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                    }
+                    MemberResolution::Type(member_type) => {
+                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                    }
+                };
+
+                return Ok(Some(concrete_resolution));
             }
         }
 
@@ -704,7 +730,7 @@ impl SemanticAnalyzer {
         member_name: &str,
         is_static_access: bool,
         info: ConstraintInfo,
-    ) -> Result<Option<Type>, BoxedError> {
+    ) -> Result<Option<MemberResolution>, BoxedError> {
         let (base_symbol_id, concrete_args) = match base_type {
             Type::Base { symbol, args } => (*symbol, args.clone()),
             _ => return Err(self.create_error(ErrorKind::InvalidFieldAccess(self.symbol_table.display_type(base_type)), info.span, &[info.span])),
@@ -734,20 +760,22 @@ impl SemanticAnalyzer {
 
                     let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
                     let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
-                    return Ok(Some(concrete_field_type));
+                    return Ok(Some(MemberResolution::Value(concrete_field_type, field_symbol.id)));
                 }
-
-                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
-                    return Ok(Some(ty));
+                
+                if let Some(resolution) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
+                    return Ok(Some(resolution));
                 }
             },
             TypeSymbolKind::Enum((scope_id, impls)) => {
-                if is_static_access && self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id).is_some() {
-                    return Ok(Some(base_type.clone()));
+                if is_static_access
+                    && let Some(variant_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id)
+                {
+                    return Ok(Some(MemberResolution::Value(base_type.clone(), variant_symbol.id)));
                 }
-
-                if let Some(ty) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
-                    return Ok(Some(ty));
+                
+                if let Some(resolution) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
+                    return Ok(Some(resolution));
                 }
             },
             TypeSymbolKind::Generic(trait_constraints) => {
@@ -755,34 +783,42 @@ impl SemanticAnalyzer {
                     let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
                     let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { continue; };
         
-                    if let Some(member_in_trait) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access, info)? {
+                    if let Some(resolution) = self.find_member_in_impl_scope(trait_scope_id, member_name, is_static_access, info)? {
                         let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
                         let substitutions = HashMap::from([(self_in_trait_id, base_type.clone())]);
-                        let concrete_member_type = self.apply_substitution(&member_in_trait, &substitutions);
                         
-                        return Ok(Some(concrete_member_type));
+                        let concrete_resolution = match resolution {
+                            MemberResolution::Value(member_type, member_id) => {
+                                MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                            }
+                            MemberResolution::Type(member_type) => {
+                                MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                            }
+                        };
+
+                        return Ok(Some(concrete_resolution));
                     }
                 }
             },
             TypeSymbolKind::TraitSelf => {
                 if is_static_access {
                     let trait_scope_id = base_symbol.scope_id;
-                    if let Some(member_type) = self.find_member_in_impl_scope(trait_scope_id, member_name, true, info)? {
-                        return Ok(Some(member_type));
+                    if let Some(resolution) = self.find_member_in_impl_scope(trait_scope_id, member_name, true, info)? {
+                        return Ok(Some(resolution));
                     }
                 }
             }
             _ => {}
         }
     
-        if let Some(ty) = self.find_member_in_trait_impls(base_type, member_name, is_static_access, info)? {
-            return Ok(Some(ty));
+        if let Some(resolution) = self.find_member_in_trait_impls(base_type, member_name, is_static_access, info)? {
+            return Ok(Some(resolution));
         }
     
         Ok(None)
     }
 
-    fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
+    fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<MemberResolution>, BoxedError> {
         let type_id = ty.get_base_symbol();
         let trait_id = tr.get_base_symbol();
 
@@ -804,12 +840,19 @@ impl SemanticAnalyzer {
             .map_or(vec![], |v| v.clone());
 
         for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl) {
-                // This call now includes the privacy check. Assuming `true` for `is_static_access` as this is for FQPs.
-                if let Some(member_type) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true, info)? {
-                    let concrete_member_type = self.apply_substitution(&member_type, &substitutions);
-                    return Ok(Some(concrete_member_type));
-                }
+            if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl)
+                && let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true, info)?
+            {
+                let concrete_resolution = match resolution {
+                    MemberResolution::Value(member_type, member_id) => {
+                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                    }
+                    MemberResolution::Type(member_type) => {
+                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                    }
+                };
+
+                return Ok(Some(concrete_resolution));
             }
         }
         
@@ -1248,9 +1291,14 @@ impl SemanticAnalyzer {
             return Ok(false);
         }
 
-        let member_ty_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;
+        let member_resolution_opt = self.find_member(&base_lhs_type, &rhs_name, is_static, info)?;
 
-        if let Some(member_ty) = member_ty_opt {
+        if let Some(resolution) = member_resolution_opt {
+            let member_ty = match resolution {
+                MemberResolution::Value(ty, _) => ty,
+                MemberResolution::Type(ty) => ty,
+            };
+
             self.unify(result_ty, member_ty, info)?;
             Ok(true)
         } else {
@@ -1275,7 +1323,7 @@ impl SemanticAnalyzer {
             return Ok(false);
         }
 
-        let member_ty_opt = if let Some(tr) = tr_opt {
+        let member_resolution_opt = if let Some(tr) = tr_opt {
             let resolved_tr = self.resolve_type(&tr);
             if self.is_uv(resolved_tr.get_base_symbol()) {
                 return Ok(false);
@@ -1290,8 +1338,8 @@ impl SemanticAnalyzer {
                     member_name
                 );
 
-                let symbol = if let Some(ty) = self.symbol_table.find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name) {
-                    ty.id
+                let symbol = if let Some(ty_symbol) = self.symbol_table.find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name) {
+                    ty_symbol.id
                 } else {
                     self.symbol_table.add_type_symbol(
                         type_name, 
@@ -1315,13 +1363,15 @@ impl SemanticAnalyzer {
             self.find_member(&resolved_ty, &member_name, true, info)?
         };
 
-        if let Some(member_ty) = member_ty_opt {
+        if let Some(resolution) = member_resolution_opt {
+            let member_ty = match resolution {
+                MemberResolution::Value(ty, _) => ty,
+                MemberResolution::Type(ty) => ty,
+            };
             self.unify(result_ty, member_ty, info)?;
-
             Ok(true)
         } else {
             let type_name = self.symbol_table.display_type(&resolved_ty);
-            
             Err(self.create_error(
                 ErrorKind::MemberNotFound(member_name, type_name),
                 info.span,
@@ -1444,6 +1494,85 @@ impl SemanticAnalyzer {
                 &[info.span],
             ))
         }
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn member_resolution_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(stmts) = &mut program.kind {
+            for stmt in stmts {
+                if let Err(e) = self.resolve_members_in_node(stmt) {
+                    errors.push(*e);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn resolve_members_in_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        for child in node.children_mut() {
+            self.resolve_members_in_node(child)?;
+        }
+
+        if let AstNodeKind::FieldAccess { left, right } = &mut node.kind {
+            let rhs_name = right.get_name().unwrap();
+            let info = ConstraintInfo {
+                span: right.span,
+                scope_id: right.scope_id.unwrap(),
+            };
+
+            let resolution_opt = if let AstNodeKind::PathQualifier { ty, tr } = &left.kind {
+                let resolved_ty = self.resolve_type(ty.type_id.as_ref().unwrap());
+                if let Some(tr_node) = tr {
+                    let resolved_tr = self.resolve_type(tr_node.type_id.as_ref().unwrap());
+                    self.find_member_in_trait_impl(&resolved_ty, &resolved_tr, &rhs_name, info)?
+                } else {
+                    self.find_member(&resolved_ty, &rhs_name, true, info)?
+                }
+            } else {
+                let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {
+                    self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
+                } else {
+                    false
+                };
+
+                let lhs_type = left.type_id.as_ref().unwrap();
+                let resolved_lhs = self.resolve_type(lhs_type);
+
+                let base_lhs_type = if !is_static_access {
+                    match &resolved_lhs {
+                        Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+                        _ => resolved_lhs.clone(),
+                    }
+                } else {
+                    resolved_lhs.clone()
+                };
+                
+                self.find_member(&base_lhs_type, &rhs_name, is_static_access, info)?
+            };
+
+            match resolution_opt {
+                Some(MemberResolution::Value(_, member_id)) => {
+                    right.value_id = Some(member_id);
+                },
+                Some(MemberResolution::Type(_)) => {},
+                None => {
+                    let type_name = self.symbol_table.display_type(left.type_id.as_ref().unwrap());
+                     return Err(self.create_error(
+                        ErrorKind::MemberNotFound(rhs_name, type_name),
+                        right.span,
+                        &[left.span, right.span],
+                    ));
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
 
@@ -1612,212 +1741,6 @@ impl SemanticAnalyzer {
         }
         
         Ok(())
-    }
-}
-
-impl SemanticAnalyzer {
-    pub fn member_resolution_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
-        let mut errors = vec![];
-        if let AstNodeKind::Program(stmts) = &mut program.kind {
-            for stmt in stmts {
-                if let Err(e) = self.resolve_members(stmt) {
-                    errors.push(*e);
-                }
-            }
-        } else {
-            unreachable!();
-        }
-        errors
-    }
-
-    fn resolve_members(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
-        for child in node.children_mut() {
-            self.resolve_members(child)?;
-        }
-
-        if let AstNodeKind::FieldAccess { left, right } = &mut node.kind {
-            let member_name = right.get_name().unwrap();
-
-            if let AstNodeKind::PathQualifier { ty, tr } = &left.kind {
-                let base_type = ty.type_id.as_ref().unwrap();
-
-                let member_symbol_id = if let Some(trait_node) = tr {
-                    let trait_type = trait_node.type_id.as_ref().unwrap();
-                    let trait_id = trait_type.get_base_symbol();
-                    let type_id = base_type.get_base_symbol();
-
-                    let mut applicable_impl = None;
-                    if let Some(impls_for_trait) = self.trait_registry.register.get(&trait_id).cloned()
-                        && let Some(impls_for_type) = impls_for_trait.get(&type_id)
-                    {
-                        for imp in impls_for_type {
-                            if self.check_trait_impl_applicability(base_type, imp).is_some() {
-                                applicable_impl = Some(imp.clone());
-                                break;
-                            }
-                        }
-                    }
-
-                    let applicable_impl = applicable_impl.ok_or_else(|| {
-                        self.create_error(
-                            ErrorKind::UnimplementedTrait(
-                                self.symbol_table.display_type(trait_type),
-                                self.symbol_table.display_type(base_type)
-                            ),
-                            node.span,
-                            &[node.span]
-                        )
-                    })?;
-
-                    if self.symbol_table.find_type_symbol_in_scope(&member_name, applicable_impl.impl_scope_id).is_some() {
-                        return Ok(());
-                    }
-
-                    if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(&member_name, applicable_impl.impl_scope_id) {
-                        value_symbol.id
-                    } else {
-                         return Err(self.create_error(
-                            ErrorKind::MemberNotFound(member_name, self.symbol_table.display_type(base_type)),
-                            node.span,
-                            &[node.span],
-                        ));
-                    }
-                } else {
-                    let base_symbol_id = base_type.get_base_symbol();
-                    if let Some(base_symbol) = self.symbol_table.get_type_symbol(base_symbol_id).cloned()
-                        && let Some(impls) = match &base_symbol.kind {
-                            TypeSymbolKind::Struct((_, impls)) => Some(impls.clone()),
-                            TypeSymbolKind::Enum((_, impls)) => Some(impls.clone()),
-                            _ => None,
-                        }
-                    {
-                        for imp in &impls {
-                            if self.check_impl_applicability(base_type, imp).is_some()
-                                && self.symbol_table.find_type_symbol_in_scope(&member_name, imp.scope_id).is_some()
-                            {
-                                return Ok(());
-                            }
-                        }
-                    }
-
-                    self.find_member_symbol_id(base_type, &member_name, true, node.span)?
-                };
-
-                right.value_id = Some(member_symbol_id);
-                node.value_id = Some(member_symbol_id);
-
-                return Ok(());
-            }
-
-            let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {
-                self.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
-            } else {
-                false
-            };
-
-            let base_type = left.type_id.as_ref().unwrap();
-
-            if is_static_access {
-                let base_symbol_id = base_type.get_base_symbol();
-                if let Some(base_symbol) = self.symbol_table.get_type_symbol(base_symbol_id).cloned()
-                    && let Some(impls) = match &base_symbol.kind {
-                        TypeSymbolKind::Struct((_, impls)) => Some(impls.clone()),
-                        TypeSymbolKind::Enum((_, impls)) => Some(impls.clone()),
-                        _ => None,
-                    } 
-                {
-                    for imp in &impls {
-                        if self.check_impl_applicability(base_type, imp).is_some()
-                            && self.symbol_table.find_type_symbol_in_scope(&member_name, imp.scope_id).is_some()
-                        {
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-            
-            let lookup_type = if !is_static_access {
-                match base_type {
-                    Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
-                    _ => base_type.clone(),
-                }
-            } else {
-                base_type.clone()
-            };
-    
-            let member_symbol_id = self.find_member_symbol_id(&lookup_type, &member_name, is_static_access, node.span)?;
-            
-            right.value_id = Some(member_symbol_id);
-            node.value_id = Some(member_symbol_id);
-        }
-        
-        Ok(())
-    }
-    
-    fn find_member_symbol_id(&self, base_type: &Type, member_name: &str, is_static: bool, access_span: Span) -> Result<ValueSymbolId, BoxedError> {
-        let base_symbol_id = base_type.get_base_symbol();
-        let base_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap();
-
-        let search_scopes = |scope_id: ScopeId| -> Option<ValueSymbolId> {
-            self.symbol_table.find_value_symbol_in_scope(member_name, scope_id)
-                .and_then(|symbol| {
-                    let fn_scope = if let ValueSymbolKind::Function(id) = symbol.kind {
-                        Some(self.symbol_table.get_scope(id).unwrap())
-                    } else { None };
-
-                    let symbol_is_static = 
-                        matches!(symbol.kind, ValueSymbolKind::Variable | ValueSymbolKind::EnumVariant) || 
-                        (fn_scope.is_some() && fn_scope.unwrap().receiver_kind.is_none());
-
-                    if (is_static && symbol_is_static) || (!is_static && !symbol_is_static) {
-                        Some(symbol.id)
-                    } else {
-                        None
-                    }
-                })
-        };
-        
-        match &base_symbol.kind {
-            TypeSymbolKind::Struct((scope_id, impls)) => {
-                if !is_static && let Some(field) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id) {
-                    return Ok(field.id);
-                }
-
-                for imp in impls {
-                    if let Some(id) = search_scopes(imp.scope_id) { 
-                        return Ok(id); 
-                    }
-                }
-            },
-            TypeSymbolKind::Enum((scope_id, impls)) => {
-                if is_static && let Some(variant) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id) {
-                    return Ok(variant.id);
-                }
-
-                for imp in impls {
-                    if let Some(id) = search_scopes(imp.scope_id) {
-                        return Ok(id);
-                    }
-                }
-            },
-            _ => {}
-        }
-        
-        for impls_for_trait in self.trait_registry.register.values() {
-            if let Some(impls_for_type) = impls_for_trait.get(&base_symbol_id) {
-                for imp in impls_for_type {
-                    if let Some(id) = search_scopes(imp.impl_scope_id) {
-                        return Ok(id);
-                    }
-                }
-            }
-        }
-
-        Err(self.create_error(
-            ErrorKind::MemberNotFound(member_name.to_string(), self.symbol_table.display_type(base_type)),
-            access_span,
-            &[access_span]
-        ))
     }
 }
 
