@@ -841,18 +841,47 @@ impl SemanticAnalyzer {
 
         for trait_impl in all_trait_impls {
             if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl)
-                && let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, true, info)?
             {
-                let concrete_resolution = match resolution {
-                    MemberResolution::Value(member_type, member_id) => {
-                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
-                    }
-                    MemberResolution::Type(member_type) => {
-                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
-                    }
-                };
+                let scope_id = trait_impl.impl_scope_id;
+                if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
+                    if value_symbol.qualifier == QualifierKind::Private {
+                        let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
+                        let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
 
-                return Ok(Some(concrete_resolution));
+                        if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
+                            return Err(self.create_error(
+                                ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
+                                info.span,
+                                &[info.span, value_symbol.span.unwrap()]
+                            ));
+                        }
+                    }
+
+                    if matches!(value_symbol.kind, ValueSymbolKind::Function(_) | ValueSymbolKind::Variable) {
+                        let member_type = value_symbol.type_id.as_ref().unwrap();
+                        let resolution = MemberResolution::Value(self.apply_substitution(member_type, &substitutions), value_symbol.id);
+                        return Ok(Some(resolution));
+                    }
+                }
+                
+                if let Some(type_symbol) = self.symbol_table.find_type_symbol_in_scope(member_name, scope_id).cloned() {
+                    if type_symbol.qualifier == QualifierKind::Private {
+                        let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
+                        let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
+
+                        if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
+                            return Err(self.create_error(
+                                ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
+                                info.span,
+                                &[info.span, type_symbol.span.unwrap()]
+                            ));
+                        }
+                    }
+                    
+                    let member_type = Type::new_base(type_symbol.id);
+                    let resolution = MemberResolution::Type(self.apply_substitution(&member_type, &substitutions));
+                    return Ok(Some(resolution));
+                }
             }
         }
         
