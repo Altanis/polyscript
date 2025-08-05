@@ -183,6 +183,50 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         value
     }
+
+    fn trait_name_to_fn_name(&self, trait_name: &str) -> String {
+        trait_name
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i != 0 && c.is_uppercase() {
+                    format!("_{}", c.to_lowercase())
+                } else {
+                    c.to_lowercase().to_string()
+                }
+            })
+            .collect::<String>()
+    }
+
+    fn find_trait_fn(&mut self, instance_type: &Type, trait_name: &str, fn_name: &str, rhs_type: Option<&Type>) -> Option<FunctionValue<'ctx>> {
+        let trait_id = *self.analyzer.trait_registry.default_traits.get(trait_name)?;
+        let type_id = instance_type.get_base_symbol();
+
+        let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
+        let impls_for_type = impls_for_trait.get(&type_id)?;
+
+        let applicable_impl = impls_for_type.iter().find(|imp| {
+            match rhs_type {
+                Some(the_rhs_type) => {
+                    if let Some(&impl_rhs_symbol_id) = imp.trait_generic_specialization.first() {
+                        return impl_rhs_symbol_id == the_rhs_type.get_base_symbol();
+                    }
+
+                    false
+                },
+                None => {
+                    return imp.trait_generic_specialization.is_empty();
+                }
+            }
+        })?;
+
+        let fn_symbol = self
+            .analyzer
+            .symbol_table
+            .find_value_symbol_in_scope(fn_name, applicable_impl.impl_scope_id)?;
+            
+        self.functions.get(&fn_symbol.id).copied()
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -347,8 +391,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     
         let operand_type = operand_node.type_id.as_ref().unwrap();
-        if !self.is_primitive(operand_type) {
-            unimplemented!("codegen for overloaded unary operator `{:?}` on type `{}`", operator, self.analyzer.symbol_table.display_type(operand_type));
+        if !self.is_primitive(operand_type) && let Some((trait_name, _)) = operator.to_trait_data() {
+            let fn_name = self.trait_name_to_fn_name(&trait_name);
+            let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
+            
+            let operand = self.compile_node(operand_node).unwrap();
+            let call = self.builder.build_call(callee, &[operand.into()], "").unwrap();
+            
+            return call.try_as_basic_value().left();
         }
         
         let operand = self.compile_node(operand_node).unwrap();
@@ -421,8 +471,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let left_type = left_node.type_id.as_ref().unwrap();
-        if !self.is_primitive(left_type) {
-            unimplemented!("codegen for overloaded binary operator `{:?}` on type `{}`", operator, self.analyzer.symbol_table.display_type(left_type));
+        let right_type = right_node.type_id.as_ref().unwrap();
+        
+        if !self.is_primitive(left_type) && let Some((trait_name, _)) = operator.to_trait_data() {
+            let fn_name = self.trait_name_to_fn_name(&trait_name);
+            let callee = self.find_trait_fn(left_type, &trait_name, &fn_name, Some(right_type)).unwrap();
+
+            let left = self.compile_node(left_node).unwrap();
+            let right = self.compile_node(right_node).unwrap();
+
+            let call = self.builder.build_call(callee, &[left.into(), right.into()], "").unwrap();
+            return call.try_as_basic_value().left();
         }
 
         if operator.is_assignment() {

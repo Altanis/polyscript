@@ -1,4 +1,4 @@
-// operator overloading
+// impl deduplication
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
@@ -6,9 +6,32 @@
 struct Scalar { x: int; }
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
-    fn add(&this): Self {
+    fn add(this, other: Self): Self {
         Scalar {
-            x: this.x
+            x: this.x + other.x
         }
     }
 }
+
+impl Add<Scalar> for Scalar {
+    type Output = Scalar;
+    fn add(this, other: Self): Self {
+        Scalar {
+            x: this.x + this.x
+        }
+    }
+}
+
+impl Add<int> for Scalar {
+    type Output = Scalar;
+    fn add(this, other: int): Self {
+        Scalar {
+            x: this.x + other
+        }
+    }
+}
+
+let s1 = Scalar { x: 3 };
+let s2 = Scalar { x: 4 };
+let s3 = s1 + s2; // Scalar { x: 7 }
+let s4 = s1 + 4; // Scalar { x: 7 }
