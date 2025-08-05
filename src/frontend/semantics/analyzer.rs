@@ -391,12 +391,15 @@ impl SymbolTable {
                 })
                 .collect();
 
+            let func_scope_id = self.enter_scope(ScopeKind::Function);
+            self.exit_scope();
+
             let mut params = vec![Type::new_base(self_type_id)];
             if !is_unary {
                 params.push(Type::new_base(trait_generic_ids[0]));
             }
 
-            self.add_type_symbol(
+            let fn_sig_type_id = self.add_type_symbol(
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params,
@@ -404,7 +407,17 @@ impl SymbolTable {
                     instance: Some(ReferenceKind::Value),
                 },
                 vec![],
+                QualifierKind::Private,
+                None,
+            )
+            .unwrap();
+
+            self.add_value_symbol(
+                &fn_name,
+                ValueSymbolKind::Function(func_scope_id),
+                false,
                 QualifierKind::Public,
+                Some(Type::new_base(fn_sig_type_id)),
                 None,
             )
             .unwrap();
