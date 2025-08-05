@@ -896,15 +896,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 _ => unreachable!()
             };
         }
-
+    
+        let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {
+            self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
+        } else {
+            false
+        };
+    
         let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
-
+    
+        if is_static_access {
+            return match member_symbol.kind {
+                ValueSymbolKind::EnumVariant | ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
+                ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
+                _ => unreachable!(),
+            };
+        }
+        
         match member_symbol.kind {
-            ValueSymbolKind::EnumVariant | ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
             ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
             ValueSymbolKind::StructField => {
                 let struct_ptr = self.compile_place_expression(left).unwrap();
-
+    
                 let member_scope = self.analyzer.symbol_table.get_scope(member_symbol.scope_id).unwrap();
                 let mut sorted_field_symbols: Vec<_> = member_scope.values.values()
                     .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
@@ -915,7 +928,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .iter()
                     .position(|s| s.id == member_symbol.id)
                     .unwrap() as u32;
-
+    
                 let base_type = match left.type_id.as_ref().unwrap() {
                     Type::Reference(inner) | Type::MutableReference(inner) => &**inner,
                     _ => left.type_id.as_ref().unwrap(),
@@ -927,6 +940,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 
                 Some(self.builder.build_load(field_type, field_ptr, "").unwrap())
             }
+            _ => unreachable!(),
         }
     }
 
@@ -940,19 +954,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let Type::Base { symbol: fn_symbol_id, .. } = callee_type else { unreachable!() };
         let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
         let TypeSymbolKind::FunctionSignature { params: param_types, return_type: fn_return_type, .. } = &fn_symbol.kind else { unreachable!() };
-
+    
         let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
         let mut param_type_iter = param_types.iter();
-
+    
         if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
             && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
             && let ValueSymbolKind::Function(scope_id) = member_symbol.kind
         {
             let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
             if fn_scope.receiver_kind.is_some() {
-                let instance_value = self.compile_node(left).unwrap();
-                let param_type = param_type_iter.next().unwrap();
-                compiled_args.push(self.box_if_needed(instance_value, left.type_id.as_ref().unwrap(), param_type));
+                let is_static_call = match &left.kind {
+                    AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some(),
+                    AstNodeKind::PathQualifier {..} => true,
+                    _ => false,
+                };
+                
+                if !is_static_call {
+                    let instance_value = self.compile_node(left).unwrap();
+                    let param_type = param_type_iter.next().unwrap();
+                    compiled_args.push(self.box_if_needed(instance_value, left.type_id.as_ref().unwrap(), param_type));
+                }
             }
         }
         
@@ -971,7 +993,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             &compiled_args.iter().map(|v| (*v).into()).collect::<Vec<_>>(),
             "",
         ).unwrap();
-
+    
         if let Some(ret_type) = return_type {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
             if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
@@ -989,7 +1011,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Some(result_val);
             }
         }
-
+    
         None
     }
 }
@@ -1154,7 +1176,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::FunctionCall { function, arguments }
                 => self.compile_function_call(function, arguments, stmt.type_id.as_ref()),
             AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,
-            _ => unimplemented!()
+            kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
     }
 }
