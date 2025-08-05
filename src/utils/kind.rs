@@ -588,6 +588,10 @@ impl std::fmt::Display for Span {
 }
 
 impl Span {
+    fn is_default(self) -> bool {
+        self == Span::default()
+    }
+
     pub fn set_end_from_values(mut self, index: usize, line: usize, column: usize) -> Span {
         self.end = index;
         self.end_pos = Position { line, column };
@@ -603,6 +607,10 @@ impl Span {
     }
 
     pub fn get_lines(&self, lines: Rc<Vec<String>>) -> Vec<(String, usize)> {
+        if self.is_default() {
+            return vec![];
+        }
+
         let mut ret: Vec<(String, usize)> = vec![];
 
         for i in self.start_pos.line..=self.end_pos.line {

@@ -2024,7 +2024,11 @@ impl SemanticAnalyzer {
         } else { unreachable!(); };
 
         if trait_params.len() != impl_params.len() {
-            return Err(self.create_error(ErrorKind::ArityMismatch(trait_params.len(), impl_params.len()), impl_fn_symbol.span.unwrap(), &[trait_fn_symbol.span.unwrap()]));
+            return Err(self.create_error(
+                ErrorKind::ArityMismatch(trait_params.len(), impl_params.len()), 
+                impl_fn_symbol.span.unwrap(), 
+                &[trait_fn_symbol.span.unwrap_or_default()]
+            ));
         }
 
         let info = ConstraintInfo {
@@ -2042,7 +2046,7 @@ impl SemanticAnalyzer {
                         Some(format!("in parameter for function `{}`", member_name)),
                     ),
                     info.span,
-                    &[trait_fn_symbol.span.unwrap()],
+                    &[trait_fn_symbol.span.unwrap_or_default()]
                 ));
             }
         }
@@ -2056,7 +2060,7 @@ impl SemanticAnalyzer {
                     Some(format!("for return type of function `{}`", member_name)),
                 ),
                 info.span,
-                &[trait_fn_symbol.span.unwrap()],
+                &[trait_fn_symbol.span.unwrap_or_default()]
             ));
         }
 
