@@ -1,3 +1,24 @@
-impl Add for int {
-    
+// generics need to be constrained to traits properly
+// memory safety (reference counting)
+
+trait Entity {
+    type TickOutput;
+    fn tick(&mut this): Self.TickOutput;
+}
+
+struct Tank {}
+struct Square {}
+
+impl Entity for Tank {
+    type TickOutput = int;
+    fn tick(&mut this): int { 4 }
+}
+
+impl Entity for Square {
+    type TickOutput = char;
+    fn tick(&mut this): char { '4' }
+}
+
+fn tick<T: Entity>(x: T): [T as Entity].TickOutput {
+    x.tick()
 }
