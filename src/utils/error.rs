@@ -22,7 +22,8 @@ pub enum ErrorKind {
     ExpectedType,
     InvalidConstraint(String),
     UnimplementedTrait(String, String),
-    ConflictingTraitImpl(String, String),
+    ConflictingTraitImpl(String),
+    DuplicateDefinitionInImpl(String, String),
     DeformedTraitImpl {
         trait_name: String,
         missing: Vec<String>,
@@ -92,8 +93,11 @@ impl ErrorKind {
             ErrorKind::UnimplementedTrait(tr, ty) => {
                 format!("trait {tr} not implemented for type {ty}")
             }
-            ErrorKind::ConflictingTraitImpl(tr, ty) => {
-                format!("conflicting trait implementations for {tr} on type {ty}")
+            ErrorKind::ConflictingTraitImpl(namespace) => {
+                format!("conflicting implementations of trait: {}", namespace)
+            }
+            ErrorKind::DuplicateDefinitionInImpl(name, namespace) => {
+                format!("symbol `{name}` defined multiple times in impls for `{namespace}`")
             }
             ErrorKind::DeformedTraitImpl {
                 trait_name,

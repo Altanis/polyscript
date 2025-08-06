@@ -109,6 +109,7 @@ pub struct TraitImpl {
     pub impl_generic_params: Vec<TypeSymbolId>,
     pub trait_generic_specialization: Vec<TypeSymbolId>,
     pub type_specialization: Vec<TypeSymbolId>,
+    pub span: Span
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -455,6 +456,7 @@ impl SymbolTable {
                         impl_generic_params: vec![],
                         trait_generic_specialization: trait_specialization,
                         type_specialization: vec![],
+                        span: Span::default()
                     },
                 );
 
@@ -1057,8 +1059,8 @@ impl SemanticAnalyzer {
         pass!(self, generic_constraints_pass, &mut program);
         pass!(self, struct_field_type_collector_pass, &mut program);
         pass!(self, impl_collector_pass, &mut program);
+        pass!(self, impl_deduplication_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
-        pass!(self, inherent_impl_deduplication_pass, &mut program);
         pass!(self, unification_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
         pass!(self, member_resolution_pass, &mut program);

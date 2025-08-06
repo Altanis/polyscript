@@ -18,55 +18,35 @@ enum MemberResolution {
 }
 
 impl SemanticAnalyzer {
-    pub fn inherent_impl_deduplication_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+    pub fn impl_deduplication_pass(&mut self, _program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
-        if let AstNodeKind::Program(statements) = &mut program.kind {
-            for statement in statements {
-                errors.append(&mut self.inherent_impl_deduplication_check_node(statement));
+        let type_symbols_clone: Vec<_> = self.symbol_table.type_symbols.values().cloned().collect();
+        for symbol in type_symbols_clone {
+            let (name, inherent_impls) = match &symbol.kind {
+                TypeSymbolKind::Struct((_, impls)) => (self.symbol_table.get_type_name(symbol.name_id), impls),
+                TypeSymbolKind::Enum((_, impls)) => (self.symbol_table.get_type_name(symbol.name_id), impls),
+                _ => continue,
+            };
+
+            if !inherent_impls.is_empty() {
+                errors.append(&mut self.find_inherent_impl_duplicates(&name, inherent_impls));
             }
-        } else {
-            unreachable!();
+        }
+        
+        let trait_registry_clone = self.trait_registry.register.clone();
+        for (trait_id, impls_for_trait) in trait_registry_clone.iter() {
+            for (type_id, trait_impls) in impls_for_trait.iter() {
+                 if trait_impls.len() > 1 {
+                    errors.append(&mut self.find_trait_impl_duplicates(*trait_id, *type_id, trait_impls));
+                }
+            }
         }
 
         errors
     }
     
-    fn inherent_impl_deduplication_check_node(&mut self, statement: &mut AstNode) -> Vec<Error> {
-        match &statement.kind {
-            AstNodeKind::StructDeclaration { name, .. } 
-                => self.inherent_impl_deduplication_handle_struct(name, statement.scope_id.unwrap()),
-            AstNodeKind::EnumDeclaration { name, .. } 
-                => self.inherent_impl_deduplication_handle_enum(name, statement.scope_id.unwrap()),
-            _ => {
-                let mut errors = vec![];
-
-                for node in statement.children_mut() {
-                    errors.append(&mut self.inherent_impl_deduplication_check_node(node));
-                }
-
-                errors
-            }
-        }
-    }
-
-    fn inherent_impl_deduplication_handle_struct(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
-        let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
-        let name = self.symbol_table.get_type_name(symbol.name_id).to_string();
-        let TypeSymbolKind::Struct((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
-
-        self.inherent_impl_deduplication_find_duplicates(&name, inherent_impls)
-    }
-
-    fn inherent_impl_deduplication_handle_enum(&mut self, name: &str, scope_id: ScopeId) -> Vec<Error> {
-        let symbol = self.symbol_table.find_type_symbol_in_scope(name, scope_id).unwrap();
-        let name = self.symbol_table.get_type_name(symbol.name_id).to_string();
-        let TypeSymbolKind::Enum((_, inherent_impls)) = &symbol.kind else { unreachable!(); };
-
-        self.inherent_impl_deduplication_find_duplicates(&name, inherent_impls)
-    }
-
-    fn inherent_impl_deduplication_find_duplicates(&self, namespace: &str, inherent_impls: &[InherentImpl]) -> Vec<Error> {
+    fn find_inherent_impl_duplicates(&self, namespace: &str, inherent_impls: &[InherentImpl]) -> Vec<Error> {
         let mut errors = vec![];
         let mut impls_by_canonical_spec: HashMap<Vec<CanonicalType>, Vec<&InherentImpl>> = HashMap::new();
 
@@ -94,58 +74,139 @@ impl SemanticAnalyzer {
         }
 
         for (canonical_spec, impls) in impls_by_canonical_spec.iter() {
-            let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
-
-            for inherent_impl in impls.iter() {
-                let scope = self.symbol_table.get_scope(inherent_impl.scope_id).unwrap();
-
-                for (&value_name_id, &value_symbol_id) in scope.values.iter() {
-                    let value_name = self.symbol_table.get_value_name(value_name_id);
-                    let value_span = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span.unwrap();
-
-                    symbols.entry(value_name.to_string()).or_default().push(value_span);
-                }
-
-                for (&type_name_id, &type_symbol_id) in scope.types.iter() {
-                    let type_name = self.symbol_table.get_type_name(type_name_id);
-                    let type_span = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span;
-                    
-                    if let Some(type_span) = type_span {
-                        symbols.entry(type_name.to_string()).or_default().push(type_span);
-                    }
-                }
+            if impls.len() <= 1 {
+                continue;
             }
 
-            let spec_str = canonical_spec.iter().map(|ct| {
-                match ct {
-                    CanonicalType::Concrete(id) => {
-                        let symbol = self.symbol_table.get_type_symbol(*id).unwrap();
-                        self.symbol_table.get_type_name(symbol.name_id).to_string()
-                    },
-                    CanonicalType::Generic(i) => {
-                        format!("T{}", i)
-                    },
-                }
-            }).collect::<Vec<_>>().join(", ");
-            
+            let spec_str = self.format_canonical_spec(canonical_spec);
             let full_type_name = if spec_str.is_empty() {
-                namespace.to_string()
+                format!("impl {}", namespace)
             } else {
-                format!("{}<{}>", namespace, spec_str)
+                format!("impl {}<{}>", namespace, spec_str)
             };
+            
+            let mut symbols: HashMap<String, Vec<Span>> = HashMap::new();
+            for inherent_impl in impls.iter() {
+                self.collect_symbols_from_scope(inherent_impl.scope_id, &mut symbols);
+            }
 
             for (name, spans) in symbols.iter() {
                 if spans.len() > 1 {
                      errors.push(*self.create_error(
-                        ErrorKind::DuplicateSymbolsInInherentImpl(name.to_string(), full_type_name.clone()),
+                        ErrorKind::DuplicateDefinitionInImpl(name.to_string(), full_type_name.clone()),
                         spans[0], 
-                        &spans[0..spans.len()]
-                    ))
+                        &spans[..]
+                    ));
                 }
             }
         }
         
         errors
+    }
+
+    fn find_trait_impl_duplicates(&self, trait_id: TypeSymbolId, type_id: TypeSymbolId, trait_impls: &[TraitImpl]) -> Vec<Error> {
+        let mut errors = vec![];
+        type CanonicalTraitImplKey = (Vec<CanonicalType>, Vec<CanonicalType>);
+        let mut impls_by_canonical_key: HashMap<CanonicalTraitImplKey, Vec<&TraitImpl>> = HashMap::new();
+
+        for trait_impl in trait_impls.iter() {
+            let generic_map: HashMap<TypeSymbolId, usize> = trait_impl.impl_generic_params
+                .iter()
+                .enumerate()
+                .map(|(i, &id)| (id, i))
+                .collect();
+
+            let canonicalize = |spec: &[TypeSymbolId]| -> Vec<CanonicalType> {
+                spec.iter()
+                    .map(|&spec_id| {
+                        if let Some(&generic_index) = generic_map.get(&spec_id) {
+                            CanonicalType::Generic(generic_index + 1)
+                        } else {
+                            CanonicalType::Concrete(spec_id)
+                        }
+                    })
+                    .collect()
+            };
+
+            let key = (
+                canonicalize(&trait_impl.trait_generic_specialization),
+                canonicalize(&trait_impl.type_specialization),
+            );
+
+            impls_by_canonical_key.entry(key)
+                .or_default()
+                .push(trait_impl);
+        }
+
+        let trait_name = self.symbol_table.get_type_name(self.symbol_table.get_type_symbol(trait_id).unwrap().name_id);
+        let type_name = self.symbol_table.get_type_name(self.symbol_table.get_type_symbol(type_id).unwrap().name_id);
+
+        for ((canonical_trait_spec, canonical_type_spec), impls) in impls_by_canonical_key.iter() {
+            if impls.len() <= 1 {
+                continue;
+            }
+
+            let trait_spec_str = self.format_canonical_spec(canonical_trait_spec);
+            let type_spec_str = self.format_canonical_spec(canonical_type_spec);
+            
+            let trait_part = if trait_spec_str.is_empty() {
+                trait_name.to_string()
+            } else {
+                format!("{}<{}>", trait_name, trait_spec_str)
+            };
+
+            let type_part = if type_spec_str.is_empty() {
+                type_name.to_string()
+            } else {
+                format!("{}<{}>", type_name, type_spec_str)
+            };
+            
+            let full_type_name = format!("impl {} for {}", trait_part, type_part);
+
+            let all_spans: Vec<_> = impls.iter().map(|imp| imp.span).collect();
+
+            errors.push(*self.create_error(
+                ErrorKind::ConflictingTraitImpl(full_type_name),
+                all_spans[0],
+                &all_spans
+            ));
+        }
+
+        errors
+    }
+
+    fn format_canonical_spec(&self, spec: &[CanonicalType]) -> String {
+        spec.iter().map(|ct| {
+            match ct {
+                CanonicalType::Concrete(id) => {
+                    let symbol = self.symbol_table.get_type_symbol(*id).unwrap();
+                    self.symbol_table.get_type_name(symbol.name_id).to_string()
+                },
+                CanonicalType::Generic(i) => {
+                    format!("T{}", i)
+                },
+            }
+        }).collect::<Vec<_>>().join(", ")
+    }
+
+    fn collect_symbols_from_scope(&self, scope_id: ScopeId, symbols: &mut HashMap<String, Vec<Span>>) {
+        let scope = self.symbol_table.get_scope(scope_id).unwrap();
+
+        for (&value_name_id, &value_symbol_id) in scope.values.iter() {
+            let value_name = self.symbol_table.get_value_name(value_name_id);
+            if let Some(value_span) = self.symbol_table.get_value_symbol(value_symbol_id).unwrap().span {
+                symbols.entry(value_name.to_string()).or_default().push(value_span);
+            }
+        }
+
+        for (&type_name_id, &type_symbol_id) in scope.types.iter() {
+            let type_name = self.symbol_table.get_type_name(type_name_id);
+            if type_name == "Self" { continue; }
+
+            if let Some(type_span) = self.symbol_table.get_type_symbol(type_symbol_id).unwrap().span {
+                symbols.entry(type_name.to_string()).or_default().push(type_span);
+            }
+        }
     }
 }
 

@@ -727,6 +727,7 @@ impl SemanticAnalyzer {
                 impl_generic_params: impl_generic_param_ids,
                 trait_generic_specialization,
                 type_specialization,
+                span: node.span
             };
 
             self.trait_registry
