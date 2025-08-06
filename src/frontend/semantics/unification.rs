@@ -1420,31 +1420,59 @@ impl SemanticAnalyzer {
             }
 
             let ty_symbol = self.symbol_table.get_type_symbol(resolved_ty.get_base_symbol()).unwrap();
-            if let TypeSymbolKind::Generic(_) = &ty_symbol.kind {
+            if let TypeSymbolKind::Generic(constraints) = &ty_symbol.kind {
+                let trait_id = resolved_tr.get_base_symbol();
+                if !constraints.contains(&trait_id) {
+                    return Err(self.create_error(
+                        ErrorKind::UnimplementedTrait(
+                            self.symbol_table.display_type(&resolved_tr),
+                            self.symbol_table.display_type(&resolved_ty),
+                        ),
+                        info.span,
+                        &[info.span],
+                    ));
+                }
+
+                let trait_symbol_def = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol_def.kind else { unreachable!(); };
+                let member_exists_in_trait = self.symbol_table.find_value_symbol_in_scope(&member_name, trait_scope_id).is_some()
+                    || self.symbol_table.find_type_symbol_in_scope(&member_name, trait_scope_id).is_some();
+
+                if !member_exists_in_trait {
+                    return Err(self.create_error(
+                        ErrorKind::MemberNotFound(member_name.clone(), self.symbol_table.display_type(&resolved_tr)),
+                        info.span,
+                        &[info.span],
+                    ));
+                }
+
                 let type_name = &format!(
-                    "[{} as {}]::{}", 
-                    self.symbol_table.display_type(&resolved_ty), 
+                    "[{} as {}].{}",
+                    self.symbol_table.display_type(&resolved_ty),
                     self.symbol_table.display_type(&resolved_tr),
                     member_name
                 );
 
-                let symbol = if let Some(ty_symbol) = self.symbol_table.find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name) {
+                let symbol_id = if let Some(ty_symbol) = self
+                    .symbol_table
+                    .find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name)
+                {
                     ty_symbol.id
                 } else {
                     self.symbol_table.add_type_symbol(
-                        type_name, 
+                        type_name,
                         TypeSymbolKind::OpaqueTypeProjection {
                             ty: resolved_ty,
                             tr: resolved_tr,
-                            member: member_name.clone()
-                        }, 
+                            member: member_name.clone(),
+                        },
                         vec![],
-                        QualifierKind::Private, 
-                        Some(info.span)
+                        QualifierKind::Private,
+                        Some(info.span),
                     )?
                 };
 
-                self.unify(result_ty, Type::new_base(symbol), info)?;
+                self.unify(result_ty, Type::new_base(symbol_id), info)?;
                 return Ok(true);
             }
 
