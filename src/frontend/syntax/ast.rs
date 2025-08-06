@@ -168,7 +168,7 @@ pub enum AstNodeKind {
 
     GenericParameter {
         name: String,
-        constraints: Vec<String>,
+        constraints: Vec<AstNode>,
     },
 
     TypeReference {

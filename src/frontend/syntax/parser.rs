@@ -961,7 +961,7 @@ impl Parser {
                     parser.advance();
 
                     loop {
-                        constraints.push(parser.consume(TokenKind::Identifier)?.get_value().to_string());
+                        constraints.push(parser.parse_type()?);
                         if parser.peek().get_token_kind() != TokenKind::Operator(Operation::Plus) {
                             break;
                         }

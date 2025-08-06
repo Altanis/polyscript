@@ -30,7 +30,7 @@ impl SemanticAnalyzer {
             };
 
             if !inherent_impls.is_empty() {
-                errors.append(&mut self.find_inherent_impl_duplicates(&name, inherent_impls));
+                errors.append(&mut self.find_inherent_impl_duplicates(name, inherent_impls));
             }
         }
         

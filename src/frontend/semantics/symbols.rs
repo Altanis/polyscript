@@ -485,32 +485,59 @@ impl SemanticAnalyzer {
         let AstNodeKind::GenericParameter { constraints, .. } = &mut node.kind else {
             unreachable!();
         };
+
         let mut trait_ids = vec![];
 
         for constraint in constraints.iter() {
-            let type_symbol = self.symbol_table.find_type_symbol(constraint).ok_or_else(|| {
-                self.create_error(
-                    ErrorKind::UnknownIdentifier(constraint.clone()),
-                    node.span,
-                    &[node.span],
-                )
-            })?;
+            let constraint_str = format!("{}", constraint);
+            let constraint_error = self.create_error(
+                ErrorKind::InvalidConstraint(constraint_str),
+                node.span,
+                &[node.span],
+            );
 
-            if !matches!(type_symbol.kind, TypeSymbolKind::Trait(_)) {
-                return Err(self.create_error(
-                    ErrorKind::InvalidConstraint(constraint.clone()),
-                    node.span,
-                    &[node.span],
-                ));
+            let AstNodeKind::TypeReference { type_name, generic_types, reference_kind } = &constraint.kind else {
+                return Err(constraint_error);
+            };
+
+            if *reference_kind != ReferenceKind::Value {
+                return Err(constraint_error);
             }
 
-            trait_ids.push(type_symbol.id);
+            let mut scope_id = Some(self.symbol_table.current_scope_id);
+            let mut type_symbol = None;
+
+            while let Some(id) = scope_id {
+                let scope = self.symbol_table.get_scope(id).unwrap();
+                if let Some(found_symbol) = self.symbol_table.find_type_symbol_in_scope(type_name, id)
+                    && matches!(found_symbol.kind, TypeSymbolKind::Trait(_))
+                {
+                    if found_symbol.generic_parameters.len() != generic_types.len() {
+                        return Err(self.create_error(
+                            ErrorKind::InvalidTypeReference(type_name.clone(), generic_types.len(), found_symbol.generic_parameters.len()),
+                            constraint.span,
+                            &[constraint.span]
+                        ));
+                    }
+
+                    type_symbol = Some(found_symbol.id);
+                }   
+
+                scope_id = scope.parent;
+            }
+
+            if let Some(id) = type_symbol {
+                trait_ids.push(id);
+            } else {
+                return Err(constraint_error);
+            }
         }
 
         let type_symbol = self
             .symbol_table
             .get_type_symbol_mut(node.type_id.as_ref().unwrap().get_base_symbol())
             .unwrap();
+
         if let TypeSymbolKind::Generic(constraints) = &mut type_symbol.kind {
             *constraints = trait_ids;
         }
