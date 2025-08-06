@@ -37,7 +37,7 @@ pub enum ErrorKind {
     IncorrectFieldAccessRhs,
     TypeAnnotationNeeded,
     SelfOutsideImpl,
-    InvalidThis(&'static str),
+    InvalidSelf(&'static str),
     ExpectedIdentifier,
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
@@ -129,7 +129,7 @@ impl ErrorKind {
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
             ErrorKind::TypeAnnotationNeeded => "cannot infer type for this; a type annotation may be needed".to_string(),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
-            ErrorKind::InvalidThis(place) => format!("found \"this\" {place}"),
+            ErrorKind::InvalidSelf(place) => format!("found \"self\" {place}"),
             ErrorKind::ExpectedIdentifier => {
                 "expected an identifier for the rhs of a field access operation".to_string()
             }

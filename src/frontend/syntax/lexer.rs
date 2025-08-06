@@ -555,9 +555,9 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Else),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
-            THIS_KEYWORD => Ok(Token::new(
+            SELF_KEYWORD => Ok(Token::new(
                 word,
-                TokenKind::Keyword(KeywordKind::This),
+                TokenKind::Keyword(KeywordKind::SelfKw),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
             PUBLIC_KEYWORD => Ok(Token::new(

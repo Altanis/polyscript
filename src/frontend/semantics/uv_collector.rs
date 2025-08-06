@@ -912,7 +912,7 @@ impl SemanticAnalyzer {
                 Some(parent_id) => function_scope = self.symbol_table.get_scope(parent_id).unwrap(),
                 None => {
                     return Err(self.create_error(
-                        ErrorKind::InvalidThis("outside of a function"),
+                        ErrorKind::InvalidSelf("outside of a function"),
                         span,
                         &[span],
                     ))
@@ -924,7 +924,7 @@ impl SemanticAnalyzer {
             Some(kind) => kind,
             None => {
                 return Err(self.create_error(
-                    ErrorKind::InvalidThis("in a static method without a 'this' parameter"),
+                    ErrorKind::InvalidSelf("in a static method without a 'this' parameter"),
                     span,
                     &[span],
                 ))
@@ -935,7 +935,7 @@ impl SemanticAnalyzer {
             Some(parent_id) => self.symbol_table.get_scope(parent_id).unwrap(),
             None => {
                 return Err(self.create_error(
-                    ErrorKind::InvalidThis("outside of an impl block"),
+                    ErrorKind::InvalidSelf("outside of an impl block"),
                     span,
                     &[span],
                 ))
@@ -943,7 +943,7 @@ impl SemanticAnalyzer {
         };
 
         if impl_scope.kind != ScopeKind::Impl {
-            return Err(self.create_error(ErrorKind::InvalidThis("outside of an impl block"), span, &[span]));
+            return Err(self.create_error(ErrorKind::InvalidSelf("outside of an impl block"), span, &[span]));
         }
 
         let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self
@@ -1339,8 +1339,8 @@ impl SemanticAnalyzer {
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
             TraitConstant { .. } => self.collect_uv_trait_const(uv_id, expr, expr.span, info)?,
-            SelfValue => {
-                if let Some(symbol) = self.symbol_table.find_value_symbol_from_scope(info.scope_id, "this") {
+            SelfExpr => {
+                if let Some(symbol) = self.symbol_table.find_value_symbol_from_scope(info.scope_id, "self") {
                     expr.value_id = Some(symbol.id);
                 }
                 

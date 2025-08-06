@@ -3,7 +3,7 @@
 
 trait Entity {
     type TickOutput;
-    fn tick(&mut this): Self.TickOutput;
+    fn tick(&mut self): Self.TickOutput;
 }
 
 struct Tank {}
@@ -11,12 +11,12 @@ struct Square {}
 
 impl Entity for Tank {
     type TickOutput = int;
-    fn tick(&mut this): int { 4 }
+    fn tick(&mut self): int { 4 }
 }
 
 impl Entity for Square {
     type TickOutput = char;
-    fn tick(&mut this): char { '4' }
+    fn tick(&mut self): char { '4' }
 }
 
 fn tick<T: Entity>(x: T): [T as Entity].TickOutput {

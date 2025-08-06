@@ -431,10 +431,10 @@ impl Parser {
                 Ok(expr)
             },
             TokenKind::OpenBrace => self.parse_block(),
-            TokenKind::Keyword(KeywordKind::This) => {
+            TokenKind::Keyword(KeywordKind::SelfKw) => {
                 self.advance();
                 Ok(AstNode {
-                    kind: AstNodeKind::SelfValue,
+                    kind: AstNodeKind::SelfExpr,
                     span: span.set_end_from_span(self.previous().get_span()),
                     type_id: None,
                     value_id: None,
@@ -834,11 +834,11 @@ impl Parser {
                         t.get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
                     });
                     let next_token_is_this = parser.tokens.get(parser.current + 1).is_some_and(|t| {
-                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
+                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::SelfKw)
                     });
                     let third_token_is_this = next_token_is_mut
                         && parser.tokens.get(parser.current + 2).is_some_and(|t| {
-                            t.get_token_kind() == TokenKind::Keyword(KeywordKind::This)
+                            t.get_token_kind() == TokenKind::Keyword(KeywordKind::SelfKw)
                         });
 
                     if next_token_is_this || third_token_is_this {
@@ -850,25 +850,25 @@ impl Parser {
                             (Operation::ImmutableAddressOf, ReferenceKind::Reference)
                         };
 
-                        parser.consume(TokenKind::Keyword(KeywordKind::This))?;
+                        parser.consume(TokenKind::Keyword(KeywordKind::SelfKw))?;
                         self_kind = Some(kind);
 
                         let type_annotation =
                             boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(kind)))?);
                         return Ok(AstNodeKind::FunctionParameter {
-                            name: "this".to_string(),
+                            name: "self".to_string(),
                             type_annotation,
                             mutable: false,
                         });
                     }
-                } else if current_token_kind == TokenKind::Keyword(KeywordKind::This) {
+                } else if current_token_kind == TokenKind::Keyword(KeywordKind::SelfKw) {
                     parser.advance();
                     self_kind = Some(ReferenceKind::Value);
 
                     let type_annotation =
                         boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(ReferenceKind::Value)))?);
                     return Ok(AstNodeKind::FunctionParameter {
-                        name: "this".to_string(),
+                        name: "self".to_string(),
                         type_annotation,
                         mutable: false,
                     });

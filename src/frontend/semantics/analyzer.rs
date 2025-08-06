@@ -489,7 +489,7 @@ impl SymbolTable {
 
                 let func_scope_id = self.enter_scope(ScopeKind::Function);
                 self.add_value_symbol(
-                    "this",
+                    "self",
                     ValueSymbolKind::Variable,
                     false,
                     QualifierKind::Public,

@@ -41,7 +41,7 @@ pub const BREAK_KEYWORD: &str = "break";
 pub const CONTINUE_KEYWORD: &str = "continue";
 pub const IF_KEYWORD: &str = "if";
 pub const ELSE_KEYWORD: &str = "else";
-pub const THIS_KEYWORD: &str = "this";
+pub const SELF_KEYWORD: &str = "self";
 pub const PUBLIC_KEYWORD: &str = "public";
 pub const PRIVATE_KEYWORD: &str = "private";
 pub const TRAIT_KEYWORD: &str = "trait";
@@ -475,7 +475,7 @@ pub enum KeywordKind {
     Enum,
     Public,
     Private,
-    This,
+    SelfKw,
     Trait,
     Type,
     Mut,
@@ -693,7 +693,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::Enum => "Keyword::Enum".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
-                KeywordKind::This => "Keyword::This".blue(),
+                KeywordKind::SelfKw => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
                 KeywordKind::Type => "Keyword::Type".purple(),

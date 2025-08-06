@@ -136,8 +136,8 @@ pub enum AstNodeKind {
         value: BoxedAstNode,
     },
 
-    ///`this`
-    SelfValue,
+    /// `self`
+    SelfExpr,
     /// `Self`, used as the type annotation for `this`, `&this`, and `&mut this`
     /// in an associated function.
     SelfType(ReferenceKind),
@@ -524,7 +524,7 @@ impl AstNode {
                 initializer.fmt_with_indent(f, 0, table)?;
             }
 
-            AstNodeKind::SelfValue => write!(f, "{}this", indent_str)?,
+            AstNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
             AstNodeKind::SelfType(operation) => {
                 let operation_str = match operation {
                     ReferenceKind::Reference => "&",
@@ -876,7 +876,7 @@ impl AstNode {
             | CharLiteral(_)
             | Identifier(_)
             | EnumVariant(_)
-            | SelfValue
+            | SelfExpr
             | SelfType(_) => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
@@ -1188,7 +1188,7 @@ impl AstNode {
             | CharLiteral(_)
             | Identifier(_)
             | EnumVariant(_)
-            | SelfValue
+            | SelfExpr
             | SelfType(_) => vec![],
 
             Program(statements) => statements.iter().collect(),

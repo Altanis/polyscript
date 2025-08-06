@@ -331,7 +331,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
-            AstNodeKind::SelfValue => {
+            AstNodeKind::SelfExpr => {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
@@ -1173,7 +1173,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
             AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
             AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
-            AstNodeKind::SelfValue => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            AstNodeKind::SelfExpr => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
             AstNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
                 let init_val = self.compile_node(initializer).unwrap();
                 self.constants.insert(stmt.value_id.unwrap(), init_val);
