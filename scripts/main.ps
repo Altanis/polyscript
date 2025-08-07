@@ -32,16 +32,16 @@ trait Iterator {
 }
 
 impl Iterator for Iterable {
-    type Item = int;
+    type Item = char;
 
     fn next(&self): Self.Item {
-        return 3;
+        return '3';
     }
 }
 
 fn next<I: Iterator>(x: &I): [I as Iterator].Item {
-    return 1;
+    return x.next();
 }
 
 let iterator = Iterable {};
-let x: int = next(&iterator);
+let x: char = next(&iterator);

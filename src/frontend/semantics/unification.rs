@@ -278,6 +278,42 @@ impl SemanticAnalyzer {
 
                         self.apply_substitution(aliased_type, &local_substitutions)
                     },
+                    TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } => {
+                        let new_opaque_ty = self.apply_substitution(opaque_ty, substitutions);
+                        let new_opaque_tr = self.apply_substitution(opaque_tr, substitutions);
+
+                        if &new_opaque_ty == opaque_ty && &new_opaque_tr == opaque_tr {
+                            return ty.clone();
+                        }
+
+                        let type_name = &format!(
+                            "[{} as {}].{}",
+                            self.symbol_table.display_type(&new_opaque_ty),
+                            self.symbol_table.display_type(&new_opaque_tr),
+                            member
+                        );
+
+                        let new_symbol_id = if let Some(sym) = self
+                            .symbol_table
+                            .find_type_symbol_from_scope(self.symbol_table.get_current_scope_id(), type_name)
+                        {
+                            sym.id
+                        } else {
+                            self.symbol_table.add_type_symbol(
+                                type_name,
+                                TypeSymbolKind::OpaqueTypeProjection {
+                                    ty: new_opaque_ty,
+                                    tr: new_opaque_tr,
+                                    member: member.clone(),
+                                },
+                                vec![],
+                                QualifierKind::Private,
+                                base_symbol.span,
+                            ).unwrap()
+                        };
+                        
+                        Type::new_base(new_symbol_id)
+                    },
                     TypeSymbolKind::FunctionSignature { params, return_type, instance } => {
                         let substituted_params = params
                             .iter()
@@ -1096,8 +1132,33 @@ impl SemanticAnalyzer {
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. }) 
                 if self.is_uv(s) => self.unify_variable(s, other, info),
             
-            (ref t @ Type::Base { symbol: s, .. }, _) | (_, ref t @ Type::Base { symbol: s, .. })
-                if self.is_opaque_type_projection(s) => Ok(t.clone()),
+            (opaque_type @ Type::Base { symbol: s, .. }, other_type) | (other_type, opaque_type @ Type::Base { symbol: s, .. }) 
+                if self.is_opaque_type_projection(s) =>
+            {
+                let opaque_symbol = self.symbol_table.get_type_symbol(s).unwrap().clone();
+                if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } = opaque_symbol.kind {
+                    let base_opaque_ty_symbol = self.symbol_table.get_type_symbol(opaque_ty.get_base_symbol()).unwrap();
+                    if matches!(base_opaque_ty_symbol.kind, TypeSymbolKind::Generic(_)) {
+                        let trait_id = opaque_tr.get_base_symbol();
+                        let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                        if let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind
+                            && let Some(trait_assoc_type_sym) = self.symbol_table.find_type_symbol_in_scope(&member, trait_scope_id)
+                            && other_type.get_base_symbol() == trait_assoc_type_sym.id
+                        {
+                            return Ok(opaque_type);
+                        }
+                    }
+    
+                    if let Some(MemberResolution::Type(resolved_member_type)) 
+                        = self.find_member_in_trait_impl(&opaque_ty, &opaque_tr, &member, info)?
+                    {
+                        return self.unify(resolved_member_type, other_type, info);
+                    }
+                }
+    
+                if opaque_type == other_type { return Ok(opaque_type); }
+                Err(self.type_mismatch_error(&t1, &t2, info, None))
+            },
 
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
@@ -1266,7 +1327,6 @@ impl SemanticAnalyzer {
             for p in &expected_params_with_receiver {
                 self.collect_signature_generics(p, &mut fn_generic_param_ids);
             }
-
 
             let mut substitutions = HashMap::new();
 
