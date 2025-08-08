@@ -924,12 +924,32 @@ impl SemanticAnalyzer {
         }
 
         let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
-        if !matches!(trait_symbol.kind, TypeSymbolKind::Trait(_)) {
+        let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else {
             return Err(self.create_error(
                 ErrorKind::InvalidConstraint(self.symbol_table.display_type(tr)),
                 info.span,
                 &[info.span],
             ));
+        };
+
+        let type_symbol = self.symbol_table.get_type_symbol(type_id).unwrap();
+        if let TypeSymbolKind::Generic(constraints) = &type_symbol.kind
+            && constraints.contains(&trait_id)
+            && let Some(resolution) = self.find_member_in_impl_scope(trait_scope_id, member_name, true, info)?
+        {
+            let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
+            let substitutions = HashMap::from([(self_in_trait_id, ty.clone())]);
+
+            let concrete_resolution = match resolution {
+                MemberResolution::Value(member_type, member_id) => {
+                    MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                },
+                MemberResolution::Type(member_type) => {
+                    MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                }
+            };
+
+            return Ok(Some(concrete_resolution));
         }
 
         let all_trait_impls: Vec<_> = self.trait_registry.register.get(&trait_id)
