@@ -7,7 +7,10 @@ use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, FunctionValue, IntVa
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{
+    AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId,
+    TypeSymbolKind, ValueSymbolId, ValueSymbolKind,
+};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 use crate::utils::kind::Operation;
 
@@ -83,6 +86,96 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn resolve_type(&self, ty: &Type) -> Type {
+        let mut current_ty = ty.clone();
+        loop {
+            let Type::Base { symbol, args } = &current_ty else { break };
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+
+            if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &type_symbol.kind {
+                let substitutions = type_symbol
+                    .generic_parameters
+                    .iter()
+                    .zip(args.iter())
+                    .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
+                    .collect();
+
+                current_ty = Self::apply_codegen_substitution(aliased_type, &substitutions);
+            } else {
+                break;
+            }
+        }
+        current_ty
+    }
+
+    fn is_impl_applicable(&self, instance_type: &Type, imp: &TraitImpl) -> bool {
+        let instance_args = if let Type::Base { args, .. } = instance_type {
+            args
+        } else {
+            return imp.type_specialization.is_empty();
+        };
+
+        let impl_target_arg_ids = &imp.type_specialization;
+        if instance_args.len() != impl_target_arg_ids.len() {
+            return false;
+        }
+
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+            let target_symbol = self.analyzer.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+            if !imp.impl_generic_params.contains(&target_symbol.id) {
+                let resolved_instance_arg = self.resolve_type(instance_arg);
+                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
+
+                if resolved_instance_arg != resolved_impl_arg {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn resolve_associated_type(&self, concrete_type: &Type, trait_type: &Type, member_name: &str) -> Option<Type> {
+        let trait_id = trait_type.get_base_symbol();
+        let type_id = concrete_type.get_base_symbol();
+
+        let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
+        let impls_for_type = impls_for_trait.get(&type_id)?;
+
+        for imp in impls_for_type {
+            if !self.is_impl_applicable(concrete_type, imp) {
+                continue;
+            }
+
+            let assoc_type_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(member_name, imp.impl_scope_id).unwrap();
+            let TypeSymbolKind::TypeAlias((_, Some(aliased_type_template))) = &assoc_type_symbol.kind else { unreachable!() };
+            let instance_args = if let Type::Base { args, .. } = concrete_type { args } else { &vec![] };
+
+            let mut substitutions: HashMap<_, _> = imp.impl_generic_params.iter()
+                .zip(instance_args.iter())
+                .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
+                .collect();
+
+            if let Type::Base { args, .. } = trait_type {
+                let trait_symbol = self.analyzer.symbol_table.get_type_symbol(trait_id).unwrap();
+                let trait_generic_substitutions: HashMap<_, _> = trait_symbol.generic_parameters.iter()
+                    .zip(args.iter())
+                    .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
+                    .collect();
+
+                substitutions.extend(trait_generic_substitutions);
+            }
+
+            return Some(Self::apply_codegen_substitution(
+                aliased_type_template,
+                &substitutions,
+            ));
+        }
+
+        None
+    }
+
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
         let substitution = if let Type::Base { symbol, .. } = ty {
@@ -137,12 +230,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         llvm_struct.set_body(&field_types, false);
                         llvm_struct.as_basic_type_enum()
                     },
-                    // Values of an enum type are integers.
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
                     TypeSymbolKind::Generic(_) => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::FunctionSignature { .. }
                         => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
+                    TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } => {
+                        let mut concrete_base = opaque_ty.clone();
+                        if let Some(substitutions) = &self.current_substitution_map {
+                            concrete_base = Self::apply_codegen_substitution(&concrete_base, substitutions);
+                        }
+                        
+                        let base_symbol_of_projection = self.analyzer.symbol_table.get_type_symbol(concrete_base.get_base_symbol()).unwrap();
+                        
+                        if let TypeSymbolKind::Generic(_) = base_symbol_of_projection.kind {
+                            self.context.ptr_type(AddressSpace::default()).as_basic_type_enum()
+                        } else {
+                            let concrete_trait = if let Some(substitutions) = &self.current_substitution_map {
+                                Self::apply_codegen_substitution(opaque_tr, substitutions)
+                            } else {
+                                opaque_tr.clone()
+                            };
+
+                            let resolved = self.resolve_associated_type(&concrete_base, &concrete_trait, member).unwrap();
+                            return self.map_semantic_type(&resolved);
+                        }
+                    }
                     _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
                 };
 
@@ -161,7 +274,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let llvm_params: Vec<_> = params
             .iter()
-            .map(|p| self.map_semantic_type(p).unwrap().into())
+            .filter_map(|p| self.map_semantic_type(p).map(|t| t.into()))
             .collect();
 
         let llvm_return = self.map_semantic_type(return_type);
@@ -1123,7 +1236,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let is_static_call = if let AstNodeKind::Identifier(name) = &left.kind {
                 self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
             } else {
-                false
+                matches!(left.kind, AstNodeKind::PathQualifier { .. })
             };
     
             if !is_static_call {
