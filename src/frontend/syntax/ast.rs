@@ -151,6 +151,7 @@ pub enum AstNodeKind {
     FunctionCall {
         function: BoxedAstNode,
         arguments: Vec<AstNode>,
+        generic_arguments: Option<Vec<Type>>
     },
 
     TraitDeclaration {
@@ -741,8 +742,16 @@ impl AstNode {
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
-            AstNodeKind::FunctionCall { function, arguments } => {
+            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
                 write!(f, "{}", indent_str)?;
+                if let (Some(gen_args), Some(table)) = (generic_arguments, table) && !gen_args.is_empty() {
+                    let args_str = gen_args
+                        .iter()
+                        .map(|t| table.display_type(t))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(f, "<{}>", args_str.cyan())?;
+                }
                 function.fmt_with_indent(f, 0, table)?;
                 write!(f, "(")?;
                 for (i, param) in arguments.iter().enumerate() {
@@ -1161,6 +1170,7 @@ impl AstNode {
             FunctionCall {
                 function,
                 arguments,
+                ..
             } => {
                 let mut children = vec![];
                 children.push(function.as_mut());
@@ -1473,6 +1483,7 @@ impl AstNode {
             FunctionCall {
                 function,
                 arguments,
+                ..
             } => {
                 let mut children = vec![];
                 children.push(function.as_ref());

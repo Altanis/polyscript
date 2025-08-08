@@ -1350,7 +1350,7 @@ impl SemanticAnalyzer {
                 self.collect_uv_self_type(uv_id, expr.scope_id.unwrap(), *reference_kind, expr.span, info)?
             }
             FieldAccess { left, right } => self.collect_uv_field_access(uv_id, left, right, info)?,
-            FunctionCall { function, arguments } => {
+            FunctionCall { function, arguments, .. } => {
                 self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?
             },
             PathQualifier { .. } => {

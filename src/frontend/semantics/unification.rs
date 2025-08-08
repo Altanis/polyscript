@@ -1234,6 +1234,25 @@ impl SemanticAnalyzer {
                         self.collect_signature_generics(p, &mut fn_generic_param_ids);
                     }
 
+                    if !callee_symbol.generic_parameters.is_empty() {
+                        let mut substitutions = HashMap::new();
+                        for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
+                            self.collect_substitutions(
+                                call_arg,
+                                sig_param,
+                                &mut substitutions,
+                                &fn_generic_param_ids,
+                                info,
+                            )?;
+                        }
+                        
+                        let concrete_types: Vec<Type> = callee_symbol.generic_parameters.iter()
+                            .map(|&id| substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id)))
+                            .collect();
+                        
+                        self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
+                    }
+
                     let mut substitutions = HashMap::new();
                     for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
                         self.collect_substitutions(
@@ -1346,6 +1365,16 @@ impl SemanticAnalyzer {
                     &fn_generic_param_ids,
                     info,
                 )?;
+            }
+
+            if !callee_symbol.generic_parameters.is_empty() {
+                let concrete_types: Vec<Type> = callee_symbol.generic_parameters.iter()
+                    .map(|&id| {
+                        substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id))
+                    })
+                    .collect();
+
+                self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
             }
 
             let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);

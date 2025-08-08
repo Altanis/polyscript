@@ -185,6 +185,7 @@ impl Parser {
                     kind: AstNodeKind::FunctionCall {
                         function: boxed!(lhs),
                         arguments,
+                        generic_arguments: None
                     },
                     type_id: None,
                     value_id: None,

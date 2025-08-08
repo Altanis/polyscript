@@ -1,7 +1,7 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-/*trait Entity {
+trait Entity {
     type TickOutput;
     fn tick(&mut self): Self.TickOutput;
 }
@@ -21,27 +21,10 @@ impl Entity for Square {
 
 fn tick<T: Entity>(x: T): [T as Entity].TickOutput {
     x.tick()
-}*/
-
-struct Iterable {}
-
-trait Iterator {
-    type Item;
-
-    fn next(&self): Self.Item;
 }
 
-impl Iterator for Iterable {
-    type Item = char;
+let tank = Tank {};
+let square = Square {};
 
-    fn next(&self): Self.Item {
-        return '3';
-    }
-}
-
-fn next<I: Iterator>(x: &I): [I as Iterator].Item {
-    return x.next();
-}
-
-let iterator = Iterable {};
-let x: char = next(&iterator);
+let fruit1: int = tick(tank);
+let fruit2: char = tick(square);

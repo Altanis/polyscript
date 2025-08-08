@@ -930,7 +930,7 @@ pub enum Constraint {
 }
 
 /// Additional information about a constraint.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConstraintInfo {
     pub span: Span,
     pub scope_id: ScopeId,
@@ -941,6 +941,7 @@ pub struct UnificationContext {
     next_id: TypeSymbolId,
     pub substitutions: HashMap<TypeSymbolId, Type>,
     pub constraints: VecDeque<(Constraint, ConstraintInfo)>,
+    pub monomorphization_requests: HashMap<Span, Vec<Type>>
 }
 
 impl UnificationContext {
@@ -981,7 +982,6 @@ pub struct SemanticAnalyzer {
     pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
-    // TODO: Find better place to put this.
     pub uv_collection_ctx: UVCollectionContext,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
@@ -1062,6 +1062,7 @@ impl SemanticAnalyzer {
         pass!(self, impl_deduplication_pass, &mut program);
         pass!(self, uv_collector_pass, &mut program);
         pass!(self, unification_pass, &mut program);
+        pass!(self, monomorphization_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
         // pass!(self, member_resolution_pass, &mut program);
         pass!(self, mutability_check_pass, &mut program);
