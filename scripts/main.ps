@@ -1,30 +1,26 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-trait Entity {
-    type TickOutput;
-    fn tick(&mut self): Self.TickOutput;
+struct Point<T> {
+    x: T;
 }
 
-struct Tank {}
-struct Square {}
+impl Point<int> {
+    const precise: bool = false;
+    type Implementor = int;
 
-impl Entity for Tank {
-    type TickOutput = int;
-    fn tick(&mut self): int { 4 }
+    fn default(): Self {
+        Point { x: 1 }
+    }
 }
 
-impl Entity for Square {
-    type TickOutput = char;
-    fn tick(&mut self): char { '4' }
+impl Point<float> {
+    const precise: bool = true;
+    type Implementor = float;
+
+    fn default(): Self {
+        Point { x: 1.0 }
+    }
 }
 
-fn tick<T: Entity>(x: T): [T as Entity].TickOutput {
-    x.tick()
-}
-
-let tank = Tank {};
-let square = Square {};
-
-let fruit1: int = tick(tank);
-let fruit2: char = tick(square);
+let p1: Point<int> = [Point<int>].default();

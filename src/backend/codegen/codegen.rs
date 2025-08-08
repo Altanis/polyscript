@@ -1093,7 +1093,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         generic_arguments: &Option<Vec<Type>>,
         return_type: Option<&Type>,
     ) -> Option<BasicValueEnum<'ctx>> {
-        let fn_value_id = function_node.value_id.unwrap();
+        let fn_value_id = if let AstNodeKind::FieldAccess { right, .. } = &function_node.kind {
+            right.value_id.unwrap()
+        } else {
+            function_node.value_id.unwrap()
+        };
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(fn_value_id).unwrap();
         let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
     
