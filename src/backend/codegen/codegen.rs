@@ -1199,6 +1199,44 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.variables = old_vars;
     }
 
+    fn compile_monomorphized_function_with_subs(
+        &mut self,
+        generic_fn_id: ValueSymbolId,
+        substitutions: &HashMap<TypeSymbolId, Type>,
+    ) -> FunctionValue<'ctx> {
+        let generic_fn_node = self.fn_ast_map[&generic_fn_id];
+        let generic_fn_symbol = self.analyzer.symbol_table.get_value_symbol(generic_fn_id).unwrap();
+
+        let base_name = self.analyzer.symbol_table.get_value_name(generic_fn_symbol.name_id);
+        let mut sorted_subs: Vec<_> = substitutions.iter().collect();
+        sorted_subs.sort_by_key(|(k, _)| **k);
+        let type_names = sorted_subs
+            .iter()
+            .map(|(_, t)| self.analyzer.symbol_table.display_type(t))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mangled_name = format!("{}<{}>", base_name, type_names);
+
+        if let Some(existing_fn) = self.module.get_function(&mangled_name) {
+            return existing_fn;
+        }
+
+        let specialized_fn_type =
+            Self::apply_codegen_substitution(generic_fn_symbol.type_id.as_ref().unwrap(), substitutions);
+        let llvm_fn_type = self.map_semantic_fn_type(&specialized_fn_type);
+
+        let function = self.module.add_function(&mangled_name, llvm_fn_type, None);
+
+        let old_sub_map = self.current_substitution_map.take();
+        self.current_substitution_map = Some(substitutions.clone());
+
+        self.compile_function_body_into(generic_fn_node, function);
+
+        self.current_substitution_map = old_sub_map;
+
+        function
+    }
+
     fn compile_function_call(
         &mut self,
         function_node: &BoxedAstNode,
@@ -1206,27 +1244,106 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         generic_arguments: &Option<Vec<Type>>,
         return_type: Option<&Type>,
     ) -> Option<BasicValueEnum<'ctx>> {
-        let fn_value_id = if let AstNodeKind::FieldAccess { right, .. } = &function_node.kind {
-            right.value_id.unwrap()
-        } else {
-            function_node.value_id.unwrap()
-        };
-        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(fn_value_id).unwrap();
-        let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
-    
-        let callee = if !fn_type_symbol.generic_parameters.is_empty() {
-            let concrete_types = generic_arguments.as_ref().unwrap();
-
-            let cache_key = (fn_value_id, concrete_types.clone());
-            if let Some(cached_fn) = self.monomorphization_cache.get(&cache_key) {
-                *cached_fn
+        let callee = if let AstNodeKind::FieldAccess { left, right } = &function_node.kind {
+            let instance_type = left.type_id.as_ref().unwrap();
+            let concrete_instance_type = if let Some(sub_map) = &self.current_substitution_map {
+                Self::apply_codegen_substitution(instance_type, sub_map)
             } else {
-                let specialized_fn = self.compile_monomorphized_function(fn_value_id, concrete_types);
-                self.monomorphization_cache.insert(cache_key, specialized_fn);
-                specialized_fn
+                instance_type.clone()
+            };
+
+            let concrete_instance_type_id = concrete_instance_type.get_base_symbol();
+
+            let impl_fn_id = right.value_id.unwrap();
+            let impl_fn_symbol = self.analyzer.symbol_table.get_value_symbol(impl_fn_id).unwrap();
+            let impl_block_scope_id = impl_fn_symbol.scope_id;
+            let impl_block_scope = self.analyzer.symbol_table.get_scope(impl_block_scope_id).unwrap();
+
+            let impl_fn_type_symbol = self.analyzer.symbol_table
+                .get_type_symbol(impl_fn_symbol.type_id.as_ref().unwrap().get_base_symbol())
+                .unwrap();
+
+            let mut final_sub_map: HashMap<TypeSymbolId, Type> = HashMap::new();
+
+            let impl_generics: Vec<TypeSymbolId> =
+                if let Some(trait_id) = impl_block_scope.trait_id {
+                    let impls = self.analyzer.trait_registry.register.get(&trait_id).unwrap().get(&concrete_instance_type_id).unwrap();
+                    let applicable_impl = impls.iter().find(|imp| imp.impl_scope_id == impl_block_scope_id).unwrap();
+
+                    applicable_impl.impl_generic_params.clone()
+                } else {
+                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(concrete_instance_type_id).unwrap();
+
+                    let inherent_impls = match &type_symbol.kind {
+                        TypeSymbolKind::Struct((_, impls)) => impls,
+                        TypeSymbolKind::Enum((_, impls)) => impls,
+                        _ => unreachable!(),
+                    };
+
+                    let applicable_impl = inherent_impls
+                        .iter()
+                        .find(|imp| imp.scope_id == impl_block_scope_id)
+                        .unwrap();
+
+                    applicable_impl.generic_params.clone()
+                };
+
+            if let Type::Base { args, .. } = &concrete_instance_type {
+                let impl_subs: HashMap<_, _> = impl_generics
+                    .iter()
+                    .zip(args.iter())
+                    .map(|(p, c)| (*p, c.clone()))
+                    .collect();
+
+                final_sub_map.extend(impl_subs);
+            }
+
+            if !impl_fn_type_symbol.generic_parameters.is_empty() {
+                let callsite_generics = generic_arguments.as_ref().unwrap();
+                let method_subs: HashMap<_, _> = impl_fn_type_symbol
+                    .generic_parameters
+                    .iter()
+                    .zip(callsite_generics.iter())
+                    .map(|(p, c)| (*p, c.clone()))
+                    .collect();
+                final_sub_map.extend(method_subs);
+
+                let concrete_types = impl_fn_type_symbol
+                    .generic_parameters
+                    .iter()
+                    .map(|p| final_sub_map.get(p).unwrap().clone())
+                    .collect::<Vec<_>>();
+
+                self.compile_monomorphized_function(impl_fn_id, &concrete_types)
+            } else if !final_sub_map.is_empty() {
+                let mut sorted_subs: Vec<_> = final_sub_map.iter().collect();
+                sorted_subs.sort_by_key(|(k, _)| **k);
+                let concrete_types_for_impl =
+                    sorted_subs.iter().map(|(_, t)| (*t).clone()).collect::<Vec<_>>();
+                let cache_key = (impl_fn_id, concrete_types_for_impl);
+
+                if let Some(cached_fn) = self.monomorphization_cache.get(&cache_key) {
+                    *cached_fn
+                } else {
+                    let specialized_fn =
+                        self.compile_monomorphized_function_with_subs(impl_fn_id, &final_sub_map);
+                    self.monomorphization_cache
+                        .insert(cache_key, specialized_fn);
+                    specialized_fn
+                }
+            } else {
+                *self.functions.get(&impl_fn_id).unwrap()
             }
         } else {
-            FunctionValue::try_from(self.compile_node(function_node).unwrap().into_pointer_value().as_any_value_enum()).unwrap()
+            let fn_value_id = function_node.value_id.unwrap();
+            let fn_symbol = self.analyzer.symbol_table.get_value_symbol(fn_value_id).unwrap();
+            let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
+            if !fn_type_symbol.generic_parameters.is_empty() {
+                let concrete_types = generic_arguments.as_ref().unwrap();
+                self.compile_monomorphized_function(fn_value_id, concrete_types)
+            } else {
+                FunctionValue::try_from(self.compile_node(function_node).unwrap().into_pointer_value().as_any_value_enum()).unwrap()
+            }
         };
 
         let specialized_fn_type = callee.get_type();
@@ -1264,7 +1381,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_monomorphized_function(&mut self, generic_fn_id: ValueSymbolId, concrete_types: &[Type]) -> FunctionValue<'ctx> {
-        let generic_fn_node = self.fn_ast_map[&generic_fn_id];
+        let cache_key = (generic_fn_id, concrete_types.to_vec());
+        if let Some(cached_fn) = self.monomorphization_cache.get(&cache_key) {
+            return *cached_fn;
+        }
+
         let generic_fn_symbol = self.analyzer.symbol_table.get_value_symbol(generic_fn_id).unwrap();
         let generic_fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(generic_fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
 
@@ -1273,26 +1394,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .map(|(&id, ty)| (id, ty.clone()))
             .collect();
         
-        let base_name = self.analyzer.symbol_table.get_value_name(generic_fn_symbol.name_id);
-        let type_names = concrete_types.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect::<Vec<_>>().join(",");
-        let mangled_name = format!("{}<{}>", base_name, type_names);
-
-        if let Some(existing_fn) = self.module.get_function(&mangled_name) {
-            return existing_fn;
-        }
-
-        let specialized_fn_type = Self::apply_codegen_substitution(generic_fn_symbol.type_id.as_ref().unwrap(), &substitution_map);
-        let llvm_fn_type = self.map_semantic_fn_type(&specialized_fn_type);
-        
-        let function = self.module.add_function(&mangled_name, llvm_fn_type, None);
-
-        let old_sub_map = self.current_substitution_map.take();
-        self.current_substitution_map = Some(substitution_map);
-        
-        self.compile_function_body_into(generic_fn_node, function);
-        
-        self.current_substitution_map = old_sub_map;
-
+        let function = self.compile_monomorphized_function_with_subs(generic_fn_id, &substitution_map);
+        self.monomorphization_cache.insert(cache_key, function);
         function
     }
 }

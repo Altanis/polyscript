@@ -1,26 +1,23 @@
-// generics need to be constrained to traits properly
-// memory safety (reference counting)
-
-struct Point<T> {
-    x: T;
+struct Vector2D {}
+trait Point {
+    fn dist(&self, other: &Self): int;
 }
 
-impl Point<int> {
-    const precise: bool = false;
-    type Implementor = int;
+impl Vector2D {
+    fn new(): Self {
+        Self {}
+    }
 
-    fn default(): Self {
-        Point { x: 1 }
+    fn mutate(&mut self) {}
+}
+
+impl Point for Vector2D {
+    fn dist(&self, other: &Self): int {
+        3
     }
 }
 
-impl Point<float> {
-    const precise: bool = true;
-    type Implementor = float;
-
-    fn default(): Self {
-        Point { x: 1.0 }
-    }
-}
-
-let p1: Point<int> = [Point<int>].default();
+let p1 = Vector2D.new();
+p1.mutate();
+let p2 = Vector2D.new();
+let d = p1.dist(&p2);

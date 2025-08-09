@@ -43,6 +43,7 @@ pub enum ErrorKind {
     NotCallable(String),
     ArityMismatch(usize, usize),
     InvalidReturn,
+    InvalidStructLiteral(String),
     InvalidField(String, String),
     MismatchedStructFields {
         struct_name: String,
@@ -142,6 +143,7 @@ impl ErrorKind {
             ErrorKind::NotCallable(ty) => format!("{ty} is not callable"),
             ErrorKind::ArityMismatch(expected, given) => format!("expected {expected} arguments, got {given} arguments"),
             ErrorKind::InvalidReturn => "return statement found outside of function".to_string(),
+            ErrorKind::InvalidStructLiteral(ty) => format!("attempted to construct {ty} as a struct literal, but it is not a struct"),
             ErrorKind::InvalidField(struct_name, field_name) => format!("struct {struct_name} does not have field {field_name}"),
             ErrorKind::MismatchedStructFields {
                 struct_name,

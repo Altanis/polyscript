@@ -637,8 +637,18 @@ impl SemanticAnalyzer {
             return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
         };
 
-        let struct_scope_id = {
-            if let TypeSymbolKind::Struct((struct_scope_id, _)) = &symbol.kind { *struct_scope_id } else { unreachable!() }
+        let struct_scope_id = match &symbol.kind {
+            TypeSymbolKind::Struct((struct_scope_id, _)) => *struct_scope_id,
+            TypeSymbolKind::TypeAlias((_, ty)) => {
+                if let Some(ty) = ty
+                    && let TypeSymbolKind::Struct((struct_scope_id, _)) = &self.symbol_table.get_type_symbol(ty.get_base_symbol()).unwrap().kind
+                { 
+                    *struct_scope_id
+                } else {
+                    return Err(self.create_error(ErrorKind::InvalidStructLiteral(name.to_string()), span, &[span]));
+                }
+            },
+            _ => return Err(self.create_error(ErrorKind::InvalidStructLiteral(name.to_string()), span, &[span]))
         };
 
         let literal_field_names: HashSet<String> = fields.keys().cloned().collect();
