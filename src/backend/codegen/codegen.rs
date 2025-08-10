@@ -7,10 +7,7 @@ use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, Point
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{
-    AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId,
-    TypeSymbolKind, ValueSymbolId, ValueSymbolKind,
-};
+use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 use crate::utils::kind::Operation;
 
@@ -21,10 +18,6 @@ pub struct CodeGen<'a, 'ctx> {
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
     
-    fn_ast_map: HashMap<ValueSymbolId, &'a AstNode>,
-    monomorphization_cache: HashMap<(ValueSymbolId, Vec<Type>), FunctionValue<'ctx>>,
-    current_substitution_map: Option<HashMap<TypeSymbolId, Type>>,
-
     analyzer: &'a SemanticAnalyzer,
 
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
@@ -86,112 +79,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn resolve_type(&self, ty: &Type) -> Type {
-        let mut current_ty = ty.clone();
-        loop {
-            let Type::Base { symbol, args } = &current_ty else { break };
-            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-
-            if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &type_symbol.kind {
-                let substitutions = type_symbol
-                    .generic_parameters
-                    .iter()
-                    .zip(args.iter())
-                    .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
-                    .collect();
-
-                current_ty = Self::apply_codegen_substitution(aliased_type, &substitutions);
-            } else {
-                break;
-            }
-        }
-        current_ty
-    }
-
-    fn is_impl_applicable(&self, instance_type: &Type, imp: &TraitImpl) -> bool {
-        let instance_args = if let Type::Base { args, .. } = instance_type {
-            args
-        } else {
-            return imp.type_specialization.is_empty();
-        };
-
-        let impl_target_arg_ids = &imp.type_specialization;
-        if instance_args.len() != impl_target_arg_ids.len() {
-            return false;
-        }
-
-        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
-            let target_symbol = self.analyzer.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
-
-            if !imp.impl_generic_params.contains(&target_symbol.id) {
-                let resolved_instance_arg = self.resolve_type(instance_arg);
-                let resolved_impl_arg = self.resolve_type(&Type::new_base(impl_target_arg_id));
-
-                if resolved_instance_arg != resolved_impl_arg {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
-    fn resolve_associated_type(&self, concrete_type: &Type, trait_type: &Type, member_name: &str) -> Option<Type> {
-        let trait_id = trait_type.get_base_symbol();
-        let type_id = concrete_type.get_base_symbol();
-
-        let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
-        let impls_for_type = impls_for_trait.get(&type_id)?;
-
-        for imp in impls_for_type {
-            if !self.is_impl_applicable(concrete_type, imp) {
-                continue;
-            }
-
-            let assoc_type_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(member_name, imp.impl_scope_id).unwrap();
-            let TypeSymbolKind::TypeAlias((_, Some(aliased_type_template))) = &assoc_type_symbol.kind else { unreachable!() };
-            let instance_args = if let Type::Base { args, .. } = concrete_type { args } else { &vec![] };
-
-            let mut substitutions: HashMap<_, _> = imp.impl_generic_params.iter()
-                .zip(instance_args.iter())
-                .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
-                .collect();
-
-            if let Type::Base { args, .. } = trait_type {
-                let trait_symbol = self.analyzer.symbol_table.get_type_symbol(trait_id).unwrap();
-                let trait_generic_substitutions: HashMap<_, _> = trait_symbol.generic_parameters.iter()
-                    .zip(args.iter())
-                    .map(|(param_id, concrete_type)| (*param_id, concrete_type.clone()))
-                    .collect();
-
-                substitutions.extend(trait_generic_substitutions);
-            }
-
-            return Some(Self::apply_codegen_substitution(
-                aliased_type_template,
-                &substitutions,
-            ));
-        }
-
-        None
-    }
-
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
-        let substitution = if let Type::Base { symbol, .. } = ty {
-            if let Some(sub_map) = &self.current_substitution_map {
-                sub_map.get(symbol).cloned() 
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some(concrete_type) = substitution {
-            return self.map_semantic_type(&concrete_type);
-        }
-
         match ty {
             Type::Base { symbol, .. } => {
                 if let Some(&llvm_ty) = self.type_map.get(symbol) {
@@ -230,32 +119,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         llvm_struct.set_body(&field_types, false);
                         llvm_struct.as_basic_type_enum()
                     },
+                    // Values of an enum type are integers.
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
-                    TypeSymbolKind::Generic(_) => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                    // TypeSymbolKind::Generic(_) => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::FunctionSignature { .. }
                         => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
-                    TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } => {
-                        let mut concrete_base = opaque_ty.clone();
-                        if let Some(substitutions) = &self.current_substitution_map {
-                            concrete_base = Self::apply_codegen_substitution(&concrete_base, substitutions);
-                        }
-                        
-                        let base_symbol_of_projection = self.analyzer.symbol_table.get_type_symbol(concrete_base.get_base_symbol()).unwrap();
-                        
-                        if let TypeSymbolKind::Generic(_) = base_symbol_of_projection.kind {
-                            self.context.ptr_type(AddressSpace::default()).as_basic_type_enum()
-                        } else {
-                            let concrete_trait = if let Some(substitutions) = &self.current_substitution_map {
-                                Self::apply_codegen_substitution(opaque_tr, substitutions)
-                            } else {
-                                opaque_tr.clone()
-                            };
-
-                            let resolved = self.resolve_associated_type(&concrete_base, &concrete_trait, member).unwrap();
-                            return self.map_semantic_type(&resolved);
-                        }
-                    }
                     _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
                 };
 
@@ -274,7 +143,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let llvm_params: Vec<_> = params
             .iter()
-            .filter_map(|p| self.map_semantic_type(p).map(|t| t.into()))
+            .map(|p| self.map_semantic_type(p).unwrap().into())
             .collect();
 
         let llvm_return = self.map_semantic_type(return_type);
@@ -283,34 +152,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ret_type.fn_type(&llvm_params, false)
         } else {
             self.context.void_type().fn_type(&llvm_params, false)
-        }
-    }
-
-    /// Applies the current substitution context to a semantic function type
-    /// to get the specialized signature.
-    fn apply_codegen_substitution(ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
-        match ty {
-            Type::Base { symbol: base_symbol_id, args } => {
-                if let Some(substituted_type) = substitutions.get(base_symbol_id) {
-                    return substituted_type.clone();
-                }
-
-                let substituted_args = args
-                    .iter()
-                    .map(|arg| Self::apply_codegen_substitution(arg, substitutions))
-                    .collect();
-
-                Type::Base {
-                    symbol: *base_symbol_id,
-                    args: substituted_args,
-                }
-            },
-            Type::Reference(inner) => {
-                Type::Reference(Box::new(Self::apply_codegen_substitution(inner, substitutions)))
-            },
-            Type::MutableReference(inner) => {
-                Type::MutableReference(Box::new(Self::apply_codegen_substitution(inner, substitutions)))
-            }
         }
     }
 
@@ -1162,207 +1003,84 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_function_body_into(&mut self, node: &AstNode, function: FunctionValue<'ctx>) {
-        let AstNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
-
-        let old_fn = self.current_function.take();
-        let old_vars = self.variables.clone();
-        self.variables.clear();
-        self.current_function = Some(function);
-
-        let entry = self.context.append_basic_block(function, "entry");
-        self.builder.position_at_end(entry);
-
-        for (i, param_node) in parameters.iter().enumerate() {
-            let param_value = function.get_nth_param(i as u32).unwrap();
-            let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
-            let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
-            param_value.set_name(param_name);
-
-            let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
-            self.builder.build_store(alloca, param_value).unwrap();
-
-            self.variables.insert(param_node.value_id.unwrap(), alloca);
-        }
-
-        let body_val = self.compile_node(body.as_ref().unwrap());
-
-        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
-            if function.get_type().get_return_type().is_some() {
-                self.builder.build_return(Some(&body_val.unwrap())).unwrap();
-            } else {
-                self.builder.build_return(None).unwrap();
-            }
-        }
-        
-        self.current_function = old_fn;
-        self.variables = old_vars;
-    }
-
-    fn compile_monomorphized_function_with_subs(
-        &mut self,
-        generic_fn_id: ValueSymbolId,
-        substitutions: &HashMap<TypeSymbolId, Type>,
-    ) -> FunctionValue<'ctx> {
-        let generic_fn_symbol = self.analyzer.symbol_table.get_value_symbol(generic_fn_id).unwrap();
-        
-        let mut sorted_subs: Vec<_> = substitutions.iter().collect();
-        sorted_subs.sort_by_key(|(k, _)| **k);
-        let concrete_types_for_cache = sorted_subs.iter().map(|(_, t)| (*t).clone()).collect::<Vec<_>>();
-        let cache_key = (generic_fn_id, concrete_types_for_cache);
-
-        if let Some(cached_fn) = self.monomorphization_cache.get(&cache_key) {
-            return *cached_fn;
-        }
-
-        let generic_fn_node = self.fn_ast_map[&generic_fn_id];
-
-        let base_name = self.analyzer.symbol_table.get_value_name(generic_fn_symbol.name_id);
-        let type_names = sorted_subs
-            .iter()
-            .map(|(_, t)| self.analyzer.symbol_table.display_type(t))
-            .collect::<Vec<_>>()
-            .join(",");
-        let mangled_name = format!("{}<{}>", base_name, type_names);
-
-        if let Some(existing_fn) = self.module.get_function(&mangled_name) {
-            self.monomorphization_cache.insert(cache_key, existing_fn);
-            return existing_fn;
-        }
-
-        let specialized_fn_type = Self::apply_codegen_substitution(generic_fn_symbol.type_id.as_ref().unwrap(), substitutions);
-        let llvm_fn_type = self.map_semantic_fn_type(&specialized_fn_type);
-
-        let function = self.module.add_function(&mangled_name, llvm_fn_type, None);
-        
-        self.monomorphization_cache.insert(cache_key.clone(), function);
-
-        let old_sub_map = self.current_substitution_map.take();
-        self.current_substitution_map = Some(substitutions.clone());
-
-        self.compile_function_body_into(generic_fn_node, function);
-
-        self.current_substitution_map = old_sub_map;
-
-        function
-    }
-
     fn compile_function_call(
         &mut self,
         function_node: &BoxedAstNode,
         arguments: &[AstNode],
-        generic_arguments: &Option<Vec<Type>>,
         return_type: Option<&Type>,
     ) -> Option<BasicValueEnum<'ctx>> {
-        let old_sub_map = self.current_substitution_map.clone();
-        let mut call_substitutions = old_sub_map.clone().unwrap_or_default();
-        let callee_id: ValueSymbolId;
-
-        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind {
-            callee_id = right.value_id.unwrap();
-
-            let instance_type = self.resolve_type(left.type_id.as_ref().unwrap());
-            if let Type::Base { symbol: type_id, args } = &instance_type {
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*type_id).unwrap();
-                if !type_symbol.generic_parameters.is_empty() {
-                    let impl_subs: HashMap<_, _> = type_symbol
-                        .generic_parameters
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(p, c)| (*p, c.clone()))
-                        .collect();
-                    call_substitutions.extend(impl_subs);
+        let callee_type = function_node.type_id.as_ref().unwrap();
+        let Type::Base { symbol: fn_symbol_id, .. } = callee_type else { unreachable!() };
+        let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
+        let TypeSymbolKind::FunctionSignature { params: param_types, return_type: fn_return_type, .. } = &fn_symbol.kind else { unreachable!() };
+    
+        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
+        let mut param_type_iter = param_types.iter();
+    
+        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
+            && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
+            && let ValueSymbolKind::Function(scope_id) = member_symbol.kind
+        {
+            let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+            if fn_scope.receiver_kind.is_some() {
+                let is_static_call = match &left.kind {
+                    AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some(),
+                    AstNodeKind::PathQualifier {..} => true,
+                    _ => false,
+                };
+                
+                if !is_static_call {
+                    let instance_value = self.compile_node(left).unwrap();
+                    let param_type = param_type_iter.next().unwrap();
+                    compiled_args.push(self.box_if_needed(instance_value, left.type_id.as_ref().unwrap(), param_type));
                 }
             }
-        } else {
-            callee_id = function_node.value_id.unwrap();
         }
-
-        let callee_symbol = self.analyzer.symbol_table.get_value_symbol(callee_id).unwrap();
-        let fn_type_symbol = self
-            .analyzer
-            .symbol_table
-            .get_type_symbol(callee_symbol.type_id.as_ref().unwrap().get_base_symbol())
-            .unwrap();
-
-        if !fn_type_symbol.generic_parameters.is_empty() {
-            let callsite_generics = generic_arguments.as_ref().unwrap();
-            let method_subs: HashMap<_, _> = fn_type_symbol
-                .generic_parameters
-                .iter()
-                .zip(callsite_generics.iter())
-                .map(|(p, c)| (*p, c.clone()))
-                .collect();
-            call_substitutions.extend(method_subs);
-        }
-
-        let callee = if call_substitutions.is_empty() || self.current_substitution_map.as_ref() == Some(&call_substitutions) {
-            *self.functions.get(&callee_id).unwrap()
-        } else {
-            self.compile_monomorphized_function_with_subs(callee_id, &call_substitutions)
-        };
-
-        self.current_substitution_map = Some(call_substitutions);
-
-        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
-        if let AstNodeKind::FieldAccess { left, .. } = &function_node.kind {
-            let is_static_call = if let AstNodeKind::Identifier(name) = &left.kind {
-                self.analyzer
-                    .symbol_table
-                    .find_type_symbol_from_scope(left.scope_id.unwrap(), name)
-                    .is_some()
-            } else {
-                matches!(left.kind, AstNodeKind::PathQualifier { .. })
-            };
-            if !is_static_call {
-                let instance_value = self.compile_node(left).unwrap();
-                compiled_args.push(instance_value);
-            }
-        }
+        
         for arg_node in arguments {
             let arg_value = self.compile_node(arg_node).unwrap();
-            compiled_args.push(arg_value);
+            let param_type = param_type_iter.next().unwrap();
+            compiled_args.push(self.box_if_needed(arg_value, arg_node.type_id.as_ref().unwrap(), param_type));
         }
-
-        self.current_substitution_map = old_sub_map;
-
-        let call = self
-            .builder
-            .build_call(
-                callee,
-                &compiled_args.iter().map(|v| (*v).into()).collect::<Vec<_>>(),
-                "",
-            )
-            .unwrap();
-
-        if return_type.is_some() && callee.get_type().get_return_type().is_some() {
-            return call.try_as_basic_value().left();
+        
+        let callee = self.compile_node(function_node).unwrap().into_pointer_value();
+        let fn_type = self.map_semantic_fn_type(function_node.type_id.as_ref().unwrap());
+        
+        let call = self.builder.build_indirect_call(
+            fn_type,
+            callee,
+            &compiled_args.iter().map(|v| (*v).into()).collect::<Vec<_>>(),
+            "",
+        ).unwrap();
+    
+        if let Some(ret_type) = return_type {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
+            if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
+                let mut result_val = call.try_as_basic_value().left().unwrap();
+                
+                let fn_return_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_return_type.get_base_symbol()).unwrap();
+                if let TypeSymbolKind::Generic(_) = fn_return_type_symbol.kind
+                    && !matches!(type_symbol.kind, TypeSymbolKind::Generic(_))
+                {
+                    let ptr = result_val.into_pointer_value();
+                    let llvm_type = self.map_semantic_type(ret_type).unwrap();
+                    result_val = self.builder.build_load(llvm_type, ptr, "").unwrap();
+                    // todo memory management
+                }
+                return Some(result_val);
+            }
         }
-
+    
         None
     }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub fn new(context: &'ctx Context, builder: &'a Builder<'ctx>, module: &'a Module<'ctx>, analyzer: &'a SemanticAnalyzer, program: &'a AstNode) -> Self {
-        let mut fn_ast_map = HashMap::new();
-        let mut queue = vec![program];
-
-        while let Some(node) = queue.pop() {
-            if let AstNodeKind::Function { .. } = &node.kind && let Some(id) = node.value_id {
-                fn_ast_map.insert(id, node);
-            }
-
-            queue.extend(node.children());
-        }
-
+    pub fn new(context: &'ctx Context, builder: &'a Builder<'ctx>, module: &'a Module<'ctx>, analyzer: &'a SemanticAnalyzer) -> Self {
         CodeGen {
             context,
             builder,
             module,
-            fn_ast_map,
-            monomorphization_cache: HashMap::new(),
-            current_substitution_map: None,
             analyzer,
             variables: HashMap::new(),
             functions: HashMap::new(),
@@ -1388,13 +1106,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_declarations_pass(&mut self, stmts: &[AstNode]) {
         for stmt in stmts.iter() {
             match &stmt.kind {
-                AstNodeKind::Function { .. } => {
-                    let fn_symbol = self.analyzer.symbol_table.get_value_symbol(stmt.value_id.unwrap()).unwrap();
-                    let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
-                    if fn_type_symbol.generic_parameters.is_empty() {
-                        self.compile_function_declaration(stmt);
-                    }
-                },
+                AstNodeKind::Function { .. } => self.compile_function_declaration(stmt),
                 AstNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
                 AstNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
                 AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. } => {
@@ -1521,7 +1233,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             AstNodeKind::FieldAccess { left, right } => self.compile_field_access(left, right),
             AstNodeKind::FunctionCall { function, arguments, generic_arguments }
-                => self.compile_function_call(function, arguments, generic_arguments, stmt.type_id.as_ref()),
+                => self.compile_function_call(function, arguments, stmt.type_id.as_ref()),
             AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }

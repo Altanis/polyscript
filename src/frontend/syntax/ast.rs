@@ -138,7 +138,7 @@ pub enum AstNodeKind {
 
     /// `self`
     SelfExpr,
-    /// `Self`, used as the type annotation for `this`, `&this`, and `&mut this`
+    /// `Self`, used as the type annotation for `self`, `&self`, and `&mut self`
     /// in an associated function.
     SelfType(ReferenceKind),
 

@@ -15,8 +15,8 @@ impl Vector2D {
     }
 
     fn take_this(this) {}
-    fn take_ref_this(&this) {}
-    fn take_mut_ref_this(&mut this) {}
+    fn take_ref_this(&self) {}
+    fn take_mut_ref_this(&mut self) {}
 }
 
 let v1 = Vector2D.default();
@@ -38,7 +38,7 @@ impl Difficulty {
         return Difficulty.Easy;
     }
 
-    fn get_levels(&this): Self.ReturnTy {
+    fn get_levels(&self): Self.ReturnTy {
         return Self.LEVELS;
     }
 }

@@ -7,8 +7,8 @@ struct Scalar {
 }
 
 impl Scalar {
-    // fn mutate_self(&this) { this.inner += 1; } -> err
-    fn mutate_self(&mut this) {
+    // fn mutate_self(&self) { this.inner += 1; } -> err
+    fn mutate_self(&mut self) {
         this.inner += 1;
     }
 }

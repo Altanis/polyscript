@@ -10,7 +10,7 @@ struct Vector2D {
 
 impl Add for Vector2D {
     type Output = Vector2D;
-    fn add(&this, other: &Self): Self.Output {
+    fn add(&self, other: &Self): Self.Output {
         Vector2D {
             x: this.x + other.x,
             y: this.y + other.y
@@ -20,7 +20,7 @@ impl Add for Vector2D {
 
 impl Multiply<int> for Vector2D {
     type Output = Vector2D;
-    fn add(&this, other: int): Self.Output {
+    fn add(&self, other: int): Self.Output {
         Vector2D {
             x: this.x * other,
             y: this.y * other

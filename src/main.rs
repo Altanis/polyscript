@@ -86,7 +86,7 @@ fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
     let module = context.create_module("a");
     let builder = context.create_builder();
 
-    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer, &program);
+    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
     codegen.compile_program(&program);
 
     let path = Path::new("bin/output.ll");

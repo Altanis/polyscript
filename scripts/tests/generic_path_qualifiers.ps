@@ -3,13 +3,13 @@ struct Iterable {}
 trait Iterator {
     type Item;
 
-    fn next(&this): Self.Item;
+    fn next(&self): Self.Item;
 }
 
 impl Iterator for Iterable {
     type Item = int;
 
-    fn next(&this): Self.Item {
+    fn next(&self): Self.Item {
         return 3;
     }
 }

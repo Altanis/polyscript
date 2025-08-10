@@ -17,6 +17,8 @@ fn find_node_by_span_mut(node: &mut AstNode, target_span: Span) -> Option<&mut A
 impl SemanticAnalyzer {
     pub fn monomorphization_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let requests = std::mem::take(&mut self.unification_context.monomorphization_requests);
+        dbg!(&requests);
+
         for (span, types) in requests {
             if let Some(node) = find_node_by_span_mut(program, span) 
                 && let AstNodeKind::FunctionCall { ref mut generic_arguments, .. } = node.kind

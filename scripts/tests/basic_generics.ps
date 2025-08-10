@@ -7,7 +7,7 @@ struct Type<A> {
 }
 
 impl<U> Type<U> {
-    fn test(&this, other: &Self) {}
+    fn test(&self, other: &Self) {}
 }
 
 let v1 = Type { x: 3 };
@@ -25,7 +25,7 @@ struct Vector3D<T, U> {
 }
 
 impl<T, U> Vector3D<T, U> {
-    fn operation(&this, other: &Self): int {
+    fn operation(&self, other: &Self): int {
         return 0;
     }
 }
@@ -37,7 +37,7 @@ impl Vector3D<int, float> {
 }
 
 impl Vector3D<float, float> {
-    fn test(&this) {
+    fn test(&self) {
 
     }
 }

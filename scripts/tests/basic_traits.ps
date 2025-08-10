@@ -1,7 +1,7 @@
 trait Animal {
     type SpeechEmission;
 
-    fn speak(&this): Self.SpeechEmission;
+    fn speak(&self): Self.SpeechEmission;
 }
 
 struct Dog {}
@@ -9,14 +9,14 @@ struct Cat {}
 
 impl Animal for Dog {
     type SpeechEmission = char;
-    fn speak(&this): Self.SpeechEmission {
+    fn speak(&self): Self.SpeechEmission {
         return 'b';
     }
 }
 
 impl Animal for Cat {
     type SpeechEmission = string;
-    fn speak(&this): Self.SpeechEmission {
+    fn speak(&self): Self.SpeechEmission {
         return "meow";
     }
 }
