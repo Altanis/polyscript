@@ -1254,25 +1254,6 @@ impl SemanticAnalyzer {
                         self.collect_signature_generics(p, &mut fn_generic_param_ids);
                     }
 
-                    if !callee_symbol.generic_parameters.is_empty() {
-                        let mut substitutions = HashMap::new();
-                        for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
-                            self.collect_substitutions(
-                                call_arg,
-                                sig_param,
-                                &mut substitutions,
-                                &fn_generic_param_ids,
-                                info,
-                            )?;
-                        }
-                        
-                        let concrete_types: Vec<Type> = callee_symbol.generic_parameters.iter()
-                            .map(|&id| substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id)))
-                            .collect();
-                        
-                        self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
-                    }
-
                     let mut substitutions = HashMap::new();
                     for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
                         self.collect_substitutions(
@@ -1282,6 +1263,20 @@ impl SemanticAnalyzer {
                             &fn_generic_param_ids,
                             info,
                         )?;
+                    }
+                        
+                    if !fn_generic_param_ids.is_empty() {
+                        let mut sorted_generics: Vec<_> = fn_generic_param_ids.iter().copied().collect();
+                        sorted_generics.sort();
+                        
+                        let concrete_types: Vec<Type> = sorted_generics
+                            .iter()
+                            .map(|&id| {
+                                substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id))
+                            })
+                            .collect();
+                        
+                        self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
                     }
 
                     let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
@@ -1387,13 +1382,17 @@ impl SemanticAnalyzer {
                 )?;
             }
 
-            if !callee_symbol.generic_parameters.is_empty() {
-                let concrete_types: Vec<Type> = callee_symbol.generic_parameters.iter()
+            if !fn_generic_param_ids.is_empty() {
+                let mut sorted_generics: Vec<_> = fn_generic_param_ids.iter().copied().collect();
+                sorted_generics.sort();
+                
+                let concrete_types: Vec<Type> = sorted_generics
+                    .iter()
                     .map(|&id| {
                         substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id))
                     })
                     .collect();
-
+                
                 self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
             }
 
