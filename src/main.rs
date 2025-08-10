@@ -17,7 +17,7 @@ use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;
 use inkwell::context::Context;
-use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetTriple};
 use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
@@ -170,7 +170,7 @@ fn assert_scripts_work() {
 
         let program = fs::read_to_string(&path).expect("Invalid source file.");
         let (lined_source, tokens) = generate_tokens(program);
-        let program_node = parse_tokens(lined_source.clone(), tokens);
+        let _ = parse_tokens(lined_source.clone(), tokens);
         // let (_, program) = analyze_tokens(lined_source, program_node);
 
         // println!("{}", program);

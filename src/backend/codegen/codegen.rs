@@ -3,7 +3,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
-use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
@@ -23,6 +23,7 @@ pub struct CodeGen<'a, 'ctx> {
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
     functions: HashMap<ValueSymbolId, FunctionValue<'ctx>>,
     constants: HashMap<ValueSymbolId, BasicValueEnum<'ctx>>,
+    monomorphized_functions: HashMap<(ValueSymbolId, Vec<Type>), FunctionValue<'ctx>>,
 
     string_interner: NameInterner,
     string_literals: HashMap<StringLiteralId, PointerValue<'ctx>>,
@@ -121,7 +122,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                     // Values of an enum type are integers.
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
-                    // TypeSymbolKind::Generic(_) => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::FunctionSignature { .. }
                         => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
@@ -1003,20 +1003,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_function_call(
+    fn prepare_call_arguments(
         &mut self,
-        function_node: &BoxedAstNode,
+        function_node: &AstNode,
         arguments: &[AstNode],
-        return_type: Option<&Type>,
-    ) -> Option<BasicValueEnum<'ctx>> {
+    ) -> Vec<BasicValueEnum<'ctx>> {
         let callee_type = function_node.type_id.as_ref().unwrap();
-        let Type::Base { symbol: fn_symbol_id, .. } = callee_type else { unreachable!() };
-        let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
-        let TypeSymbolKind::FunctionSignature { params: param_types, return_type: fn_return_type, .. } = &fn_symbol.kind else { unreachable!() };
-    
+        let Type::Base { symbol: fn_type_symbol_id, .. } = callee_type else { unreachable!(); };
+        let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_type_symbol_id).unwrap();
+        let TypeSymbolKind::FunctionSignature { params: param_types, .. } = &fn_type_symbol.kind else { unreachable!(); };
+
         let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
         let mut param_type_iter = param_types.iter();
-    
+
         if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
             && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
             && let ValueSymbolKind::Function(scope_id) = member_symbol.kind
@@ -1032,7 +1031,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if !is_static_call {
                     let instance_value = self.compile_node(left).unwrap();
                     let param_type = param_type_iter.next().unwrap();
-                    compiled_args.push(self.box_if_needed(instance_value, left.type_id.as_ref().unwrap(), param_type));
+                    let instance_type = left.type_id.as_ref().unwrap();
+                    compiled_args.push(self.box_if_needed(instance_value, instance_type, param_type));
                 }
             }
         }
@@ -1040,34 +1040,69 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for arg_node in arguments {
             let arg_value = self.compile_node(arg_node).unwrap();
             let param_type = param_type_iter.next().unwrap();
-            compiled_args.push(self.box_if_needed(arg_value, arg_node.type_id.as_ref().unwrap(), param_type));
+            let arg_type = arg_node.type_id.as_ref().unwrap();
+            compiled_args.push(self.box_if_needed(arg_value, arg_type, param_type));
         }
+
+        compiled_args
+    }
+
+    fn get_or_create_monomorphized_fn(&mut self, base_fn_id: ValueSymbolId, specializations: &[Type]) -> FunctionValue<'ctx> {
+        if let Some(fn_value) = self.monomorphized_functions.get(&(base_fn_id, specializations.to_vec())) {
+            return *fn_value;
+        }
+
+        // TODO: This is where the real work would happen:
+        // 1. Find the AST for the generic function `base_fn_id`.
+        // 2. Create a mangled name for the new function (e.g., `vec_add<i32>` -> `vec_add_i32`).
+        // 3. Create a new specialized `FunctionType` by replacing generic params with `specializations`.
+        // 4. Add the new `FunctionValue` to the module.
+        // 5. Add it to `self.monomorphized_functions` *before* compiling the body to allow recursion.
+        // 6. Set up a temporary "generic context" mapping generic type symbols to concrete types.
+        // 7. Compile the body of the function in this new context.
+        // 8. Restore the context.
+        // 9. Return the new `FunctionValue`.
         
-        let callee = self.compile_node(function_node).unwrap().into_pointer_value();
-        let fn_type = self.map_semantic_fn_type(function_node.type_id.as_ref().unwrap());
-        
-        let call = self.builder.build_indirect_call(
-            fn_type,
-            callee,
-            &compiled_args.iter().map(|v| (*v).into()).collect::<Vec<_>>(),
-            "",
-        ).unwrap();
+        panic!()
+    }
     
+    fn compile_function_call(
+        &mut self,
+        function_node: &BoxedAstNode,
+        arguments: &[AstNode],
+        generic_arguments: &Option<Vec<Type>>,
+        return_type: Option<&Type>,
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let compiled_args = self.prepare_call_arguments(function_node, arguments);
+        let arg_refs: Vec<_> = compiled_args.iter().map(|v| (*v).into()).collect();
+
+        let call: CallSiteValue = if let Some(generics) = generic_arguments {
+            let fn_symbol_id = if let AstNodeKind::FieldAccess { right, .. } = &function_node.kind {
+                right.value_id.unwrap()
+            } else {
+                function_node.value_id.unwrap()
+            };
+            
+            let monomorphized_fn = self.get_or_create_monomorphized_fn(fn_symbol_id, generics);
+            
+            self.builder.build_call(monomorphized_fn, &arg_refs, "").unwrap()
+        } else {
+            let callee_value = self.compile_node(function_node).unwrap();
+
+            if let Ok(function) = FunctionValue::try_from(callee_value.into_pointer_value().as_any_value_enum()) {
+                self.builder.build_call(function, &arg_refs, "").unwrap()
+            } else {
+                let callee_ptr = callee_value.into_pointer_value();
+                let fn_type = self.map_semantic_fn_type(function_node.type_id.as_ref().unwrap());
+                
+                self.builder.build_indirect_call(fn_type, callee_ptr, &arg_refs, "").unwrap()
+            }
+        };
+
         if let Some(ret_type) = return_type {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
             if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
-                let mut result_val = call.try_as_basic_value().left().unwrap();
-                
-                let fn_return_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_return_type.get_base_symbol()).unwrap();
-                if let TypeSymbolKind::Generic(_) = fn_return_type_symbol.kind
-                    && !matches!(type_symbol.kind, TypeSymbolKind::Generic(_))
-                {
-                    let ptr = result_val.into_pointer_value();
-                    let llvm_type = self.map_semantic_type(ret_type).unwrap();
-                    result_val = self.builder.build_load(llvm_type, ptr, "").unwrap();
-                    // todo memory management
-                }
-                return Some(result_val);
+                return call.try_as_basic_value().left();
             }
         }
     
@@ -1085,6 +1120,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             variables: HashMap::new(),
             functions: HashMap::new(),
             constants: HashMap::new(),
+            monomorphized_functions: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
             continue_blocks: vec![],
@@ -1232,8 +1268,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Some(init_val)
             },
             AstNodeKind::FieldAccess { left, right } => self.compile_field_access(left, right),
-            AstNodeKind::FunctionCall { function, arguments, generic_arguments }
-                => self.compile_function_call(function, arguments, stmt.type_id.as_ref()),
+            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+                self.compile_function_call(function, arguments, generic_arguments, stmt.type_id.as_ref())
+            }
             AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
