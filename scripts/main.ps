@@ -1,14 +1,16 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-fn identity<T>(x: T): T {
+/*fn identity<T>(x: T): T {
     return x;
 }
 
 let y = identity(3);
-let z = identity("3");
+let z = identity("3");*/
 
-/*trait Entity {
+// bug: ptr is passed to identity instead of actual int
+
+trait Entity {
     type TickOutput;
     fn tick(&mut self): Self.TickOutput;
 }
@@ -34,4 +36,4 @@ let tank = Tank {};
 let square = Square {};
 
 let fruit1: int = tick(tank);
-let fruit2: char = tick(square);*/
+let fruit2: char = tick(square);

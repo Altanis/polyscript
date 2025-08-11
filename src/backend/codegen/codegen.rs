@@ -1115,80 +1115,44 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return *fn_value;
         }
 
-        // --- 1. Preparation ---
-        // Save the current state to be restored later.
-        let old_context = self.monomorphization_context.take();
 
-        // Get the AST and symbol information for the generic base function.
-        let base_fn_ast = *self.fn_asts.get(&base_fn_id)
-            .expect("CodeGen: Generic function AST not found for monomorphization.");
+        let old_context = self.monomorphization_context.take();
+        let prev_block = self.builder.get_insert_block();
+
+        let base_fn_ast = *self.fn_asts.get(&base_fn_id).unwrap();
         let base_fn_symbol = self.analyzer.symbol_table.get_value_symbol(base_fn_id).unwrap();
         let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(base_fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
         
-        // --- 2. Discover Generic Parameters and Create Context ---
         let new_context = {
-            let TypeSymbolKind::FunctionSignature { params, .. } = &fn_type_symbol.kind else {
-                panic!("CodeGen: Symbol is not a function signature.");
-            };
+            let TypeSymbolKind::FunctionSignature { params, .. } = &fn_type_symbol.kind else { unreachable!(); };
 
-            // Discover the generic parameters from the signature in the order of their first appearance.
-            // e.g., for `fn foo<U, T>(a: U, b: T, c: U)`, the order is `[U, T]`.
             let mut ordered_generic_ids = Vec::new();
             for param_type in params {
-                // We need to check the base type, as it could be `&T` or `&mut T`.
                 let base_symbol_id = param_type.get_base_symbol();
-                let param_type_symbol = self.analyzer.symbol_table.get_type_symbol(base_symbol_id)
-                    .expect("CodeGen: Type symbol not found for parameter.");
+                let param_type_symbol = self.analyzer.symbol_table.get_type_symbol(base_symbol_id).unwrap();
 
-                if let TypeSymbolKind::Generic(_) = param_type_symbol.kind {
-                    // Only add the generic ID if it's the first time we've seen it.
-                    if !ordered_generic_ids.contains(&base_symbol_id) {
-                        ordered_generic_ids.push(base_symbol_id);
-                    }
+                if let TypeSymbolKind::Generic(_) = param_type_symbol.kind && !ordered_generic_ids.contains(&base_symbol_id) {
+                    ordered_generic_ids.push(base_symbol_id);
                 }
             }
-
-            // The number of unique generic types discovered must match the number of specializations provided.
-            if ordered_generic_ids.len() != specializations.len() {
-                // This would indicate a bug in the semantic analyzer (the caller), but it's a good sanity check.
-                panic!(
-                    "Mismatched number of generic arguments during monomorphization. Expected {}, got {}.",
-                    ordered_generic_ids.len(),
-                    specializations.len()
-                );
-            }
             
-            // This maps generic TypeSymbolIds (like for `T`) to the concrete specialization Types (like `i64`).
-            ordered_generic_ids
-                .into_iter()
-                .zip(specializations.iter().cloned())
-                .collect()
+            ordered_generic_ids.into_iter().zip(specializations.iter().cloned()).collect()
         };
         self.monomorphization_context = Some(new_context);
 
-        // --- 3. Mangle the function name for the new specialization ---
         let base_name = self.analyzer.symbol_table.get_value_name(base_fn_symbol.name_id);
-        let specialization_names: Vec<_> = specializations.iter()
-            .map(|ty| {
-                // Create a simple, safe name for the type to use in the LLVM symbol.
-                self.analyzer.symbol_table.display_type(ty)
-                    .replace(|c: char| !c.is_alphanumeric(), "_")
-            })
+        let specialization_names: Vec<_> = specializations
+            .iter()
+            .map(|ty| self.analyzer.symbol_table.display_type(ty).replace(|c: char| !c.is_alphanumeric(), "_"))
             .collect();
         let mangled_name = format!("{}_{}", base_name, specialization_names.join("_"));
 
-        // --- 4. Generate the specialized LLVM function type ---
-        // `map_semantic_fn_type` will now use the monomorphization_context we just set.
         let fn_type = base_fn_symbol.type_id.as_ref().unwrap();
         let llvm_fn_type = self.map_semantic_fn_type(fn_type);
 
-        // --- 5. Create the LLVM function and cache it before compilation ---
-        // Caching before compiling the body is crucial for handling recursion.
         let function = self.module.add_function(&mangled_name, llvm_fn_type, None);
         self.monomorphized_functions.insert(key, function);
 
-        // --- 6. Compile the function body in the new context ---
-        // Save state for the duration of this specific function's compilation.
         let old_fn_in_compiler = self.current_function.take();
         let old_vars = self.variables.clone();
         self.variables.clear();
@@ -1199,7 +1163,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        // Set up function parameters.
         for (i, param_node) in parameters.iter().enumerate() {
             let param_value = function.get_nth_param(i as u32).unwrap();
             let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
@@ -1211,10 +1174,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.variables.insert(param_node.value_id.unwrap(), alloca);
         }
         
-        // Compile the function's body. `compile_node` will use the active context.
         let body_val = self.compile_node(body.as_ref().unwrap());
 
-        // Add a return instruction if the block is not already terminated.
         if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
             if function.get_type().get_return_type().is_some() {
                 self.builder.build_return(Some(&body_val.unwrap())).unwrap();
@@ -1223,13 +1184,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
         
-        // --- 7. Clean up ---
-        // Restore the previous state.
         self.current_function = old_fn_in_compiler;
         self.variables = old_vars;
         self.monomorphization_context = old_context;
+
+        if let Some(block) = prev_block {
+            self.builder.position_at_end(block);
+        }
         
-        // --- 8. Return the completed function ---
         function
     }
 
