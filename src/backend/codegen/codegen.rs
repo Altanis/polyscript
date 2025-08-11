@@ -7,7 +7,7 @@ use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, Funct
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 use crate::utils::kind::Operation;
 
@@ -132,21 +132,73 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn monomorphization_substitute_type(&self, ty: &Type) -> Type {
-        let Some(context) = &self.monomorphization_context else {
-            return ty.clone();
-        };
+    fn find_concrete_method(&self, base_type: &Type, member_symbol: &ValueSymbol) -> Option<ValueSymbolId> {
+        let member_name = self.analyzer.symbol_table.get_value_name(member_symbol.name_id);
+        
+        let trait_scope_id = self.analyzer.symbol_table.get_scope(member_symbol.scope_id)?.id;
+        let trait_symbol = self.analyzer.symbol_table.type_symbols.values()
+            .find(|s| matches!(s.kind, TypeSymbolKind::Trait(id) if id == trait_scope_id))?;        
+        let trait_id = trait_symbol.id;
 
-        match ty {
-            Type::Base { symbol, .. } => {
-                if let Some(concrete_type) = context.get(symbol) {
-                    return concrete_type.clone();
+        let instance_type_for_check = match base_type {
+            Type::Reference(inner) | Type::MutableReference(inner) => &**inner,
+            _ => base_type
+        };
+        let type_id = instance_type_for_check.get_base_symbol();
+
+        let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
+        let candidate_impls = impls_for_trait.get(&type_id)?;
+        
+        let find_applicable_impl = |instance_type: &Type, imps: &Vec<TraitImpl>| -> Option<TraitImpl> {
+            for imp in imps {
+                let instance_args = if let Type::Base { args, .. } = instance_type {
+                    args
+                } else { 
+                    if imp.type_specialization.is_empty() {
+                        return Some(imp.clone());
+                    }
+
+                    continue; 
+                };
+
+                let impl_target_arg_ids = &imp.type_specialization;
+
+                if instance_args.len() != impl_target_arg_ids.len() {
+                    continue;
                 }
 
-                ty.clone()
-            },
-            Type::Reference(inner) => Type::Reference(Box::new(self.monomorphization_substitute_type(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.monomorphization_substitute_type(inner)))
+                let mut is_match = true;
+                for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(impl_target_arg_ids) {
+                    let target_symbol = self.analyzer.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+                    if imp.impl_generic_params.contains(&target_symbol.id) {
+                        continue;
+                    }
+
+                    if instance_arg.get_base_symbol() != impl_target_arg_id {
+                        is_match = false;
+                        break;
+                    }
+                }
+
+                if is_match {
+                    return Some(imp.clone());
+                }
+            }
+
+            None
+        };
+
+        let applicable_impl = find_applicable_impl(instance_type_for_check, candidate_impls)?;
+        let impl_fn_symbol = self.analyzer.symbol_table.find_value_symbol_in_scope(member_name, applicable_impl.impl_scope_id)?;
+        
+        Some(impl_fn_symbol.id)
+    }
+
+    fn monomorphization_substitute_type(&self, ty: &Type) -> Type {
+        match &self.monomorphization_context {
+            Some(substitutions) => Self::apply_codegen_substitution(ty, substitutions),
+            None => ty.clone()
         }
     }
 
@@ -1108,7 +1160,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
         
         match member_symbol.kind {
-            ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
+            ValueSymbolKind::Function(_) => {
+                let mut fn_id = right.value_id.unwrap();
+
+                if self.monomorphization_context.is_some() {
+                    let left_type = left.type_id.as_ref().unwrap();
+                    let left_base_symbol_id = left_type.get_base_symbol();
+                    let left_base_symbol = self.analyzer.symbol_table.get_type_symbol(left_base_symbol_id).unwrap();
+        
+                    if matches!(left_base_symbol.kind, TypeSymbolKind::Generic(_)) {
+                        let concrete_instance_type = self.monomorphization_substitute_type(left_type);
+                        if let Some(id) = self.find_concrete_method(&concrete_instance_type, member_symbol) {
+                            fn_id = id;
+                        }
+                    }
+                }
+                
+                Some(self.functions.get(&fn_id).unwrap().as_global_value().as_basic_value_enum())
+            },
             ValueSymbolKind::StructField => {
                 let struct_ptr = self.compile_place_expression(left).unwrap();
     

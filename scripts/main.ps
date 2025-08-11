@@ -37,32 +37,3 @@ let square = Square {};
 
 let fruit1: int = tick(tank);
 let fruit2: char = tick(square);
-
-/*trait Entity {
-    type TickOutput;
-    fn tick(&mut self): Self.TickOutput;
-}
-
-struct Tank {}
-struct Square {}
-
-impl Entity for Tank {
-    type TickOutput = int;
-    fn tick(&mut self): int { 4 }
-}
-
-impl Entity for Square {
-    type TickOutput = char;
-    fn tick(&mut self): char { '4' }
-}
-
-fn tick<T: Entity>(x: T) {
-    x.tick();
-    3; // fix how returns work
-}
-
-let tank = Tank {};
-let square = Square {};
-
-tick(tank);
-tick(square);*/
