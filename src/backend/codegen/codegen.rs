@@ -7,7 +7,7 @@ use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, Funct
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
 use crate::utils::kind::Operation;
 
@@ -83,6 +83,55 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn apply_codegen_substitution(ty: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
+        match ty {
+            Type::Base { symbol, args } => {
+                if let Some(sub) = substitutions.get(symbol) {
+                    return sub.clone();
+                }
+
+                let new_args = args.iter().map(|a| Self::apply_codegen_substitution(a, substitutions)).collect();
+                Type::Base { symbol: *symbol, args: new_args }
+            },
+            Type::Reference(inner) => Type::Reference(Box::new(Self::apply_codegen_substitution(inner, substitutions))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(Self::apply_codegen_substitution(inner, substitutions))),
+        }
+    }
+
+    fn find_applicable_trait_impl<'s>(&'s self, concrete_instance_type: &Type, candidate_impls: &'s [TraitImpl]) -> Option<(&'s TraitImpl, HashMap<TypeSymbolId, Type>)> {
+        candidate_impls.iter().find_map(|imp| {
+            let instance_args = if let Type::Base { args, .. } = concrete_instance_type {
+                args
+            } else {
+                return None;
+            };
+
+            if instance_args.len() != imp.type_specialization.len() {
+                return None;
+            }
+
+            let mut substitutions = HashMap::new();
+            let mut is_applicable = true;
+
+            for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(&imp.type_specialization) {
+                let target_symbol = self.analyzer.symbol_table.get_type_symbol(impl_target_arg_id).unwrap();
+
+                if imp.impl_generic_params.contains(&target_symbol.id) {
+                    substitutions.insert(target_symbol.id, instance_arg.clone());
+                } else if instance_arg.get_base_symbol() != impl_target_arg_id {
+                    is_applicable = false;
+                    break;
+                }
+            }
+            
+            if is_applicable {
+                Some((imp, substitutions))
+            } else {
+                None
+            }
+        })
+    }
+
     fn monomorphization_substitute_type(&self, ty: &Type) -> Type {
         let Some(context) = &self.monomorphization_context else {
             return ty.clone();
@@ -176,6 +225,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     TypeSymbolKind::FunctionSignature { .. }
                         => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
+                    TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } => {
+                        let concrete_instance_type = self.monomorphization_substitute_type(opaque_ty);
+                        let concrete_trait_type = self.monomorphization_substitute_type(opaque_tr);
+
+                        let trait_id = concrete_trait_type.get_base_symbol();
+                        let type_id = concrete_instance_type.get_base_symbol();
+
+                        let candidate_impls = self.analyzer.trait_registry.register
+                            .get(&trait_id)
+                            .and_then(|impls_for_trait| impls_for_trait.get(&type_id))
+                            .cloned()
+                            .unwrap_or_default();
+                        
+                        let (applicable_impl, impl_substitutions) = self.find_applicable_trait_impl(&concrete_instance_type, &candidate_impls).unwrap();
+
+                        let associated_type_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(member, applicable_impl.impl_scope_id).unwrap();
+
+                        let TypeSymbolKind::TypeAlias((_, Some(aliased_type_template))) = &associated_type_symbol.kind else {
+                            unreachable!();
+                        };
+                        
+                        let concrete_associated_type = Self::apply_codegen_substitution(aliased_type_template, &impl_substitutions);
+                        return self.map_semantic_type(&concrete_associated_type);
+                    },
                     _ => unimplemented!("map_semantic_type for complex type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
                 };
 
