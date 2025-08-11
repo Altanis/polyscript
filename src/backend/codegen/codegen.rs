@@ -23,6 +23,9 @@ pub struct CodeGen<'a, 'ctx> {
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
     functions: HashMap<ValueSymbolId, FunctionValue<'ctx>>,
     constants: HashMap<ValueSymbolId, BasicValueEnum<'ctx>>,
+
+    fn_asts: HashMap<ValueSymbolId, &'a AstNode>,
+    monomorphization_context: Option<HashMap<TypeSymbolId, Type>>,
     monomorphized_functions: HashMap<(ValueSymbolId, Vec<Type>), FunctionValue<'ctx>>,
 
     string_interner: NameInterner,
@@ -80,9 +83,57 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn monomorphization_substitute_type(&self, ty: &Type) -> Type {
+        let Some(context) = &self.monomorphization_context else {
+            return ty.clone();
+        };
+
+        match ty {
+            Type::Base { symbol, .. } => {
+                if let Some(concrete_type) = context.get(symbol) {
+                    return concrete_type.clone();
+                }
+
+                ty.clone()
+            },
+            Type::Reference(inner) => Type::Reference(Box::new(self.monomorphization_substitute_type(inner))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.monomorphization_substitute_type(inner)))
+        }
+    }
+
+    fn is_function_generic(&self, fn_id: ValueSymbolId) -> bool {
+        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(fn_id).unwrap();
+        let fn_type_id = fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+        let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_type_id).unwrap();
+
+        let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &fn_type_symbol.kind else {
+            return false;
+        };
+
+        for param_type in params {
+            let base_symbol_id = param_type.get_base_symbol();
+            if let Some(param_type_symbol) = self.analyzer.symbol_table.get_type_symbol(base_symbol_id)
+                && matches!(param_type_symbol.kind, TypeSymbolKind::Generic(_))
+            {
+                return true;
+            }
+        }
+
+        let return_base_id = return_type.get_base_symbol();
+        if let Some(return_symbol) = self.analyzer.symbol_table.get_type_symbol(return_base_id)
+            && matches!(return_symbol.kind, TypeSymbolKind::Generic(_))
+        {
+            return true;
+        }
+
+        false
+    }
+
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
-        match ty {
+        let concrete_ty = self.monomorphization_substitute_type(ty);
+
+        match &concrete_ty {
             Type::Base { symbol, .. } => {
                 if let Some(&llvm_ty) = self.type_map.get(symbol) {
                     return Some(llvm_ty);
@@ -863,6 +914,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_function_declaration(&mut self, node: &AstNode) {
         let value_id = node.value_id.unwrap();
+
+        if self.is_function_generic(value_id) {
+            return;
+        }
+        
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let fn_type = fn_symbol.type_id.as_ref().unwrap();
 
@@ -875,7 +931,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_function_body(&mut self, node: &AstNode) {
         let AstNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
-        let function = self.functions[&node.value_id.unwrap()];
+        let fn_symbol_id = if let AstNodeKind::FieldAccess { right, .. } = &node.kind {
+            right.value_id.unwrap()
+        } else {
+            node.value_id.unwrap()
+        };
+
+        let function = self.functions[&fn_symbol_id];
 
         let old_fn = self.current_function.take();
         let old_vars = self.variables.clone();
@@ -1048,24 +1110,129 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn get_or_create_monomorphized_fn(&mut self, base_fn_id: ValueSymbolId, specializations: &[Type]) -> FunctionValue<'ctx> {
-        if let Some(fn_value) = self.monomorphized_functions.get(&(base_fn_id, specializations.to_vec())) {
+        let key = (base_fn_id, specializations.to_vec());
+        if let Some(fn_value) = self.monomorphized_functions.get(&key) {
             return *fn_value;
         }
 
-        // TODO: This is where the real work would happen:
-        // 1. Find the AST for the generic function `base_fn_id`.
-        // 2. Create a mangled name for the new function (e.g., `vec_add<i32>` -> `vec_add_i32`).
-        // 3. Create a new specialized `FunctionType` by replacing generic params with `specializations`.
-        // 4. Add the new `FunctionValue` to the module.
-        // 5. Add it to `self.monomorphized_functions` *before* compiling the body to allow recursion.
-        // 6. Set up a temporary "generic context" mapping generic type symbols to concrete types.
-        // 7. Compile the body of the function in this new context.
-        // 8. Restore the context.
-        // 9. Return the new `FunctionValue`.
+        // --- 1. Preparation ---
+        // Save the current state to be restored later.
+        let old_context = self.monomorphization_context.take();
+
+        // Get the AST and symbol information for the generic base function.
+        let base_fn_ast = *self.fn_asts.get(&base_fn_id)
+            .expect("CodeGen: Generic function AST not found for monomorphization.");
+        let base_fn_symbol = self.analyzer.symbol_table.get_value_symbol(base_fn_id).unwrap();
+        let fn_type_symbol = self.analyzer.symbol_table.get_type_symbol(base_fn_symbol.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
         
-        panic!()
+        // --- 2. Discover Generic Parameters and Create Context ---
+        let new_context = {
+            let TypeSymbolKind::FunctionSignature { params, .. } = &fn_type_symbol.kind else {
+                panic!("CodeGen: Symbol is not a function signature.");
+            };
+
+            // Discover the generic parameters from the signature in the order of their first appearance.
+            // e.g., for `fn foo<U, T>(a: U, b: T, c: U)`, the order is `[U, T]`.
+            let mut ordered_generic_ids = Vec::new();
+            for param_type in params {
+                // We need to check the base type, as it could be `&T` or `&mut T`.
+                let base_symbol_id = param_type.get_base_symbol();
+                let param_type_symbol = self.analyzer.symbol_table.get_type_symbol(base_symbol_id)
+                    .expect("CodeGen: Type symbol not found for parameter.");
+
+                if let TypeSymbolKind::Generic(_) = param_type_symbol.kind {
+                    // Only add the generic ID if it's the first time we've seen it.
+                    if !ordered_generic_ids.contains(&base_symbol_id) {
+                        ordered_generic_ids.push(base_symbol_id);
+                    }
+                }
+            }
+
+            // The number of unique generic types discovered must match the number of specializations provided.
+            if ordered_generic_ids.len() != specializations.len() {
+                // This would indicate a bug in the semantic analyzer (the caller), but it's a good sanity check.
+                panic!(
+                    "Mismatched number of generic arguments during monomorphization. Expected {}, got {}.",
+                    ordered_generic_ids.len(),
+                    specializations.len()
+                );
+            }
+            
+            // This maps generic TypeSymbolIds (like for `T`) to the concrete specialization Types (like `i64`).
+            ordered_generic_ids
+                .into_iter()
+                .zip(specializations.iter().cloned())
+                .collect()
+        };
+        self.monomorphization_context = Some(new_context);
+
+        // --- 3. Mangle the function name for the new specialization ---
+        let base_name = self.analyzer.symbol_table.get_value_name(base_fn_symbol.name_id);
+        let specialization_names: Vec<_> = specializations.iter()
+            .map(|ty| {
+                // Create a simple, safe name for the type to use in the LLVM symbol.
+                self.analyzer.symbol_table.display_type(ty)
+                    .replace(|c: char| !c.is_alphanumeric(), "_")
+            })
+            .collect();
+        let mangled_name = format!("{}_{}", base_name, specialization_names.join("_"));
+
+        // --- 4. Generate the specialized LLVM function type ---
+        // `map_semantic_fn_type` will now use the monomorphization_context we just set.
+        let fn_type = base_fn_symbol.type_id.as_ref().unwrap();
+        let llvm_fn_type = self.map_semantic_fn_type(fn_type);
+
+        // --- 5. Create the LLVM function and cache it before compilation ---
+        // Caching before compiling the body is crucial for handling recursion.
+        let function = self.module.add_function(&mangled_name, llvm_fn_type, None);
+        self.monomorphized_functions.insert(key, function);
+
+        // --- 6. Compile the function body in the new context ---
+        // Save state for the duration of this specific function's compilation.
+        let old_fn_in_compiler = self.current_function.take();
+        let old_vars = self.variables.clone();
+        self.variables.clear();
+        self.current_function = Some(function);
+
+        let AstNodeKind::Function { parameters, body, .. } = &base_fn_ast.kind else { unreachable!(); };
+
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        // Set up function parameters.
+        for (i, param_node) in parameters.iter().enumerate() {
+            let param_value = function.get_nth_param(i as u32).unwrap();
+            let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
+            let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
+            param_value.set_name(param_name);
+
+            let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
+            self.builder.build_store(alloca, param_value).unwrap();
+            self.variables.insert(param_node.value_id.unwrap(), alloca);
+        }
+        
+        // Compile the function's body. `compile_node` will use the active context.
+        let body_val = self.compile_node(body.as_ref().unwrap());
+
+        // Add a return instruction if the block is not already terminated.
+        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+            if function.get_type().get_return_type().is_some() {
+                self.builder.build_return(Some(&body_val.unwrap())).unwrap();
+            } else {
+                self.builder.build_return(None).unwrap();
+            }
+        }
+        
+        // --- 7. Clean up ---
+        // Restore the previous state.
+        self.current_function = old_fn_in_compiler;
+        self.variables = old_vars;
+        self.monomorphization_context = old_context;
+        
+        // --- 8. Return the completed function ---
+        function
     }
-    
+
     fn compile_function_call(
         &mut self,
         function_node: &BoxedAstNode,
@@ -1120,6 +1287,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             variables: HashMap::new(),
             functions: HashMap::new(),
             constants: HashMap::new(),
+            fn_asts: HashMap::new(),
+            monomorphization_context: None,
             monomorphized_functions: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
@@ -1130,7 +1299,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub fn compile_program(&mut self, program: &AstNode) {
+    pub fn compile_program(&mut self, program: &'a AstNode) {
         let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
 
         self.compile_declarations_pass(stmts);
@@ -1139,10 +1308,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_declarations_pass(&mut self, stmts: &[AstNode]) {
+    fn compile_declarations_pass(&mut self, stmts: &'a [AstNode]) {
         for stmt in stmts.iter() {
             match &stmt.kind {
-                AstNodeKind::Function { .. } => self.compile_function_declaration(stmt),
+                AstNodeKind::Function { .. } => {
+                    self.compile_function_declaration(stmt);
+                    self.fn_asts.insert(stmt.value_id.unwrap(), stmt);
+                },
                 AstNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
                 AstNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
                 AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. } => {
@@ -1153,6 +1325,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     for func_node in associated_functions {
                         self.compile_function_declaration(func_node);
+                        self.fn_asts.insert(func_node.value_id.unwrap(), func_node);
                     }
                 },
                 AstNodeKind::VariableDeclaration { mutable: false, .. } => {
@@ -1169,12 +1342,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_executable_code_pass(&mut self, stmts: &[AstNode]) {
         for stmt in stmts.iter() {
             if let AstNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
-                self.compile_function_body(stmt);
+                let fn_id = stmt.value_id.unwrap();
+
+                if !self.is_function_generic(fn_id) {
+                    self.compile_function_body(stmt);
+                }
             }
 
             if let AstNodeKind::ImplDeclaration { associated_functions, .. } = &stmt.kind {
                 for func_node in associated_functions {
-                    self.compile_function_body(func_node);
+                    if let AstNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
+                        let fn_id = func_node.value_id.unwrap();
+
+                        if !self.is_function_generic(fn_id) {
+                            self.compile_function_body(func_node);
+                        }
+                    }
                 }
             }
         }
