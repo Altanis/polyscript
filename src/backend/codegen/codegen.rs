@@ -1455,9 +1455,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if let AstNodeKind::ImplDeclaration { associated_functions, .. } = &stmt.kind {
                 for func_node in associated_functions {
-                    if let AstNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
+                    if let AstNodeKind::Function { body, .. } = &func_node.kind && body.is_some() {
                         let fn_id = func_node.value_id.unwrap();
-
                         if !self.is_function_generic(fn_id) {
                             self.compile_function_body(func_node);
                         }
