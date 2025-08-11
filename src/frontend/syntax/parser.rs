@@ -470,9 +470,11 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<AstNode, BoxedError> {
-        let node = self.parse_expression()?;
-        self.consume(TokenKind::Semicolon)?;
-        Ok(node)
+        self.spanned_node(|parser| {
+            let node = parser.parse_expression()?;
+            parser.consume(TokenKind::Semicolon)?;
+            Ok(AstNodeKind::ExpressionStatement(boxed!(node)))
+        })
     }
 }
 
