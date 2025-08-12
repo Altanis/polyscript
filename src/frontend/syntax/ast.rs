@@ -108,6 +108,7 @@ pub enum AstNodeKind {
     StructLiteral {
         name: String,
         fields: IndexMap<String, AstNode>,
+        generic_arguments: Vec<AstNode>
     },
 
     EnumDeclaration {
@@ -658,8 +659,18 @@ impl AstNode {
                 write!(f, ": ")?;
                 type_annotation.fmt_with_indent(f, 0, table)?;
             }
-            AstNodeKind::StructLiteral { name, fields } => {
+            AstNodeKind::StructLiteral { name, generic_arguments, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
+                if !generic_arguments.is_empty() {
+                    write!(f, "<")?;
+                    for (i, arg) in generic_arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        arg.fmt_with_indent(f, 0, table)?;
+                    }
+                    write!(f, ">")?;
+                }
                 write!(f, "{}", "{".dimmed())?;
 
                 for (i, (field_name, expr)) in fields.iter().enumerate() {

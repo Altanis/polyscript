@@ -22,7 +22,7 @@ use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
-use crate::backend::optimizations::escape_analysis;
+use crate::backend::optimizations::{escape_analysis, monomorphization};
 use crate::frontend::syntax::lexer::Lexer;
 
 mod frontend;
@@ -78,6 +78,7 @@ fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, Semanti
 }
 
 fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+    monomorphization::init(program, analyzer);
     escape_analysis::init(program, analyzer);
 }
 

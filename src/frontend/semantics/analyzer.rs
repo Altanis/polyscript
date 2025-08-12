@@ -926,7 +926,9 @@ pub enum Constraint {
     /// A type denotes a fully qualified path access.
     FullyQualifiedAccess(Type, Type, Option<Type>, String),
     /// The initial type must be validly castable to the other.
-    Cast(Type, Type)
+    Cast(Type, Type),
+    /// A struct with generic parameters is being created.
+    StructInstantiation(Type)
 }
 
 /// Additional information about a constraint.
@@ -1444,7 +1446,8 @@ impl Constraint {
                         "{} -> {}",
                         self.t.display_type(initial).yellow(),
                         self.t.display_type(r#final).yellow()
-                    )
+                    ),
+                    StructInstantiation(ty) => write!(f, "{ty} is being instantiated.")
                 }
             }
         }

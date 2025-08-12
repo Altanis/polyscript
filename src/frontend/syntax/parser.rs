@@ -409,7 +409,7 @@ impl Parser {
                     self.advance();
 
                     Ok(AstNode {
-                        kind: AstNodeKind::StructLiteral { name, fields },
+                        kind: AstNodeKind::StructLiteral { name, fields, generic_arguments: vec![] },
                         span: span.set_end_from_span(self.previous().get_span()),
                         type_id: None,
                         value_id: None,

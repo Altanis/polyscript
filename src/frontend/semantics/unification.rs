@@ -411,6 +411,20 @@ impl SemanticAnalyzer {
         current_ty
     }
 
+    fn type_contains_uvs(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, args } => {
+                if self.is_uv(*symbol) {
+                    return true;
+                }
+
+                args.iter().any(|arg| self.type_contains_uvs(arg))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => self.type_contains_uvs(inner),
+        }
+     }
+ 
+
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
     /// https://en.wikipedia.org/wiki/Occurs_check
     fn occurs_check(&mut self, uv_id: TypeSymbolId, ty: &Type) -> bool {
@@ -1135,7 +1149,19 @@ impl SemanticAnalyzer {
             Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs, operation) => {
                 self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info, operation)
             },
-            Constraint::Cast(source, target) => self.unify_cast(source, target, info)
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
+            Constraint::StructInstantiation(struct_type) => {
+                let resolved_type = self.resolve_type(&struct_type);
+                if !self.type_contains_uvs(&resolved_type) {
+                    if let Type::Base { args, .. } = resolved_type {
+                        self.unification_context.monomorphization_requests.insert(info.span, args);
+                    }
+
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
         }
     }
 

@@ -699,6 +699,13 @@ impl SemanticAnalyzer {
             args: generic_uvs.values().cloned().collect()
         };
 
+        if !generic_params.is_empty() {
+            self.unification_context.register_constraint(Constraint::StructInstantiation(struct_type.clone()), ConstraintInfo {
+                span,
+                scope_id: info.scope_id
+            });
+        }
+
         self.unification_context.register_constraint(
             Constraint::Equality(Type::new_base(uv_id), struct_type),
             info,
@@ -1350,7 +1357,7 @@ impl SemanticAnalyzer {
                 self.collect_uv_function_pointer(uv_id, params, return_type, expr.span, info)?
             }
             FunctionParameter { .. } => self.collect_uv_function_parameter(uv_id, expr, expr.span, info)?,
-            StructLiteral { name, fields } => {
+            StructLiteral { name, fields, .. } => {
                 self.collect_uv_struct_literal(uv_id, expr.scope_id.unwrap(), name, fields, expr.span, info)?
             }
             AssociatedConstant { .. } => self.collect_uv_associated_const(uv_id, expr, expr.span, info)?,
