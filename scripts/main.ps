@@ -5,14 +5,6 @@ struct Scalar<T> {
     x: T;
 }
 
-fn id<T>(x: T): T {
-    x
-}
-
-trait Numeric<T> {
-    fn get_number(&self): T;
-}
-
 impl<T> Scalar<T> {
     fn new(x: T): Self {
         Scalar { x }
@@ -23,17 +15,8 @@ impl<T> Scalar<T> {
     }
 }
 
-impl<T> Numeric<T> for Scalar<T> {
-    fn get_number(&self): T {
-        self.x
-    }
-}
-
 let scalar = Scalar.new(4);
 let num = scalar.get_num();
-let num2 = scalar.get_number();
-
-let other_num = Scalar { x: 5 };
 
 // check out impl blocks that have generics
 // impl<T> Vector2D<T> { fn thing(x: T): { } }

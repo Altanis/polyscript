@@ -498,23 +498,6 @@ impl SemanticAnalyzer {
 
         let impl_target_arg_ids = &imp.specialization;
 
-        if instance_args.is_empty() && !impl_target_arg_ids.is_empty() {
-            let mut substitutions = HashMap::new();
-            for &param_id in &imp.generic_params {
-                let uv = self.unification_context.generate_uv_type(&mut self.symbol_table, imp.span);
-                substitutions.insert(param_id, uv);
-            }
-
-            for &spec_id in impl_target_arg_ids {
-                let spec_sym = self.symbol_table.get_type_symbol(spec_id).unwrap();
-                if let TypeSymbolKind::Generic(_) = spec_sym.kind && !imp.generic_params.contains(&spec_id) {
-                    return None;
-                }
-            }
-
-            return Some(substitutions);
-        }
-
         if instance_args.len() != impl_target_arg_ids.len() {
             return None; // arity mismatch
         }
@@ -551,22 +534,6 @@ impl SemanticAnalyzer {
         };
 
         let impl_target_arg_ids = &imp.type_specialization;
-
-        if instance_args.is_empty() && !impl_target_arg_ids.is_empty() {
-            let mut substitutions = HashMap::new();
-            for &param_id in &imp.impl_generic_params {
-                let uv = self.unification_context.generate_uv_type(&mut self.symbol_table, imp.span);
-                substitutions.insert(param_id, uv);
-            }
-
-            for &spec_id in impl_target_arg_ids {
-                let spec_sym = self.symbol_table.get_type_symbol(spec_id).unwrap();
-                if let TypeSymbolKind::Generic(_) = spec_sym.kind && !imp.impl_generic_params.contains(&spec_id) {
-                    return None;
-                }
-            }
-            return Some(substitutions);
-        }
 
         if instance_args.len() != impl_target_arg_ids.len() {
             return None; // arity mismatch
@@ -709,6 +676,15 @@ impl SemanticAnalyzer {
             },
             (Type::MutableReference(ci), Type::MutableReference(ti)) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
+            },
+            (Type::MutableReference(ci), Type::Reference(ti)) => {
+                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
+            },
+            (c @ Type::Base { .. }, Type::Reference(ti) | Type::MutableReference(ti)) => {
+                self.collect_substitutions(&c, &ti, substitutions, fn_generics, info)
+            },
+            (Type::Reference(ci) | Type::MutableReference(ci), t @ Type::Base { .. }) => {
+                self.collect_substitutions(&ci, &t, substitutions, fn_generics, info)
             },
             _ => Ok(())
         }
