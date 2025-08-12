@@ -1149,19 +1149,7 @@ impl SemanticAnalyzer {
             Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs, operation) => {
                 self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info, operation)
             },
-            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
-            Constraint::StructInstantiation(struct_type) => {
-                let resolved_type = self.resolve_type(&struct_type);
-                if !self.type_contains_uvs(&resolved_type) {
-                    if let Type::Base { args, .. } = resolved_type {
-                        self.unification_context.monomorphization_requests.insert(info.span, args);
-                    }
-
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            },
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info)
         }
     }
 
@@ -1290,20 +1278,6 @@ impl SemanticAnalyzer {
                             info,
                         )?;
                     }
-                        
-                    if !fn_generic_param_ids.is_empty() {
-                        let mut sorted_generics: Vec<_> = fn_generic_param_ids.iter().copied().collect();
-                        sorted_generics.sort();
-                        
-                        let concrete_types: Vec<Type> = sorted_generics
-                            .iter()
-                            .map(|&id| {
-                                substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id))
-                            })
-                            .collect();
-                        
-                        self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
-                    }
 
                     let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
                     let concrete_return = self.apply_substitution(sig_return, &substitutions);
@@ -1406,20 +1380,6 @@ impl SemanticAnalyzer {
                     &fn_generic_param_ids,
                     info,
                 )?;
-            }
-
-            if !fn_generic_param_ids.is_empty() {
-                let mut sorted_generics: Vec<_> = fn_generic_param_ids.iter().copied().collect();
-                sorted_generics.sort();
-                
-                let concrete_types: Vec<Type> = sorted_generics
-                    .iter()
-                    .map(|&id| {
-                        substitutions.get(&id).cloned().unwrap_or_else(|| Type::new_base(id))
-                    })
-                    .collect();
-                
-                self.unification_context.monomorphization_requests.insert(info.span, concrete_types);
             }
 
             let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);

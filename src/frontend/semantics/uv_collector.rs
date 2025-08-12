@@ -699,13 +699,6 @@ impl SemanticAnalyzer {
             args: generic_uvs.values().cloned().collect()
         };
 
-        if !generic_params.is_empty() {
-            self.unification_context.register_constraint(Constraint::StructInstantiation(struct_type.clone()), ConstraintInfo {
-                span,
-                scope_id: info.scope_id
-            });
-        }
-
         self.unification_context.register_constraint(
             Constraint::Equality(Type::new_base(uv_id), struct_type),
             info,

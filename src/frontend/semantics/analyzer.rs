@@ -926,9 +926,7 @@ pub enum Constraint {
     /// A type denotes a fully qualified path access.
     FullyQualifiedAccess(Type, Type, Option<Type>, String),
     /// The initial type must be validly castable to the other.
-    Cast(Type, Type),
-    /// A struct with generic parameters is being created.
-    StructInstantiation(Type)
+    Cast(Type, Type)
 }
 
 /// Additional information about a constraint.
@@ -942,8 +940,7 @@ pub struct ConstraintInfo {
 pub struct UnificationContext {
     next_id: TypeSymbolId,
     pub substitutions: HashMap<TypeSymbolId, Type>,
-    pub constraints: VecDeque<(Constraint, ConstraintInfo)>,
-    pub monomorphization_requests: HashMap<Span, Vec<Type>>
+    pub constraints: VecDeque<(Constraint, ConstraintInfo)>
 }
 
 impl UnificationContext {
@@ -1446,8 +1443,7 @@ impl Constraint {
                         "{} -> {}",
                         self.t.display_type(initial).yellow(),
                         self.t.display_type(r#final).yellow()
-                    ),
-                    StructInstantiation(ty) => write!(f, "{ty} is being instantiated.")
+                    )
                 }
             }
         }

@@ -1,13 +1,36 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-struct Point<T> {
+struct Scalar<T> {
     x: T;
 }
 
-fn id<T>(x: T): T { x }
+fn id<T>(x: T): T {
+    x
+}
 
-let p1 = Point { x: 4 };
-let p2 = Point { x: "4" };
-let id1 = id(4);
-let id2 = id("4");
+trait Numeric<T> {
+    fn get_number(&self): T;
+}
+
+impl<T> Scalar<T> {
+    fn new(x: T): Self {
+        Scalar { x }
+    }
+}
+
+impl<T> Numeric<T> for Scalar<T> {
+    fn get_number(&self): T {
+        self.x
+    }
+}
+
+let scalar = Scalar { x: 4 };
+let num = scalar.get_number();
+num = id(num);
+
+let other_num = Scalar { x: 5 };
+
+// check out impl blocks that have generics
+// impl<T> Vector2D<T> { fn thing(x: T): { } }
+// must monomorphize trait and impl blocks with generics FUCK
