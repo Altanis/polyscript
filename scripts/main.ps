@@ -17,6 +17,10 @@ impl<T> Scalar<T> {
     fn new(x: T): Self {
         Scalar { x }
     }
+
+    fn get_num(&self): T {
+        self.x
+    }
 }
 
 impl<T> Numeric<T> for Scalar<T> {
@@ -25,9 +29,9 @@ impl<T> Numeric<T> for Scalar<T> {
     }
 }
 
-let scalar = Scalar { x: 4 };
-let num = scalar.get_number();
-num = id(num);
+let scalar = Scalar.new(4);
+let num = scalar.get_num();
+let num2 = scalar.get_number();
 
 let other_num = Scalar { x: 5 };
 
