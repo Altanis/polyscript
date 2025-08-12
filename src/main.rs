@@ -239,7 +239,17 @@ fn test_escape_analysis() {
             let my_b = my_a.b;
             let my_c = my_b.c;
             return my_c;
-        }"#;
+        }
+        
+        fn id<T>(x: T): T {
+            return x;
+        }
+        
+        fn test9(): &int {
+            let val = 10;
+            return id(&val);
+        }
+        "#;
 
     let (lined_source, tokens) = generate_tokens(code.to_string());
     let program = parse_tokens(lined_source.clone(), tokens);
@@ -260,6 +270,7 @@ fn test_escape_analysis() {
         ("my_a",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("my_b",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("my_c",           crate::frontend::semantics::analyzer::AllocationKind::Heap),
+        ("val",            crate::frontend::semantics::analyzer::AllocationKind::Heap)
     ];
 
     for (name, alloc_type) in expected {

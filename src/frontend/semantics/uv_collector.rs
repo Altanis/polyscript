@@ -314,6 +314,12 @@ impl SemanticAnalyzer {
             );
         } else {
             let void_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Void));
+            
+            self.unification_context.register_constraint(
+                Constraint::Equality(then_type, void_type.clone()),
+                info,
+            );
+
             self.unification_context.register_constraint(
                 Constraint::Equality(result_uv, void_type),
                 info,

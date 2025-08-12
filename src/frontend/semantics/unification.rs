@@ -1085,13 +1085,13 @@ impl SemanticAnalyzer {
 
         if errors.is_empty() {
             for symbol in self.symbol_table.type_symbols.values() {
-                if let TypeSymbolKind::UnificationVariable(_) = symbol.kind
+                if let TypeSymbolKind::UnificationVariable(id) = symbol.kind
                     && !self.unification_context.substitutions.contains_key(&symbol.id)
                 {
                     let span = symbol.span.unwrap();
                     
                     errors.push(*self.create_error(
-                        ErrorKind::TypeAnnotationNeeded,
+                        ErrorKind::TypeAnnotationNeeded(id),
                         span,
                         &[span],
                     ));

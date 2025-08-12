@@ -35,7 +35,7 @@ pub enum ErrorKind {
     MemberNotFound(String, String),
     InvalidFieldAccess(String),
     IncorrectFieldAccessRhs,
-    TypeAnnotationNeeded,
+    TypeAnnotationNeeded(usize),
     SelfOutsideImpl,
     InvalidSelf(&'static str),
     ExpectedIdentifier,
@@ -128,7 +128,7 @@ impl ErrorKind {
                 format!("type {type_name} does not comprise fields")
             }
             ErrorKind::IncorrectFieldAccessRhs => "cannot access this field".to_string(),
-            ErrorKind::TypeAnnotationNeeded => "cannot infer type for this; a type annotation may be needed".to_string(),
+            ErrorKind::TypeAnnotationNeeded(id) => format!("cannot infer type for this; a type annotation may be needed (#uv_{})", id),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidSelf(place) => format!("found \"self\" {place}"),
             ErrorKind::ExpectedIdentifier => {
