@@ -1,15 +1,11 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-struct Message { public content: string; }
-fn test7(): Message {
-    if (true) {
-        let m = Message { content: "hello" };
-        return m;
-    };
-    
-    return Message { content: "world" };
+struct Point<T> {
+    x: T;
 }
+
+let point: Point<int> = Point { x: 4 };
 
 /*fn identity<T>(x: T): T {
     return x;
