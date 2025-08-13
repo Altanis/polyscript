@@ -13,9 +13,16 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     errors: Vec<Error>,
+    current_id: usize
 }
 
 impl Parser {
+    fn get_next_node_id(&mut self) -> usize {
+        let id = self.current_id;
+        self.current_id += 1;
+        id
+    }
+
     fn is_at_end(&self) -> bool {
         self.peek().get_token_kind() == TokenKind::EndOfFile
     }
@@ -127,6 +134,7 @@ impl Parser {
             type_id: None,
             value_id: None,
             scope_id: None,
+            id: self.get_next_node_id()
         })
     }
 }
@@ -166,6 +174,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 };
             } else if operator == Operation::FunctionCall {
                 let mut arguments = vec![];
@@ -189,6 +198,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 };
             } else {
                 let rhs = self.parse_binding_power(right_bp)?;
@@ -216,6 +226,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 };
             }
         }
@@ -278,6 +289,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::NumberLiteral(_) => {
@@ -329,6 +341,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::BooleanLiteral => {
@@ -341,6 +354,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::StringLiteral => {
@@ -355,6 +369,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::CharLiteral => {
@@ -369,6 +384,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::Identifier => {
@@ -394,6 +410,7 @@ impl Parser {
                                 type_id: None,
                                 value_id: None,
                                 scope_id: None,
+                                id: self.get_next_node_id()
                             }
                         };
 
@@ -413,6 +430,7 @@ impl Parser {
                         type_id: None,
                         value_id: None,
                         scope_id: None,
+                        id: self.get_next_node_id()
                     })
                 } else {
                     Ok(AstNode {
@@ -421,6 +439,7 @@ impl Parser {
                         type_id: None,
                         value_id: None,
                         scope_id: None,
+                        id: self.get_next_node_id()
                     })
                 }
             }
@@ -439,6 +458,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             }
             TokenKind::Keyword(KeywordKind::Fn) => self.parse_function_expression(),
@@ -453,6 +473,7 @@ impl Parser {
                     type_id: None,
                     value_id: None,
                     scope_id: None,
+                    id: self.get_next_node_id()
                 })
             },
             _ => {
@@ -484,6 +505,7 @@ impl Parser {
             tokens,
             current: 0,
             errors: vec![],
+            current_id: 0
         }
     }
 
@@ -523,6 +545,7 @@ impl Parser {
             type_id: None,
             value_id: None,
             scope_id: None,
+            id: self.get_next_node_id()
         }
     }
 
@@ -625,6 +648,7 @@ impl Parser {
                 TokenKind::Identifier => {
                     if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
                         parser.advance();
+                        let (left_id, right_id) = (parser.get_next_node_id(), parser.get_next_node_id());
                         let next = parser.consume(TokenKind::Identifier)?;
 
                         Ok(AstNodeKind::FieldAccess {
@@ -633,14 +657,16 @@ impl Parser {
                                 span: type_reference.get_span(),
                                 value_id: None,
                                 scope_id: None,
-                                type_id: None
+                                type_id: None,
+                                id: left_id
                             }),
                             right: boxed!(AstNode {
                                 kind: AstNodeKind::Identifier(next.get_value().to_string()),
                                 span: next.get_span(),
                                 value_id: None,
                                 scope_id: None,
-                                type_id: None
+                                type_id: None,
+                                id: right_id
                             }),
                         })
                     } else {
@@ -705,6 +731,7 @@ impl Parser {
 
                     if parser.peek().get_token_kind() == TokenKind::Operator(Operation::FieldAccess) {
                         parser.advance();
+                        let (left_id, right_id) = (parser.get_next_node_id(), parser.get_next_node_id());
                         let next = parser.consume(TokenKind::Identifier)?;
 
                         Ok(AstNodeKind::FieldAccess {
@@ -713,14 +740,16 @@ impl Parser {
                                 span: type_reference.get_span(),
                                 value_id: None,
                                 scope_id: None,
-                                type_id: None
+                                type_id: None,
+                                id: left_id
                             }),
                             right: boxed!(AstNode {
                                 kind: AstNodeKind::Identifier(next.get_value().to_string()),
                                 span: next.get_span(),
                                 value_id: None,
                                 scope_id: None,
-                                type_id: None
+                                type_id: None,
+                                id: right_id
                             }),
                         })
                     } else {

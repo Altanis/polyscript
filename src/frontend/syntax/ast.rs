@@ -201,6 +201,7 @@ pub struct AstNode {
     pub type_id: Option<Type>,
     /// The scope the node lives in.
     pub scope_id: Option<ScopeId>,
+    pub id: usize
 }
 
 pub type BoxedAstNode = Box<AstNode>;

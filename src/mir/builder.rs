@@ -187,3 +187,9 @@ impl<'a> IRBuilder<'a> {
         })
     }
 }
+
+/*
+1. associate astnodes with ids
+2. traverse ast, find sites for monomorphization
+3. build ir tree, for template nodes lookup monomorphs and implement
+*/
