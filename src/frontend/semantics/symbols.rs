@@ -415,17 +415,18 @@ impl SemanticAnalyzer {
         value: &mut BoxedAstNode,
         span: Span,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
-        let (scope_id, generics) = if !generic_parameters.is_empty() {
-            let scope_id = self.symbol_table.enter_scope(ScopeKind::Type);
-            let generics = self.collect_generic_parameters(generic_parameters)?;
-            self.symbol_table.exit_scope();
-
-            (Some(scope_id), generics)
+        let scope_id = if !generic_parameters.is_empty() {
+            Some(self.symbol_table.enter_scope(ScopeKind::Type))
         } else {
-            (None, vec![])
+            None
         };
 
+        let generics = self.collect_generic_parameters(generic_parameters)?;
         self.symbol_collector_check_node(value)?;
+
+        if scope_id.is_some() {
+            self.symbol_table.exit_scope();
+        }
 
         let type_id = self.symbol_table.add_type_symbol(
             name,
