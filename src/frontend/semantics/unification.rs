@@ -322,21 +322,31 @@ impl SemanticAnalyzer {
 
                         let substituted_return_type = self.apply_substitution(return_type, substitutions);
 
-                        let relevant_substitutions: HashMap<_, _> = substitutions
-                            .iter()
-                            .filter(|(k, _)| base_symbol.generic_parameters.contains(k))
-                            .collect();
+                        if params.iter().zip(&substituted_params).all(|(a, b)| a == b)
+                            && return_type == &substituted_return_type
+                        {
+                            return ty.clone();
+                        }
 
-                        let mut sorted_subs: Vec<_> = relevant_substitutions.iter().collect();
+                        let base_fn_name = self.symbol_table.get_type_name(base_symbol.name_id);
+                        
+                        let mut sorted_subs: Vec<_> = substitutions.iter().filter(|(k, _)| {
+                            let sym = self.symbol_table.get_type_symbol(**k).unwrap();
+                            matches!(sym.kind, TypeSymbolKind::Generic(_))
+                        }).collect();
                         sorted_subs.sort_by_key(|(k, _)| **k);
-                        
-                        let specialization_key = sorted_subs
+
+                        let specialization_str = sorted_subs
                             .iter()
-                            .map(|(k, v)| format!("{}-{}", k, v))
+                            .map(|(_, v)| self.symbol_table.display_type(v))
                             .collect::<Vec<_>>()
-                            .join("_");
+                            .join(", ");
                         
-                        let signature_name = format!("#fn_sig_specialized_{}_{}", base_symbol.id, specialization_key);
+                        let signature_name = if specialization_str.is_empty() {
+                            format!("#fn_sig_specialized_{}", base_symbol.id)
+                        } else {
+                            format!("{}<{}>", base_fn_name, specialization_str)
+                        };
                         
                         let specialized_sig_id = if let Some(symbol) =
                             self.symbol_table.find_type_symbol_in_scope(&signature_name, base_symbol.scope_id)

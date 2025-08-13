@@ -518,8 +518,14 @@ impl SemanticAnalyzer {
 
         self.uv_collection_ctx.current_return_type = old_return_type;
 
+        let fn_sig_type_name = if is_declaration {
+            format!("#fn_sig_{}_{}", name, node.id)
+        } else {
+            format!("#fn_sig_{}", uv_id)
+        };
+
         let fn_sig_type_id = self.symbol_table.add_type_symbol(
-            &format!("#fn_sig_{}", uv_id),
+            &fn_sig_type_name,
             TypeSymbolKind::FunctionSignature {
                 params: param_types,
                 return_type: return_type_val,
@@ -550,7 +556,7 @@ impl SemanticAnalyzer {
 
         Ok(())
     }
-
+    
     fn collect_uv_function_parameter(
         &mut self,
         uv_id: TypeSymbolId,

@@ -30,14 +30,30 @@ impl<'a> IRBuilder<'a> {
 }
 
 impl<'a> IRBuilder<'a> {
-    pub fn monomorphize(&mut self, program: &AstNode) {
-        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
-        for stmt in stmts.iter() {
-            self.collect_monomorphization_site(stmt);
+    pub fn type_is_fully_concrete(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, args } => {
+                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_)) {
+                    return false;
+                }
+
+                args.iter().all(|arg| self.type_is_fully_concrete(arg))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.type_is_fully_concrete(inner)
+            }
         }
     }
 
-    fn collect_monomorphization_site(&mut self, node: &AstNode) {
+    pub fn monomorphize(&mut self, program: &AstNode) {
+        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
+        for stmt in stmts.iter() {
+            self.collect_monomorphization_sites(stmt);
+        }
+    }
+
+    fn collect_monomorphization_sites(&mut self, node: &AstNode) {
         match &node.kind {
             AstNodeKind::FunctionCall { function, arguments } => {
                 let fn_symbol = self.analyzer.symbol_table.get_type_symbol(function.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
@@ -50,12 +66,17 @@ impl<'a> IRBuilder<'a> {
                     .map(|(i, _)| arguments[i].type_id.clone().unwrap())
                     .collect();
 
-                self.monomorphization_ctx.substitutions.entry(fn_symbol.id).or_default().insert(generic_arguments);
+                if !generic_arguments.is_empty() && generic_arguments.iter().all(|ty| self.type_is_fully_concrete(ty)) {
+                    self.monomorphization_ctx.substitutions.entry(fn_symbol.id).or_default().insert(generic_arguments);
+                }
             },
             AstNodeKind::StructLiteral { .. } => {
                 if let Some(Type::Base { symbol, args }) = &node.type_id {
                     let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                    if !type_symbol.generic_parameters.is_empty() {
+                    if !type_symbol.generic_parameters.is_empty() 
+                        && !args.is_empty()
+                        && args.iter().all(|arg| self.type_is_fully_concrete(arg))
+                    {
                         self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
                     }
                 }
@@ -63,7 +84,10 @@ impl<'a> IRBuilder<'a> {
             AstNodeKind::TypeReference { .. } => {
                 if let Some(Type::Base { symbol, args }) = &node.type_id {
                     let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                    if !type_symbol.generic_parameters.is_empty() && !args.is_empty() {
+                    if !type_symbol.generic_parameters.is_empty() 
+                        && !args.is_empty() 
+                        && args.iter().all(|arg| self.type_is_fully_concrete(arg))
+                    {
                         self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
                     }
                 }
@@ -72,7 +96,7 @@ impl<'a> IRBuilder<'a> {
         }
 
         for child in node.children().iter() {
-            self.collect_monomorphization_site(child);
+            self.collect_monomorphization_sites(child);
         }
     }
 }
@@ -253,7 +277,7 @@ impl<'a> IRBuilder<'a> {
 
 impl std::fmt::Display for IRBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "\n{}", "Unification Context:".bold().underline())?;
+        writeln!(f, "\n{}", "Monomorphization Sites:".bold().underline())?;
         if self.monomorphization_ctx.substitutions.is_empty() {
             return writeln!(f, "  {}", "(no monomorphization sites found)".dimmed());
         }
