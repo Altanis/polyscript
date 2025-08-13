@@ -22,10 +22,13 @@ use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
-use crate::backend::optimizations::{escape_analysis, monomorphization};
+use crate::backend::optimizations::escape_analysis;
 use crate::frontend::syntax::lexer::Lexer;
+use crate::mir::builder::IRBuilder;
+use crate::mir::ir_node::IRNode;
 
 mod frontend;
+mod mir;
 mod backend;
 mod utils;
 
@@ -77,8 +80,12 @@ fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, Semanti
     }
 }
 
+fn lower_ast_to_mir(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) -> IRNode {
+    let mut builder = IRBuilder::new(analyzer);
+    builder.build(program).unwrap()
+}
+
 fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
-    monomorphization::init(program, analyzer);
     escape_analysis::init(program, analyzer);
 }
 
@@ -135,10 +142,9 @@ fn test_main_script() {
 
         if SEMANTIC_ANALYSIS {
             let (mut program, mut analyzer) = analyze_ast(lined_source, program);
-            optimize(&mut program, &mut analyzer);
             
             if PRINT {
-                println!("--- ANNOTATED AST ---");
+                println!("--- AST ---");
                 
                 let mut format_str = String::new();
                 let _ = program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
@@ -148,6 +154,14 @@ fn test_main_script() {
                 println!("{}", analyzer);
             }
 
+            let mir_program = lower_ast_to_mir(&mut program, &mut analyzer);
+
+            println!("--- MIR ---");
+            let mut format_str = String::new();
+            let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
+            println!("{}", format_str);
+
+            optimize(&mut program, &mut analyzer);
             compile_ast(program, &analyzer);
         }
     }

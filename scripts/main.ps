@@ -4,6 +4,37 @@
 // memory safety (reference counting)
 
 
-struct Type<A> {}
-type Struct<T> = Type<T>;
-let ty: Struct<int> = Type {};
+struct Scalar<T> {
+    x: T;
+}
+
+fn id<T>(x: T): T {
+    x
+}
+
+trait Numeric<T> {
+    fn get_number(&self): T;
+}
+
+impl<T> Scalar<T> {
+    fn new(x: T): Self {
+        Scalar { x }
+    }
+
+    fn get_num(&self): T {
+        self.x
+    }
+}
+
+impl<T> Numeric<T> for Scalar<T> {
+    fn get_number(&self): T {
+        self.x
+    }
+}
+
+let scalar = [Scalar<int>].new(4);
+let num = scalar.get_num();
+let num2 = scalar.get_number();
+
+let other_num = Scalar { x: 5 };
+let clone = id(other_num);
