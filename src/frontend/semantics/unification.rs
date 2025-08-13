@@ -1802,9 +1802,7 @@ impl SemanticAnalyzer {
             };
 
             match resolution_opt {
-                Some(MemberResolution::Value(_, member_id)) => {
-                    right.value_id = Some(member_id);
-                },
+                Some(MemberResolution::Value(_, member_id)) => node.value_id = Some(member_id),
                 Some(MemberResolution::Type(_)) => {},
                 None => {
                     let type_name = self.symbol_table.display_type(left.type_id.as_ref().unwrap());

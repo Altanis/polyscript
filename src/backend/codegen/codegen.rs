@@ -319,10 +319,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let inner_ptr_type = self.map_semantic_type(node.type_id.as_ref().unwrap()).unwrap();
                 Some(self.builder.build_load(inner_ptr_type, ptr_to_ptr, "").unwrap().into_pointer_value())
             },
-            AstNodeKind::FieldAccess { left, right } => {
+            AstNodeKind::FieldAccess { left, .. } => {
                 let struct_ptr = self.compile_place_expression(left)?;
     
-                let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+                let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                if !matches!(member_symbol.kind, ValueSymbolKind::StructField) {
+                    return None;
+                }
+                
                 let member_scope = self.analyzer.symbol_table.get_scope(member_symbol.scope_id).unwrap();
     
                 let mut sorted_field_symbols: Vec<_> = member_scope.values.values()
@@ -928,9 +932,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(aggregate.into())
     }
 
-    fn compile_field_access(&mut self, left: &BoxedAstNode, right: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_field_access(&mut self, node: &AstNode, left: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
         if let AstNodeKind::PathQualifier { .. } = &left.kind {
-            let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+            let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
             return match member_symbol.kind {
                 ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
                 ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
@@ -944,7 +948,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             false
         };
     
-        let member_symbol = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap()).unwrap();
+        let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
     
         if is_static_access {
             return match member_symbol.kind {
@@ -956,7 +960,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         match member_symbol.kind {
             ValueSymbolKind::Function(_) => {
-                let fn_id = right.value_id.unwrap();
+                let fn_id = node.value_id.unwrap();
                 Some(self.functions.get(&fn_id).unwrap().as_global_value().as_basic_value_enum())
             },
             ValueSymbolKind::StructField => {
@@ -1210,7 +1214,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.constants.insert(stmt.value_id.unwrap(), init_val);
                 Some(init_val)
             },
-            AstNodeKind::FieldAccess { left, right } => self.compile_field_access(left, right),
+            AstNodeKind::FieldAccess { left, .. } => self.compile_field_access(stmt, left),
             AstNodeKind::FunctionCall { function, arguments } => {
                 self.compile_function_call(function, arguments, stmt.type_id.as_ref())
             }
