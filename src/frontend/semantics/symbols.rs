@@ -10,6 +10,7 @@ use crate::{
     },
 };
 use indexmap::IndexMap;
+use std::collections::HashSet;
 
 impl SemanticAnalyzer {
     pub fn symbol_collector_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
@@ -721,6 +722,59 @@ impl SemanticAnalyzer {
 
         let impl_scope_id = self.symbol_table.enter_scope(ScopeKind::Impl);
         let impl_generic_param_ids = self.collect_generic_parameters(impl_generics)?;
+
+        let impl_generic_names: HashSet<String> = impl_generics.iter().map(|n| n.get_name().unwrap()).collect();
+        if !impl_generic_names.is_empty() {
+            let mut used_generic_names = HashSet::new();
+
+            fn collect_used_generics(node: &AstNode, used: &mut HashSet<String>, available: &HashSet<String>) {
+                match &node.kind {
+                    AstNodeKind::TypeReference { type_name, generic_types, .. } => {
+                        if available.contains(type_name) {
+                            used.insert(type_name.clone());
+                        }
+                        for arg in generic_types {
+                            collect_used_generics(arg, used, available);
+                        }
+                    },
+                    AstNodeKind::FunctionPointer { params, return_type, .. } => {
+                        for param in params {
+                            collect_used_generics(param, used, available);
+                        }
+                        if let Some(rt) = return_type {
+                            collect_used_generics(rt, used, available);
+                        }
+                    },
+                    AstNodeKind::PathQualifier { ty, tr, .. } => {
+                        collect_used_generics(ty, used, available);
+                        if let Some(trait_node) = tr {
+                            collect_used_generics(trait_node, used, available);
+                        }
+                    },
+                    AstNodeKind::FieldAccess { left, .. } => {
+                        collect_used_generics(left, used, available);
+                    },
+                    _ => { }
+                }
+            }
+
+            collect_used_generics(type_reference, &mut used_generic_names, &impl_generic_names);
+            if let Some(trait_node) = trait_node.as_ref() {
+                collect_used_generics(trait_node, &mut used_generic_names, &impl_generic_names);
+            }
+
+            for generic_param_node in impl_generics.iter() {
+                let name = generic_param_node.get_name().unwrap();
+                if !used_generic_names.contains(&name) {
+                    return Err(self.create_error(
+                        ErrorKind::UnusedGenericParameter(name),
+                        generic_param_node.span,
+                        &[generic_param_node.span]
+                    ));
+                }
+            }
+        }
+
         for generic in impl_generics.iter_mut() {
             self.collect_generic_constraint(generic)?;
         }

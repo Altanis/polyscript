@@ -55,6 +55,7 @@ pub enum ErrorKind {
     InvalidPathQualifier,
     OutsideOfLoop,
     InvalidTypeReference(String, usize, usize),
+    UnusedGenericParameter(String),
     MutatingImmutableData(String),
     ExpectedValue,
     PrivateMemberAccess(String, String)
@@ -174,6 +175,7 @@ impl ErrorKind {
             ErrorKind::InvalidTypeReference(ty, given, expected) => {
                 format!("type {ty} was given {given} generic parameters but expects {expected} generic parameters")
             },
+            ErrorKind::UnusedGenericParameter(name) => format!("unused generic parameter `{}`", name),
             ErrorKind::MutatingImmutableData(ident) => format!("cannot mutable immutable data {ident}"),
             ErrorKind::ExpectedValue => "expected a value".to_string(),
             ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty)
