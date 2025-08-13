@@ -15,7 +15,7 @@ pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
         }
     }
 
-    for symbol in analyzer.symbol_table.value_symbols.values_mut() {
+    for symbol in analyzer.symbol_table.registry.value_symbols.values_mut() {
         if let ValueSymbolKind::Variable = symbol.kind && symbol.allocation_kind == AllocationKind::Unresolved {
             symbol.allocation_kind = AllocationKind::Stack;
         }

@@ -21,7 +21,7 @@ impl SemanticAnalyzer {
     pub fn impl_deduplication_pass(&mut self, _program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
 
-        let type_symbols_clone: Vec<_> = self.symbol_table.type_symbols.values().cloned().collect();
+        let type_symbols_clone: Vec<_> = self.symbol_table.registry.type_symbols.values().cloned().collect();
         for symbol in type_symbols_clone {
             let (name, inherent_impls) = match &symbol.kind {
                 TypeSymbolKind::Struct((_, impls)) => (self.symbol_table.get_type_name(symbol.name_id), impls),
@@ -1131,7 +1131,7 @@ impl SemanticAnalyzer {
         }
 
         if errors.is_empty() {
-            for symbol in self.symbol_table.type_symbols.values() {
+            for symbol in self.symbol_table.registry.type_symbols.values() {
                 if let TypeSymbolKind::UnificationVariable(id) = symbol.kind
                     && !self.unification_context.substitutions.contains_key(&symbol.id)
                 {
@@ -1841,11 +1841,11 @@ impl SemanticAnalyzer {
     }
 
     fn traverse_symbol_table(&mut self) {
-        let keys: Vec<_> = self.symbol_table.value_symbols.keys().cloned().collect();
+        let keys: Vec<_> = self.symbol_table.registry.value_symbols.keys().cloned().collect();
 
         for key in keys {
             let ty_opt = {
-                let map = &mut self.symbol_table.value_symbols;
+                let map = &mut self.symbol_table.registry.value_symbols;
 
                 if let Some(symbol) = map.get_mut(&key) {
                     symbol.type_id.take()
@@ -1857,16 +1857,16 @@ impl SemanticAnalyzer {
             if let Some(ty) = ty_opt {
                 let resolved = self.resolve_final_type(&ty);
 
-                if let Some(symbol) = self.symbol_table.value_symbols.get_mut(&key) {
+                if let Some(symbol) = self.symbol_table.registry.value_symbols.get_mut(&key) {
                     symbol.type_id = Some(resolved);
                 }
             }
         }
 
-        let type_symbol_ids: Vec<TypeSymbolId> = self.symbol_table.type_symbols.keys().cloned().collect();
+        let type_symbol_ids: Vec<TypeSymbolId> = self.symbol_table.registry.type_symbols.keys().cloned().collect();
 
         for id in type_symbol_ids {
-            let mut symbol_clone = self.symbol_table.type_symbols[&id].clone();
+            let mut symbol_clone = self.symbol_table.registry.type_symbols[&id].clone();
             let new_generics: Vec<usize> = symbol_clone.generic_parameters.iter()
                 .map(|&p| self.resolve_final_type(&Type::new_base(p)).get_base_symbol())
                 .collect();
@@ -1904,7 +1904,7 @@ impl SemanticAnalyzer {
                 _ => {}
             }
 
-            if was_changed && let Some(symbol) = self.symbol_table.type_symbols.get_mut(&id) {
+            if was_changed && let Some(symbol) = self.symbol_table.registry.type_symbols.get_mut(&id) {
                 *symbol = symbol_clone;
             }
         }

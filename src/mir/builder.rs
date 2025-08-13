@@ -1,22 +1,55 @@
+use std::{collections::HashMap, process::Child};
+
 use crate::{
     frontend::{
-        semantics::analyzer::SemanticAnalyzer,
+        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{IRNode, IRNodeKind},
 };
 
+pub struct MonomorphizationContext {
+    substitutions: HashMap<TypeSymbolId, Vec<Vec<Type>>>
+}
+
 pub struct IRBuilder<'a> {
-    analyzer: &'a SemanticAnalyzer,
+    analyzer: &'a mut SemanticAnalyzer
 }
 
 impl<'a> IRBuilder<'a> {
-    pub fn new(analyzer: &'a SemanticAnalyzer) -> Self {
+    pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
         Self { analyzer }
     }
+}
 
-    pub fn build(&mut self, ast: &AstNode) -> Option<IRNode> {
-        self.lower_node(ast)
+impl<'a> IRBuilder<'a> {
+    pub fn monomorphize(&mut self, program: &AstNode) {
+        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
+        for stmt in stmts.iter() {
+            self.collect_monomorphization_site(stmt);
+        }
+    }
+
+    fn collect_monomorphization_site(&mut self, node: &AstNode) {
+        match &node.kind {
+            AstNodeKind::FunctionCall { function, arguments } => {
+                // maybe see if the entire field access could have the resolved function instead of right
+                // let value_id = 
+            },
+            AstNodeKind::StructLiteral { name, fields } => {},
+            AstNodeKind::TypeReference { type_name, generic_types, reference_kind } => {},
+            _ => {}
+        }
+
+        for child in node.children().iter() {
+            self.collect_monomorphization_site(child);
+        }
+    }
+}
+
+impl<'a> IRBuilder<'a> {
+    pub fn build(&mut self, program: &AstNode) -> Option<IRNode> {
+        self.lower_node(program)
     }
 
     fn lower_node(&mut self, node: &AstNode) -> Option<IRNode> {

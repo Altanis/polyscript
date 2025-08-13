@@ -254,9 +254,14 @@ pub struct Scope {
     pub trait_id: Option<TypeSymbolId>,
 }
 
-pub struct SymbolTable {
+#[derive(Default, Debug, Clone)]
+pub struct SymbolRegistry {
     pub value_symbols: HashMap<ValueSymbolId, ValueSymbol>,
-    pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>,
+    pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>
+}
+
+pub struct SymbolTable {
+    pub registry: SymbolRegistry,
     pub value_names: NameInterner,
     pub type_names: NameInterner,
 
@@ -276,8 +281,7 @@ pub struct SymbolTable {
 impl SymbolTable {
     pub fn new(lines: Rc<Vec<String>>) -> Self {
         let mut table = SymbolTable {
-            value_symbols: HashMap::new(),
-            type_symbols: HashMap::new(),
+            registry: SymbolRegistry::default(),
             value_names: NameInterner::new(),
             type_names: NameInterner::new(),
             default_trait_impl_scopes: HashMap::new(),
@@ -559,7 +563,7 @@ impl SymbolTable {
         let scope_id = self.current_scope_id;
 
         if let Some(existing_id) = self.scopes[&scope_id].values.get(&name_id) {
-            let existing_symbol = &self.value_symbols[existing_id];
+            let existing_symbol = &self.registry.value_symbols[existing_id];
             let err = self.create_redeclaration_error(name.to_string(), existing_symbol.span, span);
             return Err(err);
         }
@@ -577,7 +581,7 @@ impl SymbolTable {
             scope_id,
             allocation_kind: AllocationKind::Unresolved
         };
-        self.value_symbols.insert(id, symbol);
+        self.registry.value_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
 
         Ok(id)
@@ -595,7 +599,7 @@ impl SymbolTable {
         let scope_id = self.current_scope_id;
 
         if let Some(existing_id) = self.scopes[&scope_id].types.get(&name_id) {
-            let existing_symbol = &self.type_symbols[existing_id];
+            let existing_symbol = &self.registry.type_symbols[existing_id];
             let err = self.create_redeclaration_error(name.to_string(), existing_symbol.span, span);
             return Err(err);
         }
@@ -611,7 +615,7 @@ impl SymbolTable {
             span,
             scope_id,
         };
-        self.type_symbols.insert(id, symbol);
+        self.registry.type_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().types.insert(name_id, id);
 
         Ok(id)
@@ -624,7 +628,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.values.get(&name_id) {
-                return self.value_symbols.get(symbol_id);
+                return self.registry.value_symbols.get(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -640,7 +644,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.values.get(&name_id) {
-                return self.value_symbols.get_mut(symbol_id);
+                return self.registry.value_symbols.get_mut(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -656,7 +660,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.types.get(&name_id) {
-                return self.type_symbols.get(symbol_id);
+                return self.registry.type_symbols.get(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -672,7 +676,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.types.get(&name_id) {
-                return self.type_symbols.get_mut(symbol_id);
+                return self.registry.type_symbols.get_mut(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -688,7 +692,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.values.get(&name_id) {
-                return self.value_symbols.get(symbol_id);
+                return self.registry.value_symbols.get(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -708,7 +712,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.values.get(&name_id) {
-                return self.value_symbols.get_mut(symbol_id);
+                return self.registry.value_symbols.get_mut(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -724,7 +728,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.types.get(&name_id) {
-                return self.type_symbols.get(symbol_id);
+                return self.registry.type_symbols.get(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -744,7 +748,7 @@ impl SymbolTable {
         while let Some(id) = scope_id {
             let scope = &self.scopes[&id];
             if let Some(symbol_id) = scope.types.get(&name_id) {
-                return self.type_symbols.get_mut(symbol_id);
+                return self.registry.type_symbols.get_mut(symbol_id);
             }
 
             scope_id = scope.parent;
@@ -757,14 +761,14 @@ impl SymbolTable {
         let name_id = self.value_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
 
-        self.value_symbols.get(symbol_id)
+        self.registry.value_symbols.get(symbol_id)
     }
 
     pub fn find_type_symbol_in_scope(&self, name: &str, scope_id: ScopeId) -> Option<&TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
 
-        self.type_symbols.get(symbol_id)
+        self.registry.type_symbols.get(symbol_id)
     }
 
     pub fn find_value_symbol_in_scope_mut(
@@ -774,7 +778,7 @@ impl SymbolTable {
     ) -> Option<&mut ValueSymbol> {
         let name_id = self.value_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.values.get(&name_id)?;
-        self.value_symbols.get_mut(symbol_id)
+        self.registry.value_symbols.get_mut(symbol_id)
     }
 
     pub fn find_type_symbol_in_scope_mut(
@@ -784,20 +788,20 @@ impl SymbolTable {
     ) -> Option<&mut TypeSymbol> {
         let name_id = self.type_names.get_id(name)?;
         let symbol_id = self.scopes.get(&scope_id)?.types.get(&name_id)?;
-        self.type_symbols.get_mut(symbol_id)
+        self.registry.type_symbols.get_mut(symbol_id)
     }
 
     pub fn get_value_symbol(&self, id: ValueSymbolId) -> Option<&ValueSymbol> {
-        self.value_symbols.get(&id)
+        self.registry.value_symbols.get(&id)
     }
     pub fn get_value_symbol_mut(&mut self, id: ValueSymbolId) -> Option<&mut ValueSymbol> {
-        self.value_symbols.get_mut(&id)
+        self.registry.value_symbols.get_mut(&id)
     }
     pub fn get_type_symbol(&self, id: TypeSymbolId) -> Option<&TypeSymbol> {
-        self.type_symbols.get(&id)
+        self.registry.type_symbols.get(&id)
     }
     pub fn get_type_symbol_mut(&mut self, id: TypeSymbolId) -> Option<&mut TypeSymbol> {
-        self.type_symbols.get_mut(&id)
+        self.registry.type_symbols.get_mut(&id)
     }
     pub fn get_value_name(&self, id: ValueNameId) -> &str {
         self.value_names.lookup(id)
@@ -1009,7 +1013,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn delete_uvs(&mut self) {
-        let uvs_to_remove = self.symbol_table.type_symbols
+        let uvs_to_remove = self.symbol_table.registry.type_symbols
             .values()
             .filter_map(|symbol| {
                 if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
@@ -1026,7 +1030,7 @@ impl SemanticAnalyzer {
 
         let uv_symbol_ids_set: HashSet<TypeSymbolId> = uvs_to_remove.iter().map(|(id, _)| *id).collect();
 
-        self.symbol_table.type_symbols.retain(|id, _| !uv_symbol_ids_set.contains(id));
+        self.symbol_table.registry.type_symbols.retain(|id, _| !uv_symbol_ids_set.contains(id));
         for scope in self.symbol_table.scopes.values_mut() {
             scope.types.retain(|_name_id, symbol_id| !uv_symbol_ids_set.contains(symbol_id));
         }
@@ -1163,7 +1167,7 @@ impl SymbolTable {
                         .symbol
                         .generic_parameters
                         .iter()
-                        .map(|id| if let Some(symbol) = self.table.type_symbols.get(id) {
+                        .map(|id| if let Some(symbol) = self.table.registry.type_symbols.get(id) {
                             self.table.get_type_name(symbol.name_id)
                         } else {
                             "[deleted_symbol]"
@@ -1182,7 +1186,7 @@ impl SymbolTable {
     pub fn display_type<'a>(&'a self, ty: &'a Type) -> String {
         match ty {
             Type::Base { symbol, args } => {
-                let type_symbol = &self.type_symbols[symbol];
+                let type_symbol = &self.registry.type_symbols[symbol];
                 match &type_symbol.kind {
                     TypeSymbolKind::FunctionSignature {
                         params,
@@ -1261,7 +1265,7 @@ impl SymbolTable {
     ) -> std::fmt::Result {
         let scope = self.scopes.get(&scope_id).unwrap();
         for symbol_id in scope.values.values() {
-            let symbol = &self.value_symbols[symbol_id];
+            let symbol = &self.registry.value_symbols[symbol_id];
             writeln!(
                 f,
                 "{:indent$}[Value({})] {}",
@@ -1272,7 +1276,7 @@ impl SymbolTable {
             )?;
         }
         for symbol_id in scope.types.values() {
-            let symbol = &self.type_symbols[symbol_id];
+            let symbol = &self.registry.type_symbols[symbol_id];
             writeln!(
                 f,
                 "{:indent$}[Type({})] {}",
@@ -1314,7 +1318,7 @@ impl TraitRegistry {
         impl std::fmt::Display for Displayer<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 for (trait_id, impls) in &self.registry.register {
-                    let trait_symbol = &self.table.type_symbols[trait_id];
+                    let trait_symbol = &self.table.registry.type_symbols[trait_id];
                     let trait_name = self.table.get_type_name(trait_symbol.name_id);
 
                     if self.registry.default_traits.contains_key(trait_name) {
@@ -1327,7 +1331,7 @@ impl TraitRegistry {
                         format!("[Trait({})] {}", trait_id, trait_name).underline()
                     )?;
                     for (type_id, impl_details) in impls {
-                        let type_symbol = &self.table.type_symbols[type_id];
+                        let type_symbol = &self.table.registry.type_symbols[type_id];
                         let type_name = self.table.get_type_name(type_symbol.name_id);
                         write!(f, "  for [Type({})] {}: ", type_id, type_name)?;
                         for (i, impl_detail) in impl_details.iter().enumerate() {
@@ -1476,7 +1480,7 @@ impl UnificationContext {
                     }
                 }
 
-               let unresolved_uvs: Vec<&TypeSymbol> = self.tbl.type_symbols
+               let unresolved_uvs: Vec<&TypeSymbol> = self.tbl.registry.type_symbols
                     .values()
                     .filter(|symbol| {
                         if let TypeSymbolKind::UnificationVariable(_) = symbol.kind {
