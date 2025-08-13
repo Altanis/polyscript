@@ -107,8 +107,7 @@ pub enum AstNodeKind {
     },
     StructLiteral {
         name: String,
-        fields: IndexMap<String, AstNode>,
-        generic_arguments: Vec<AstNode>
+        fields: IndexMap<String, AstNode>
     },
 
     EnumDeclaration {
@@ -151,8 +150,7 @@ pub enum AstNodeKind {
     /// A function call (i.e. `f()`).
     FunctionCall {
         function: BoxedAstNode,
-        arguments: Vec<AstNode>,
-        generic_arguments: Option<Vec<Type>>
+        arguments: Vec<AstNode>
     },
 
     TraitDeclaration {
@@ -659,18 +657,8 @@ impl AstNode {
                 write!(f, ": ")?;
                 type_annotation.fmt_with_indent(f, 0, table)?;
             }
-            AstNodeKind::StructLiteral { name, generic_arguments, fields } => {
+            AstNodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
-                if !generic_arguments.is_empty() {
-                    write!(f, "<")?;
-                    for (i, arg) in generic_arguments.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        arg.fmt_with_indent(f, 0, table)?;
-                    }
-                    write!(f, ">")?;
-                }
                 write!(f, "{}", "{".dimmed())?;
 
                 for (i, (field_name, expr)) in fields.iter().enumerate() {
@@ -753,16 +741,8 @@ impl AstNode {
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
-            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+            AstNodeKind::FunctionCall { function, arguments } => {
                 write!(f, "{}", indent_str)?;
-                if let (Some(gen_args), Some(table)) = (generic_arguments, table) && !gen_args.is_empty() {
-                    let args_str = gen_args
-                        .iter()
-                        .map(|t| table.display_type(t))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    write!(f, "<{}>", args_str.cyan())?;
-                }
                 function.fmt_with_indent(f, 0, table)?;
                 write!(f, "(")?;
                 for (i, param) in arguments.iter().enumerate() {

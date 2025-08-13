@@ -184,8 +184,7 @@ impl Parser {
                     span: lhs.span.set_end_from_span(self.previous().get_span()),
                     kind: AstNodeKind::FunctionCall {
                         function: boxed!(lhs),
-                        arguments,
-                        generic_arguments: None
+                        arguments
                     },
                     type_id: None,
                     value_id: None,
@@ -409,7 +408,7 @@ impl Parser {
                     self.advance();
 
                     Ok(AstNode {
-                        kind: AstNodeKind::StructLiteral { name, fields, generic_arguments: vec![] },
+                        kind: AstNodeKind::StructLiteral { name, fields },
                         span: span.set_end_from_span(self.previous().get_span()),
                         type_id: None,
                         value_id: None,

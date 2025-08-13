@@ -20,6 +20,7 @@
 
 constraints on generics
 default impl for ops
+must explicitly specify type for T when using a static method on Type<T>, i.e. `[Type<T>].Member`
 
 NOTE: stdlib should contain:
 - io functions (print, err, etc)
