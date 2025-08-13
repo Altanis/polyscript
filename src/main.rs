@@ -80,9 +80,12 @@ fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, Semanti
     }
 }
 
-fn lower_ast_to_mir(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) -> IRNode {
+fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyzer) -> (IRBuilder<'a>, IRNode) {
     let mut builder = IRBuilder::new(analyzer);
-    builder.build(program).unwrap()
+    builder.monomorphize(program);
+    let program = builder.build(program).unwrap();
+
+    (builder, program)
 }
 
 fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
@@ -154,9 +157,12 @@ fn test_main_script() {
                 println!("{}", analyzer);
             }
 
-            let mir_program = lower_ast_to_mir(&mut program, &mut analyzer);
+            let (ir_builder, mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
 
-            println!("--- MIR ---");
+            println!("--- IR BUILDER ---");
+            println!("{}", ir_builder);
+
+            println!("--- MIR PROGRAM ---");
             let mut format_str = String::new();
             let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
             println!("{}", format_str);

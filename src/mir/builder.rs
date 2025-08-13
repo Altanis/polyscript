@@ -1,24 +1,31 @@
-use std::{collections::HashMap, process::Child};
+use std::collections::{HashMap, HashSet};
+
+use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId},
+        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{IRNode, IRNodeKind},
 };
 
+#[derive(Default)]
 pub struct MonomorphizationContext {
-    substitutions: HashMap<TypeSymbolId, Vec<Vec<Type>>>
+    substitutions: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
 }
 
 pub struct IRBuilder<'a> {
-    analyzer: &'a mut SemanticAnalyzer
+    analyzer: &'a mut SemanticAnalyzer,
+    monomorphization_ctx: MonomorphizationContext
 }
 
 impl<'a> IRBuilder<'a> {
     pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
-        Self { analyzer }
+        Self {
+            analyzer,
+            monomorphization_ctx: MonomorphizationContext::default()
+        }
     }
 }
 
@@ -33,11 +40,34 @@ impl<'a> IRBuilder<'a> {
     fn collect_monomorphization_site(&mut self, node: &AstNode) {
         match &node.kind {
             AstNodeKind::FunctionCall { function, arguments } => {
-                // maybe see if the entire field access could have the resolved function instead of right
-                // let value_id = 
+                let fn_symbol = self.analyzer.symbol_table.get_type_symbol(function.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
+                let TypeSymbolKind::FunctionSignature { params, .. } = &fn_symbol.kind else { unreachable!(); };
+                let generic_arguments: Vec<Type> = params.iter().enumerate()
+                    .filter(|(_, param)| matches!(
+                        self.analyzer.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap().kind,
+                        TypeSymbolKind::Generic(_)
+                    ))
+                    .map(|(i, _)| arguments[i].type_id.clone().unwrap())
+                    .collect();
+
+                self.monomorphization_ctx.substitutions.entry(fn_symbol.id).or_default().insert(generic_arguments);
             },
-            AstNodeKind::StructLiteral { name, fields } => {},
-            AstNodeKind::TypeReference { type_name, generic_types, reference_kind } => {},
+            AstNodeKind::StructLiteral { .. } => {
+                if let Some(Type::Base { symbol, args }) = &node.type_id {
+                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                    if !type_symbol.generic_parameters.is_empty() {
+                        self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
+                    }
+                }
+            },
+            AstNodeKind::TypeReference { .. } => {
+                if let Some(Type::Base { symbol, args }) = &node.type_id {
+                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                    if !type_symbol.generic_parameters.is_empty() && !args.is_empty() {
+                        self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
+                    }
+                }
+            },
             _ => {}
         }
 
@@ -221,8 +251,47 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-/*
-1. associate astnodes with ids
-2. traverse ast, find sites for monomorphization
-3. build ir tree, for template nodes lookup monomorphs and implement
-*/
+impl std::fmt::Display for IRBuilder<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\n{}", "Unification Context:".bold().underline())?;
+        if self.monomorphization_ctx.substitutions.is_empty() {
+            return writeln!(f, "  {}", "(no monomorphization sites found)".dimmed());
+        }
+
+        let mut keys: Vec<_> = self.monomorphization_ctx.substitutions.keys().cloned().collect();
+        keys.sort();
+
+        for symbol_id in keys {
+            let instantiations = &self.monomorphization_ctx.substitutions[&symbol_id];
+            let symbol = self.analyzer.symbol_table.get_type_symbol(symbol_id).unwrap();
+            let name = self.analyzer.symbol_table.get_type_name(symbol.name_id);
+            
+            let generic_params_str = symbol.generic_parameters
+                .iter()
+                .map(|&p_id| {
+                    let param_symbol = self.analyzer.symbol_table.get_type_symbol(p_id).unwrap();
+                    self.analyzer.symbol_table.get_type_name(param_symbol.name_id).yellow().to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            writeln!(f, "  {} {} <{}>", name.cyan(), "=>".dimmed(), generic_params_str)?;
+            
+            let mut sorted_instantiations: Vec<String> = instantiations.iter().map(|arg_vec| {
+                let args_str = arg_vec
+                    .iter()
+                    .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_blue().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("<{}>", args_str)
+            }).collect();
+            sorted_instantiations.sort();
+            
+            for instantiation_str in sorted_instantiations {
+                writeln!(f, "    - {}", instantiation_str)?;
+            }
+        }
+
+        Ok(())
+    }
+}
