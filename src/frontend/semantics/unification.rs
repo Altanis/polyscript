@@ -941,11 +941,11 @@ impl SemanticAnalyzer {
     fn find_member_in_trait_impl(&mut self, ty: &Type, tr: &Type, member_name: &str, info: ConstraintInfo) -> Result<Option<MemberResolution>, BoxedError> {
         let type_id = ty.get_base_symbol();
         let trait_id = tr.get_base_symbol();
-
+    
         if self.is_uv(type_id) || self.is_uv(trait_id) {
             return Ok(None);
         }
-
+    
         let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
         let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else {
             return Err(self.create_error(
@@ -954,7 +954,7 @@ impl SemanticAnalyzer {
                 &[info.span],
             ));
         };
-
+    
         let type_symbol = self.symbol_table.get_type_symbol(type_id).unwrap();
         if let TypeSymbolKind::Generic(constraints) = &type_symbol.kind
             && constraints.contains(&trait_id)
@@ -962,7 +962,7 @@ impl SemanticAnalyzer {
         {
             let self_in_trait_id = self.symbol_table.find_type_symbol_in_scope("Self", trait_scope_id).unwrap().id;
             let substitutions = HashMap::from([(self_in_trait_id, ty.clone())]);
-
+    
             let concrete_resolution = match resolution {
                 MemberResolution::Value(member_type, member_id) => {
                     MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
@@ -971,23 +971,45 @@ impl SemanticAnalyzer {
                     MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
                 }
             };
-
+    
             return Ok(Some(concrete_resolution));
         }
-
+    
         let all_trait_impls: Vec<_> = self.trait_registry.register.get(&trait_id)
             .and_then(|impls_for_trait| impls_for_trait.get(&type_id))
             .map_or(vec![], |v| v.clone());
-
+    
         for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(ty, &trait_impl)
-            {
+            let original_sub_map = self.unification_context.substitutions.clone();
+    
+            let applicability_result = (|| {
+                let mut substitutions = self.check_trait_impl_applicability(ty, &trait_impl)?;
+                
+                let impl_trait_template = Type::Base {
+                    symbol: trait_id,
+                    args: trait_impl.trait_generic_specialization.iter().map(|id| Type::new_base(*id)).collect(),
+                };
+                let call_site_trait = tr.clone();
+                let impl_generics_set: HashSet<TypeSymbolId> = trait_impl.impl_generic_params.iter().cloned().collect();
+    
+                if self.collect_substitutions(&call_site_trait, &impl_trait_template, &mut substitutions, &impl_generics_set, info).is_err() {
+                    return None;
+                }
+    
+                let substituted_impl_trait = self.apply_substitution(&impl_trait_template, &substitutions);
+                match self.unify(call_site_trait, substituted_impl_trait, info) {
+                    Ok(_) => Some(substitutions),
+                    Err(_) => None,
+                }
+            })();
+    
+            if let Some(substitutions) = applicability_result {
                 let scope_id = trait_impl.impl_scope_id;
                 if let Some(value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, scope_id).cloned() {
                     if value_symbol.qualifier == QualifierKind::Private {
                         let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
                         let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
-
+    
                         if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
                             return Err(self.create_error(
                                 ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
@@ -996,7 +1018,7 @@ impl SemanticAnalyzer {
                             ));
                         }
                     }
-
+    
                     if matches!(value_symbol.kind, ValueSymbolKind::Function(_) | ValueSymbolKind::Variable) {
                         let member_type = value_symbol.type_id.as_ref().unwrap();
                         let resolution = MemberResolution::Value(self.apply_substitution(member_type, &substitutions), value_symbol.id);
@@ -1008,7 +1030,7 @@ impl SemanticAnalyzer {
                     if type_symbol.qualifier == QualifierKind::Private {
                         let self_symbol = self.symbol_table.find_type_symbol_in_scope("Self", scope_id).unwrap();
                         let TypeSymbolKind::TypeAlias((_, Some(self_type))) = &self_symbol.kind else { unreachable!(); };
-
+    
                         if !self.is_access_in_impl_of(info.scope_id, self_type.get_base_symbol()) {
                             return Err(self.create_error(
                                 ErrorKind::PrivateMemberAccess(member_name.to_string(), self.symbol_table.display_type(self_type)),
@@ -1022,6 +1044,8 @@ impl SemanticAnalyzer {
                     let resolution = MemberResolution::Type(self.apply_substitution(&member_type, &substitutions));
                     return Ok(Some(resolution));
                 }
+            } else {
+                self.unification_context.substitutions = original_sub_map;
             }
         }
         
