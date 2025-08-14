@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind},
+        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{IRNode, IRNodeKind},
@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct MonomorphizationContext {
-    substitutions: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
+    substitutions: HashMap<TypeSymbolId, HashSet<(Vec<Type>, Vec<Type>)>>
 }
 
 pub struct IRBuilder<'a> {
@@ -53,42 +53,126 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn collect_monomorphization_sites(&mut self, node: &AstNode) {
-        match &node.kind {
-            AstNodeKind::FunctionCall { function, arguments } => {
-                let fn_symbol = self.analyzer.symbol_table.get_type_symbol(function.type_id.as_ref().unwrap().get_base_symbol()).unwrap();
-                let TypeSymbolKind::FunctionSignature { params, .. } = &fn_symbol.kind else { unreachable!(); };
-                let generic_arguments: Vec<Type> = params.iter().enumerate()
-                    .filter(|(_, param)| matches!(
-                        self.analyzer.symbol_table.get_type_symbol(param.get_base_symbol()).unwrap().kind,
-                        TypeSymbolKind::Generic(_)
-                    ))
-                    .map(|(i, _)| arguments[i].type_id.clone().unwrap())
-                    .collect();
+    fn collect_generic_mappings(
+        &self,
+        concrete_ty: &Type,
+        template_ty: &Type,
+        substitutions: &mut HashMap<TypeSymbolId, Type>,
+    ) {
+        match (concrete_ty, template_ty) {
+            (
+                Type::Base {
+                    symbol: concrete_symbol,
+                    args: concrete_args,
+                },
+                Type::Base {
+                    symbol: template_symbol,
+                    args: template_args,
+                },
+            ) => {
+                let template_type_symbol = self
+                    .analyzer
+                    .symbol_table
+                    .get_type_symbol(*template_symbol)
+                    .unwrap();
 
-                if !generic_arguments.is_empty() && generic_arguments.iter().all(|ty| self.type_is_fully_concrete(ty)) {
-                    self.monomorphization_ctx.substitutions.entry(fn_symbol.id).or_default().insert(generic_arguments);
+                if let TypeSymbolKind::Generic(_) = template_type_symbol.kind {
+                    substitutions.insert(*template_symbol, concrete_ty.clone());
+                    return;
                 }
-            },
-            AstNodeKind::StructLiteral { .. } => {
-                if let Some(Type::Base { symbol, args }) = &node.type_id {
-                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                    if !type_symbol.generic_parameters.is_empty() 
-                        && !args.is_empty()
-                        && args.iter().all(|arg| self.type_is_fully_concrete(arg))
-                    {
-                        self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
+
+                if concrete_symbol == template_symbol && concrete_args.len() == template_args.len() {
+                    for (c_arg, t_arg) in concrete_args.iter().zip(template_args.iter()) {
+                        self.collect_generic_mappings(c_arg, t_arg, substitutions);
                     }
                 }
             },
-            AstNodeKind::TypeReference { .. } => {
-                if let Some(Type::Base { symbol, args }) = &node.type_id {
+            (Type::Reference(c_inner), Type::Reference(t_inner))
+                | (Type::MutableReference(c_inner), Type::MutableReference(t_inner))
+            => {
+                self.collect_generic_mappings(c_inner, t_inner, substitutions);
+            },
+            _ => {}
+        }
+    }
+
+    fn collect_monomorphization_sites(&mut self, node: &AstNode) {
+        match &node.kind {
+            AstNodeKind::FunctionCall { function, arguments } => {
+                let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) else { return; };
+                let Some(template_fn_type) = fn_value_symbol.type_id.as_ref() else { return; };
+
+                let Type::Base { symbol: fn_symbol_id, .. } = template_fn_type else { return; };
+                let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
+                let TypeSymbolKind::FunctionSignature { params: template_params, .. } = &fn_symbol.kind else { return; };
+
+                let mut generic_id_to_concrete_type = HashMap::new();
+                
+                let has_receiver = template_params.len() > arguments.len();
+
+                if has_receiver
+                    && let AstNodeKind::FieldAccess { left, .. } = &function.kind
+                    && let Some(instance_type) = &left.type_id
+                {
+                    self.collect_generic_mappings(
+                        instance_type, 
+                        &template_params[0], 
+                        &mut generic_id_to_concrete_type
+                    );
+                }
+
+                let params_to_zip = if has_receiver {
+                    &template_params[1..]
+                } else {
+                    template_params
+                };
+
+                for (arg_node, template_param) in arguments.iter().zip(params_to_zip.iter()) {
+                    if let Some(concrete_type) = &arg_node.type_id {
+                        self.collect_generic_mappings(concrete_type, template_param, &mut generic_id_to_concrete_type);
+                    }
+                }
+
+                let ValueSymbolKind::Function(fn_scope_id) = fn_value_symbol.kind else { return };
+
+                let mut parent_args = Vec::new();
+                let mut local_args = Vec::new();
+
+                for (&generic_param_id, concrete_type) in generic_id_to_concrete_type.iter() {
+                    let generic_param_symbol = self.analyzer.symbol_table.get_type_symbol(generic_param_id).unwrap();
+
+                    if generic_param_symbol.scope_id == fn_scope_id {
+                        local_args.push(concrete_type.clone());
+                    } else {
+                        parent_args.push(concrete_type.clone());
+                    }
+                }
+
+                if (!local_args.is_empty() || !parent_args.is_empty()) &&
+                   local_args.iter().all(|t| self.type_is_fully_concrete(t)) &&
+                   parent_args.iter().all(|t| self.type_is_fully_concrete(t))
+                {
+                    self.monomorphization_ctx
+                        .substitutions
+                        .entry(*fn_symbol_id)
+                        .or_default()
+                        .insert((parent_args, local_args));
+                }
+            },
+            AstNodeKind::StructLiteral { .. } | AstNodeKind::TypeReference { .. } => {
+                if let Some(Type::Base { symbol, args, .. }) = &node.type_id {
                     let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                    if !type_symbol.generic_parameters.is_empty() 
-                        && !args.is_empty() 
-                        && args.iter().all(|arg| self.type_is_fully_concrete(arg))
-                    {
-                        self.monomorphization_ctx.substitutions.entry(*symbol).or_default().insert(args.clone());
+                    
+                    if type_symbol.generic_parameters.is_empty() || args.is_empty() {
+                        return;
+                    }
+
+                    if args.iter().all(|arg| self.type_is_fully_concrete(arg)) {
+                        self.monomorphization_ctx
+                            .substitutions
+                            .entry(*symbol)
+                            .or_default()
+                            .insert((vec![], args.clone()));
                     }
                 }
             },
@@ -299,20 +383,45 @@ impl std::fmt::Display for IRBuilder<'_> {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            writeln!(f, "  {} {} <{}>", name.cyan(), "=>".dimmed(), generic_params_str)?;
+            if generic_params_str.is_empty() {
+                 writeln!(f, "  {}", name.cyan())?;
+            } else {
+                 writeln!(f, "  {} <{}>", name.cyan(), generic_params_str)?;
+            }
             
-            let mut sorted_instantiations: Vec<String> = instantiations.iter().map(|arg_vec| {
-                let args_str = arg_vec
-                    .iter()
-                    .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_blue().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("<{}>", args_str)
-            }).collect();
-            sorted_instantiations.sort();
+            let mut sorted_instantiations: Vec<_> = instantiations.iter().collect();
+            sorted_instantiations.sort_by_key(|(parent_args, local_args)| {
+                let p_str: String = parent_args.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect();
+                let l_str: String = local_args.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect();
+                (p_str, l_str)
+            });
             
-            for instantiation_str in sorted_instantiations {
-                writeln!(f, "    - {}", instantiation_str)?;
+            for (parent_args, local_args) in sorted_instantiations {
+                write!(f, "    - ")?;
+
+                if parent_args.is_empty() {
+                    write!(f, "Parent: {} ", "[]".dimmed())?;
+                } else {
+                    let parent_args_str = parent_args
+                        .iter()
+                        .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_blue().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(f, "Parent: <{}> ", parent_args_str)?;
+                }
+                
+                write!(f, "{}", "/".dimmed())?;
+
+                if local_args.is_empty() {
+                    writeln!(f, " Local: {}", "[]".dimmed())?;
+                } else {
+                    let local_args_str = local_args
+                        .iter()
+                        .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_green().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(f, " Local: <{}>", local_args_str)?;
+                }
             }
         }
 

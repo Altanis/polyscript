@@ -1,4 +1,5 @@
 // <T: Add<T>> no work properly
+// [Scalar<int>].new("%") works for some reason
 // can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
@@ -6,10 +7,6 @@
 
 struct Scalar<T> {
     x: T;
-}
-
-fn id<T>(x: T): T {
-    x
 }
 
 trait Numeric<T> {
@@ -36,5 +33,9 @@ let scalar = [Scalar<int>].new(4);
 let num = scalar.get_num();
 let num2 = scalar.get_number();
 
-let other_num = Scalar { x: 5 };
-let clone = id(other_num);
+
+fn identity1<T>(x: T): T { x }
+fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
+
+let clone = identity1([Scalar<char>].new('5'));
+let clone2 = identity2(Scalar { x: true });
