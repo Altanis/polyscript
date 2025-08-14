@@ -6,17 +6,7 @@
 // memory safety (reference counting)
 
 
-struct Scalar<T> { x: T; }
-impl<T: Not> Scalar<T> {
-    fn get_negation(&self): [T as Not].Output {
-        !self.x
-    }
-}
-
-let scalar = Scalar { x: "4" };
-scalar.get_negation();
-
-/*struct Scalar<T> {
+struct Scalar<T> {
     x: T;
 }
 
@@ -41,14 +31,13 @@ impl<T> Numeric<T> for Scalar<T> {
 }
 
 let scalar = Scalar { x: 4 };
-let num = scalar.get_num();
+let num = scalar.get_num(); // should invoke get_num (parent: [int])
 
 let s2 = Scalar { x: "84" };
-let num2 = s2.get_number(); // impl block string for trait
-
+let num2 = s2.get_number(); // should invoke get_number (parent: [string])
 
 fn identity1<T>(x: T): T { x }
 fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
 
 let clone = identity1([Scalar<char>].new('5'));
-let clone2 = identity2(Scalar { x: true });*/
+let clone2 = identity2(Scalar { x: true });

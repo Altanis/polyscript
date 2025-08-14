@@ -211,6 +211,33 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    fn check_impl_generic_constraints(
+        &mut self,
+        generic_params: &[TypeSymbolId],
+        substitutions: &HashMap<TypeSymbolId, Type>,
+    ) -> Result<bool, BoxedError> {
+        for &generic_param_id in generic_params {
+            let generic_param_symbol = self.symbol_table.get_type_symbol(generic_param_id).unwrap();
+            let TypeSymbolKind::Generic(constraints) = &generic_param_symbol.kind else {
+                continue;
+            };
+
+            let constraints = constraints.clone(); 
+            if constraints.is_empty() {
+                continue;
+            }
+            
+            let concrete_type = substitutions.get(&generic_param_id).unwrap(); 
+            
+            for trait_id in constraints {
+                if !self.does_type_implement_trait(concrete_type, trait_id)? {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
     fn is_uv(&self, symbol_id: TypeSymbolId) -> bool {
         matches!(
             self.symbol_table.get_type_symbol(symbol_id).unwrap().kind,
@@ -588,7 +615,9 @@ impl SemanticAnalyzer {
         }
 
         for imp in impls {
-            if self.check_trait_impl_applicability(&resolved_type, &imp).is_some() {
+            if let Some(substitutions) = self.check_trait_impl_applicability(&resolved_type, &imp)
+                && self.check_impl_generic_constraints(&imp.impl_generic_params, &substitutions)?
+            {
                 return Ok(true);
             }
         }
@@ -798,22 +827,27 @@ impl SemanticAnalyzer {
         impls: &[InherentImpl],
         member_name: &str,
         is_static_access: bool,
-        info: ConstraintInfo
+        info: ConstraintInfo,
     ) -> Result<Option<MemberResolution>, BoxedError> {
         for imp in impls {
-            if let Some(substitutions) = self.check_impl_applicability(base_type, imp)
-                && let Some(resolution) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)?
-            {
-                let concrete_resolution = match resolution {
-                    MemberResolution::Value(member_type, member_id) => {
-                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
-                    }
-                    MemberResolution::Type(member_type) => {
-                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
-                    }
-                };
-                
-                return Ok(Some(concrete_resolution));
+            if let Some(substitutions) = self.check_impl_applicability(base_type, imp) {
+                if !self.check_impl_generic_constraints(&imp.generic_params, &substitutions)? {
+                    continue;
+                }
+
+                if let Some(resolution) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)? {
+                    let concrete_resolution = match resolution {
+                        MemberResolution::Value(member_type, member_id) => MemberResolution::Value(
+                            self.apply_substitution(&member_type, &substitutions),
+                            member_id,
+                        ),
+                        MemberResolution::Type(member_type) => {
+                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                        }
+                    };
+
+                    return Ok(Some(concrete_resolution));
+                }
             }
         }
 
@@ -825,7 +859,7 @@ impl SemanticAnalyzer {
         base_type: &Type,
         member_name: &str,
         is_static_access: bool,
-        info: ConstraintInfo
+        info: ConstraintInfo,
     ) -> Result<Option<MemberResolution>, BoxedError> {
         let base_symbol_id = base_type.get_base_symbol();
         
@@ -835,19 +869,24 @@ impl SemanticAnalyzer {
             .cloned().collect();
     
         for trait_impl in all_trait_impls {
-            if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl)
-                && let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
-            {
-                let concrete_resolution = match resolution {
-                    MemberResolution::Value(member_type, member_id) => {
-                        MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
-                    }
-                    MemberResolution::Type(member_type) => {
-                        MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
-                    }
-                };
+            if let Some(substitutions) = self.check_trait_impl_applicability(base_type, &trait_impl) {
+                if !self.check_impl_generic_constraints(&trait_impl.impl_generic_params, &substitutions)? {
+                    continue;
+                }
+                
+                if let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
+                {
+                    let concrete_resolution = match resolution {
+                        MemberResolution::Value(member_type, member_id) => {
+                            MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                        }
+                        MemberResolution::Type(member_type) => {
+                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                        }
+                    };
 
-                return Ok(Some(concrete_resolution));
+                    return Ok(Some(concrete_resolution));
+                }
             }
         }
 
