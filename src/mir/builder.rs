@@ -46,7 +46,7 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    pub fn monomorphize(&mut self, program: &AstNode) {
+    fn monomorphize(&mut self, program: &AstNode) {
         let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
         for stmt in stmts.iter() {
             self.collect_monomorphization_sites(stmt);
@@ -217,6 +217,7 @@ impl<'a> IRBuilder<'a> {
 
 impl<'a> IRBuilder<'a> {
     pub fn build(&mut self, program: &AstNode) -> Option<IRNode> {
+        self.monomorphize(program);
         self.lower_node(program)
     }
 
