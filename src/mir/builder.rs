@@ -104,20 +104,36 @@ impl<'a> IRBuilder<'a> {
 
                 let Type::Base { symbol: fn_symbol_id, .. } = template_fn_type else { return; };
                 let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
-                let TypeSymbolKind::FunctionSignature { params: template_params, .. } = &fn_symbol.kind else { return; };
+                let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return, .. } = &fn_symbol.kind else { return; };
 
                 let mut generic_id_to_concrete_type = HashMap::new();
                 
-                let has_receiver = template_params.len() > arguments.len();
+                let has_receiver = fn_symbol.generic_parameters.iter().any(|p| {
+                    let sym = self.analyzer.symbol_table.get_type_symbol(*p).unwrap();
+                    let name = self.analyzer.symbol_table.get_type_name(sym.name_id);
+                    name == "Self"
+                }) || (!template_params.is_empty() && arguments.len() < template_params.len());
+
 
                 if has_receiver
                     && let AstNodeKind::FieldAccess { left, .. } = &function.kind
                     && let Some(instance_type) = &left.type_id
                 {
+                    let mut concrete_receiver_ty = instance_type;
+                    while let Type::Reference(inner) | Type::MutableReference(inner) = concrete_receiver_ty {
+                        concrete_receiver_ty = inner;
+                    }
+                
+                    let template_receiver_ty = &template_params[0];
+                    let mut base_template_receiver_ty = template_receiver_ty;
+                    while let Type::Reference(inner) | Type::MutableReference(inner) = base_template_receiver_ty {
+                        base_template_receiver_ty = inner;
+                    }
+                
                     self.collect_generic_mappings(
-                        instance_type, 
-                        &template_params[0], 
-                        &mut generic_id_to_concrete_type
+                        concrete_receiver_ty,
+                        base_template_receiver_ty,
+                        &mut generic_id_to_concrete_type,
                     );
                 }
 
@@ -132,21 +148,35 @@ impl<'a> IRBuilder<'a> {
                         self.collect_generic_mappings(concrete_type, template_param, &mut generic_id_to_concrete_type);
                     }
                 }
+                
+                if let Some(call_site_return_type) = &node.type_id {
+                    self.collect_generic_mappings(
+                        call_site_return_type,
+                        template_return,
+                        &mut generic_id_to_concrete_type,
+                    );
+                }
 
                 let ValueSymbolKind::Function(fn_scope_id) = fn_value_symbol.kind else { return };
 
-                let mut parent_args = Vec::new();
-                let mut local_args = Vec::new();
+                let mut parent_generic_ids = Vec::new();
+                let mut local_generic_ids = Vec::new();
 
-                for (&generic_param_id, concrete_type) in generic_id_to_concrete_type.iter() {
+                for &generic_param_id in generic_id_to_concrete_type.keys() {
                     let generic_param_symbol = self.analyzer.symbol_table.get_type_symbol(generic_param_id).unwrap();
-
                     if generic_param_symbol.scope_id == fn_scope_id {
-                        local_args.push(concrete_type.clone());
+                        local_generic_ids.push(generic_param_id);
                     } else {
-                        parent_args.push(concrete_type.clone());
+                        parent_generic_ids.push(generic_param_id);
                     }
                 }
+
+                parent_generic_ids.sort();
+                local_generic_ids.sort();
+
+                let parent_args: Vec<Type> = parent_generic_ids.iter().map(|id| generic_id_to_concrete_type[id].clone()).collect();
+                let local_args: Vec<Type> = local_generic_ids.iter().map(|id| generic_id_to_concrete_type[id].clone()).collect();
+
 
                 if (!local_args.is_empty() || !parent_args.is_empty()) &&
                    local_args.iter().all(|t| self.type_is_fully_concrete(t)) &&
