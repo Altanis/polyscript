@@ -1716,6 +1716,51 @@ impl SemanticAnalyzer {
             
             Ok(true)
         } else {
+            let lhs_symbol = self.symbol_table.get_type_symbol(resolved_lhs.get_base_symbol()).unwrap();
+            if let TypeSymbolKind::Generic(constraints) = &lhs_symbol.kind && constraints.contains(&trait_id) {
+                let member_name = "Output";
+                
+                let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                let TypeSymbolKind::Trait(trait_scope_id) = trait_symbol.kind else { unreachable!() };
+
+                if self.symbol_table.find_type_symbol_in_scope(member_name, trait_scope_id).is_none() {
+                    let trait_name_disp = self.symbol_table.display_type(&Type::new_base(trait_id));
+                    return Err(self.create_error(
+                        ErrorKind::MemberNotFound(member_name.to_string(), trait_name_disp),
+                        info.span,
+                        &[info.span]
+                    ));
+                }
+
+                let opaque_type_name = format!("[{} as {}].{}", self.symbol_table.display_type(&resolved_lhs), self.symbol_table.display_type(&trait_type), member_name);
+                
+                let old_scope = self.symbol_table.current_scope_id;
+                self.symbol_table.current_scope_id = info.scope_id;
+                
+                let opaque_type_id = if let Some(existing_symbol) = self.symbol_table.find_type_symbol(&opaque_type_name) {
+                    existing_symbol.id
+                } else {
+                    self.symbol_table.add_type_symbol(
+                        &opaque_type_name,
+                        TypeSymbolKind::OpaqueTypeProjection {
+                            ty: resolved_lhs.clone(),
+                            tr: trait_type.clone(),
+                            member: member_name.to_string(),
+                        },
+                        vec![],
+                        QualifierKind::Private,
+                        Some(info.span),
+                    )?
+                };
+
+                self.symbol_table.current_scope_id = old_scope;
+                
+                let opaque_type = Type::new_base(opaque_type_id);
+                self.unify(result_ty, opaque_type, info)?;
+                
+                return Ok(true);
+            }
+
             let trait_name = self.symbol_table.display_type(&Type::Base { symbol: trait_id, args: trait_args });
             let lhs_name = self.symbol_table.display_type(&resolved_lhs);
             Err(self.create_error(
