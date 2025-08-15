@@ -82,7 +82,7 @@ fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, Semanti
 
 fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyzer) -> (IRBuilder<'a>, IRNode) {
     let mut builder = IRBuilder::new(analyzer);
-    let program = builder.build(program).unwrap();
+    let program = builder.build(program);
 
     (builder, program)
 }
