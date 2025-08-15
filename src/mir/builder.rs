@@ -468,7 +468,7 @@ impl<'a> MIRBuilder<'a> {
                     let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return_type, .. } = &template_fn_sig_symbol.kind else { unreachable!() };
 
                     let mangled_name = self.mangle_name(template_type.get_base_symbol(), substitutions.values());
-                    let parent_scope_id = self.analyzer.symbol_table.get_scope(template_value_symbol.scope_id).unwrap().parent.unwrap();
+                    let parent_scope_id = self.analyzer.symbol_table.get_scope(template_value_symbol.scope_id).unwrap().id;
                     if self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).is_some() {
                         return None;
                     }
@@ -478,6 +478,7 @@ impl<'a> MIRBuilder<'a> {
 
                     let original_scope = self.analyzer.symbol_table.current_scope_id;
                     self.analyzer.symbol_table.current_scope_id = parent_scope_id;
+                    dbg!(parent_scope_id);
 
                     let concrete_fn_sig_id = self.analyzer.symbol_table.add_type_symbol(
                         &mangled_name,
@@ -492,15 +493,6 @@ impl<'a> MIRBuilder<'a> {
                     ).unwrap();
 
                     let new_fn_body_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Function);
-                    
-                    let concrete_fn_value_id = self.analyzer.symbol_table.add_value_symbol(
-                        &mangled_name,
-                        ValueSymbolKind::Function(new_fn_body_scope_id),
-                        false,
-                        template_value_symbol.qualifier,
-                        Some(Type::new_base(concrete_fn_sig_id)),
-                        Some(node.span),
-                    ).unwrap();
 
                     let mut mir_params = vec![];
                     for (i, param_node) in parameters.iter_mut().enumerate() {
@@ -530,6 +522,16 @@ impl<'a> MIRBuilder<'a> {
                     let mir_body = body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap()));
 
                     self.analyzer.symbol_table.exit_scope();
+
+                    let concrete_fn_value_id = self.analyzer.symbol_table.add_value_symbol(
+                        &mangled_name,
+                        ValueSymbolKind::Function(new_fn_body_scope_id),
+                        false,
+                        template_value_symbol.qualifier,
+                        Some(Type::new_base(concrete_fn_sig_id)),
+                        Some(node.span),
+                    ).unwrap();
+
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
                     return Some(MIRNode {
@@ -555,10 +557,51 @@ impl<'a> MIRBuilder<'a> {
                 name: name.clone(),
                 mutable: *mutable,
             },
-            AstNodeKind::FunctionCall { function, arguments, .. } => MIRNodeKind::FunctionCall {
-                function: Box::new(self.lower_node(function)?),
-                arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect(),
-            },
+            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+                if !generic_arguments.is_empty() {
+                    let generic_fn_value_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
+                    let generic_fn_type = generic_fn_value_symbol.type_id.as_ref().unwrap();
+                    let Type::Base { symbol: generic_fn_sig_id, .. } = generic_fn_type else { unreachable!() };
+                    let mangled_name = self.mangle_name(*generic_fn_sig_id, generic_arguments);
+                    let parent_scope_id = self.analyzer.symbol_table.get_scope(generic_fn_value_symbol.scope_id).unwrap().id;
+                    let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
+
+                    let mir_function_expr = match &mut function.kind {
+                        AstNodeKind::Identifier(_) => {
+                            MIRNode {
+                                kind: MIRNodeKind::Identifier(mangled_name),
+                                span: function.span,
+                                value_id: Some(monomorphized_fn_value_symbol.id),
+                                type_id: monomorphized_fn_value_symbol.type_id.clone(),
+                            }
+                        },
+                        AstNodeKind::FieldAccess { left, right } => {
+                            let mir_left = self.lower_node(left)?;
+                            let mir_right = MIRNode {
+                                kind: MIRNodeKind::Identifier(mangled_name),
+                                span: right.span,
+                                value_id: Some(monomorphized_fn_value_symbol.id),
+                                type_id: monomorphized_fn_value_symbol.type_id.clone(),
+                            };
+
+                            MIRNode {
+                                kind: MIRNodeKind::FieldAccess {
+                                    left: Box::new(mir_left),
+                                    right: Box::new(mir_right),
+                                },
+                                span: function.span,
+                                value_id: Some(monomorphized_fn_value_symbol.id),
+                                type_id: monomorphized_fn_value_symbol.type_id.clone(),
+                            }
+                        },
+                        _ => unreachable!()
+                    };
+
+                    MIRNodeKind::FunctionCall { function: Box::new(mir_function_expr), arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect() }
+                } else {
+                    MIRNodeKind::FunctionCall { function: Box::new(self.lower_node(function)?), arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect() }
+                }
+            }
             AstNodeKind::FieldAccess { left, right } => MIRNodeKind::FieldAccess {
                 left: Box::new(self.lower_node(left)?),
                 right: Box::new(self.lower_node(right)?),
