@@ -8,7 +8,7 @@ use colored::Colorize;
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone)]
-pub enum IRNodeKind {
+pub enum MIRNodeKind {
     IntegerLiteral(i64),
     FloatLiteral(f64),
     BooleanLiteral(bool),
@@ -19,56 +19,56 @@ pub enum IRNodeKind {
     VariableDeclaration {
         name: String,
         mutable: bool,
-        initializer: Box<IRNode>,
+        initializer: Box<MIRNode>,
     },
 
     UnaryOperation {
         operator: Operation,
-        operand: Box<IRNode>,
+        operand: Box<MIRNode>,
     },
     BinaryOperation {
         operator: Operation,
-        left: Box<IRNode>,
-        right: Box<IRNode>,
+        left: Box<MIRNode>,
+        right: Box<MIRNode>,
     },
     ConditionalOperation {
         operator: Operation,
-        left: Box<IRNode>,
-        right: Box<IRNode>,
+        left: Box<MIRNode>,
+        right: Box<MIRNode>,
     },
-    HeapExpression(Box<IRNode>),
+    HeapExpression(Box<MIRNode>),
 
     TypeCast {
-        expr: Box<IRNode>,
+        expr: Box<MIRNode>,
         target_type: Type
     },
 
-    Block(Vec<IRNode>),
+    Block(Vec<MIRNode>),
     IfStatement {
-        condition: Box<IRNode>,
-        then_branch: Box<IRNode>,
-        else_if_branches: Vec<(Box<IRNode>, Box<IRNode>)>,
-        else_branch: Option<Box<IRNode>>,
+        condition: Box<MIRNode>,
+        then_branch: Box<MIRNode>,
+        else_if_branches: Vec<(Box<MIRNode>, Box<MIRNode>)>,
+        else_branch: Option<Box<MIRNode>>,
     },
     ForLoop {
-        initializer: Option<Box<IRNode>>,
-        condition: Option<Box<IRNode>>,
-        increment: Option<Box<IRNode>>,
-        body: Box<IRNode>,
+        initializer: Option<Box<MIRNode>>,
+        condition: Option<Box<MIRNode>>,
+        increment: Option<Box<MIRNode>>,
+        body: Box<MIRNode>,
     },
     WhileLoop {
-        condition: Box<IRNode>,
-        body: Box<IRNode>,
+        condition: Box<MIRNode>,
+        body: Box<MIRNode>,
     },
-    Return(Option<Box<IRNode>>),
+    Return(Option<Box<MIRNode>>),
     Break,
     Continue,
 
     Function {
         name: String,
-        parameters: Vec<IRNode>,
+        parameters: Vec<MIRNode>,
         instance: Option<ReferenceKind>,
-        body: Option<Box<IRNode>>,
+        body: Option<Box<MIRNode>>,
     },
     FunctionParameter {
         name: String,
@@ -77,53 +77,53 @@ pub enum IRNodeKind {
 
     StructDeclaration {
         name: String,
-        fields: Vec<IRNode>
+        fields: Vec<MIRNode>
     },
     StructField {
         name: String,
     },
     StructLiteral {
         name: String,
-        fields: IndexMap<String, IRNode>
+        fields: IndexMap<String, MIRNode>
     },
 
     EnumDeclaration {
         name: String,
-        variants: IndexMap<String, (IRNode, Option<IRNode>)>,
+        variants: IndexMap<String, (MIRNode, Option<MIRNode>)>,
     },
     EnumVariant(String),
 
     SelfExpr,
 
     FieldAccess {
-        left: Box<IRNode>,
-        right: Box<IRNode>,
+        left: Box<MIRNode>,
+        right: Box<MIRNode>,
     },
     FunctionCall {
-        function: Box<IRNode>,
-        arguments: Vec<IRNode>,
+        function: Box<MIRNode>,
+        arguments: Vec<MIRNode>,
     },
 
-    ExpressionStatement(Box<IRNode>),
+    ExpressionStatement(Box<MIRNode>),
 
-    Program(Vec<IRNode>),
+    Program(Vec<MIRNode>),
 }
 
 #[derive(Debug, Clone)]
-pub struct IRNode {
-    pub kind: IRNodeKind,
+pub struct MIRNode {
+    pub kind: MIRNodeKind,
     pub span: Span,
     pub value_id: Option<ValueSymbolId>,
     pub type_id: Option<Type>
 }
 
-impl std::fmt::Display for IRNode {
+impl std::fmt::Display for MIRNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.fmt_with_indent(f, 0, None)
     }
 }
 
-impl IRNode {
+impl MIRNode {
     pub fn fmt_with_indent<W: Write>(
         &self,
         f: &mut W,
@@ -134,7 +134,7 @@ impl IRNode {
         let child_indent = indent + 4;
 
         match &self.kind {
-            IRNodeKind::Program(nodes) => {
+            MIRNodeKind::Program(nodes) => {
                 let header = format!(
                     "{} ({} top-level items)",
                     "IR Program".bright_blue().bold(),
@@ -146,17 +146,17 @@ impl IRNode {
                     writeln!(f)?;
                 }
             }
-            IRNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
-            IRNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
-            IRNodeKind::BooleanLiteral(val) => {
+            MIRNodeKind::IntegerLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            MIRNodeKind::FloatLiteral(val) => write!(f, "{}{}", indent_str, val.to_string().blue())?,
+            MIRNodeKind::BooleanLiteral(val) => {
                 write!(f, "{}{}", indent_str, val.to_string().magenta())?
             }
-            IRNodeKind::StringLiteral(s) => {
+            MIRNodeKind::StringLiteral(s) => {
                 write!(f, "{}{}", indent_str, format!("\"{s}\"").green())?
             }
-            IRNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
-            IRNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
-            IRNodeKind::VariableDeclaration {
+            MIRNodeKind::CharLiteral(c) => write!(f, "{}\'{}\'", indent_str, c.to_string().red())?,
+            MIRNodeKind::Identifier(name) => write!(f, "{}{}", indent_str, name.yellow())?,
+            MIRNodeKind::VariableDeclaration {
                 name,
                 mutable,
                 initializer,
@@ -171,13 +171,13 @@ impl IRNode {
                 write!(f, " = ")?;
                 initializer.fmt_with_indent(f, 0, table)?;
             }
-            IRNodeKind::UnaryOperation { operator, operand } => {
+            MIRNodeKind::UnaryOperation { operator, operand } => {
                 write!(f, "{}(", indent_str)?;
                 write!(f, "{}", operator)?;
                 operand.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
             }
-            IRNodeKind::BinaryOperation {
+            MIRNodeKind::BinaryOperation {
                 operator,
                 left,
                 right,
@@ -188,7 +188,7 @@ impl IRNode {
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
             }
-            IRNodeKind::ConditionalOperation {
+            MIRNodeKind::ConditionalOperation {
                 operator,
                 left,
                 right,
@@ -199,11 +199,11 @@ impl IRNode {
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
             }
-            IRNodeKind::HeapExpression(expr) => {
+            MIRNodeKind::HeapExpression(expr) => {
                 write!(f, "{}heap ", indent_str)?;
                 expr.fmt_with_indent(f, 0, table)?;
             }
-            IRNodeKind::TypeCast { expr, target_type } => {
+            MIRNodeKind::TypeCast { expr, target_type } => {
                 write!(f, "{}(", indent_str)?;
                 expr.fmt_with_indent(f, 0, table)?;
                 write!(f, " {} ", "as".yellow())?;
@@ -215,7 +215,7 @@ impl IRNode {
                 write!(f, ")")?;
             }
 
-            IRNodeKind::Block(nodes) => {
+            MIRNodeKind::Block(nodes) => {
                 write!(f, "{}", "{".dimmed())?;
                 if !nodes.is_empty() {
                     writeln!(f)?;
@@ -228,7 +228,7 @@ impl IRNode {
                 write!(f, "{}", "}".dimmed())?;
             }
 
-            IRNodeKind::Function {
+            MIRNodeKind::Function {
                 name,
                 parameters,
                 body,
@@ -263,9 +263,9 @@ impl IRNode {
                 }
             }
 
-            IRNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
+            MIRNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
 
-            IRNodeKind::IfStatement {
+            MIRNodeKind::IfStatement {
                 condition,
                 then_branch,
                 else_if_branches,
@@ -289,7 +289,7 @@ impl IRNode {
                 }
             }
 
-            IRNodeKind::ForLoop {
+            MIRNodeKind::ForLoop {
                 initializer,
                 condition,
                 increment,
@@ -311,22 +311,22 @@ impl IRNode {
                 body.fmt_with_indent(f, indent, table)?;
             }
 
-            IRNodeKind::WhileLoop { condition, body } => {
+            MIRNodeKind::WhileLoop { condition, body } => {
                 write!(f, "{}while (", indent_str)?;
                 condition.fmt_with_indent(f, 0, table)?;
                 write!(f, ") ")?;
                 body.fmt_with_indent(f, indent, table)?;
             }
 
-            IRNodeKind::Return(Some(expr)) => {
+            MIRNodeKind::Return(Some(expr)) => {
                 write!(f, "{}return ", indent_str)?;
                 expr.fmt_with_indent(f, 0, table)?;
             }
-            IRNodeKind::Return(None) => write!(f, "{}return", indent_str)?,
-            IRNodeKind::Break => write!(f, "{}break", indent_str)?,
-            IRNodeKind::Continue => write!(f, "{}continue", indent_str)?,
+            MIRNodeKind::Return(None) => write!(f, "{}return", indent_str)?,
+            MIRNodeKind::Break => write!(f, "{}break", indent_str)?,
+            MIRNodeKind::Continue => write!(f, "{}continue", indent_str)?,
 
-            IRNodeKind::FunctionParameter { name, mutable } => {
+            MIRNodeKind::FunctionParameter { name, mutable } => {
                 write!(f, "{}", indent_str)?;
                 write!(
                     f,
@@ -336,7 +336,7 @@ impl IRNode {
                 )?;
             }
 
-            IRNodeKind::StructDeclaration { name, fields } => {
+            MIRNodeKind::StructDeclaration { name, fields } => {
                 write!(f, "{}struct {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
 
@@ -347,11 +347,11 @@ impl IRNode {
 
                 write!(f, "{}{}", indent_str, "}".dimmed())?;
             }
-            IRNodeKind::StructField { name } => {
+            MIRNodeKind::StructField { name } => {
                 write!(f, "{}", indent_str)?;
                 write!(f, "{}", name.yellow())?;
             }
-            IRNodeKind::StructLiteral { name, fields } => {
+            MIRNodeKind::StructLiteral { name, fields } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
                 write!(f, "{}", "{".dimmed())?;
 
@@ -372,7 +372,7 @@ impl IRNode {
                 }
                 write!(f, "{}", "}".dimmed())?;
             }
-            IRNodeKind::EnumDeclaration { name, variants } => {
+            MIRNodeKind::EnumDeclaration { name, variants } => {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
 
@@ -388,16 +388,16 @@ impl IRNode {
 
                 write!(f, "{}{}", indent_str, "}".dimmed())?;
             }
-            IRNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
+            MIRNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
 
-            IRNodeKind::FieldAccess { left, right } => {
+            MIRNodeKind::FieldAccess { left, right } => {
                 write!(f, "{}(", indent_str)?;
                 left.fmt_with_indent(f, 0, table)?;
                 write!(f, ".")?;
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
             }
-            IRNodeKind::FunctionCall {
+            MIRNodeKind::FunctionCall {
                 function,
                 arguments,
             } => {
@@ -413,7 +413,7 @@ impl IRNode {
                 write!(f, ")")?;
             }
 
-            IRNodeKind::ExpressionStatement(expr) => {
+            MIRNodeKind::ExpressionStatement(expr) => {
                 expr.fmt_with_indent(f, indent, table)?;
                 write!(f, ";")?;
             }

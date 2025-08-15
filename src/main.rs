@@ -24,8 +24,8 @@ use utils::kind::Token;
 use crate::backend::codegen::codegen::CodeGen;
 use crate::backend::optimizations::escape_analysis;
 use crate::frontend::syntax::lexer::Lexer;
-use crate::mir::builder::IRBuilder;
-use crate::mir::ir_node::IRNode;
+use crate::mir::builder::MIRBuilder;
+use crate::mir::ir_node::MIRNode;
 
 mod frontend;
 mod mir;
@@ -80,8 +80,8 @@ fn analyze_ast(lined_source: Vec<String>, program: AstNode) -> (AstNode, Semanti
     }
 }
 
-fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyzer) -> (IRBuilder<'a>, IRNode) {
-    let mut builder = IRBuilder::new(analyzer);
+fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyzer) -> (MIRBuilder<'a>, MIRNode) {
+    let mut builder = MIRBuilder::new(analyzer);
     let program = builder.build(program);
 
     (builder, program)
@@ -158,7 +158,7 @@ fn test_main_script() {
 
             let (ir_builder, mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
 
-            println!("--- IR BUILDER ---");
+            println!("--- MIR BUILDER ---");
             println!("{}", ir_builder);
 
             println!("--- MIR PROGRAM ---");

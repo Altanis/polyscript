@@ -7,7 +7,7 @@ use crate::{
         semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
-    mir::ir_node::{IRNode, IRNodeKind}
+    mir::ir_node::{MIRNode, MIRNodeKind}
 };
 
 #[derive(Default)]
@@ -16,12 +16,12 @@ pub struct MonomorphizationContext {
     substitution_ctx: Option<Rc<BTreeMap<TypeSymbolId, Type>>>
 }
 
-pub struct IRBuilder<'a> {
+pub struct MIRBuilder<'a> {
     analyzer: &'a mut SemanticAnalyzer,
     monomorphization_ctx: MonomorphizationContext
 }
 
-impl<'a> IRBuilder<'a> {
+impl<'a> MIRBuilder<'a> {
     pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
         Self {
             analyzer,
@@ -30,7 +30,7 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-impl<'a> IRBuilder<'a> {
+impl<'a> MIRBuilder<'a> {
     pub fn type_is_fully_concrete(&self, ty: &Type) -> bool {
         match ty {
             Type::Base { symbol, args } => {
@@ -266,8 +266,8 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-impl<'a> IRBuilder<'a> {
-    fn monomorphize(&mut self, program: &mut AstNode) -> IRNode {
+impl<'a> MIRBuilder<'a> {
+    fn monomorphize(&mut self, program: &mut AstNode) -> MIRNode {
         let mut mir_stmts = vec![];
 
         let AstNodeKind::Program(stmts) = &mut program.kind else { unreachable!(); };
@@ -275,8 +275,8 @@ impl<'a> IRBuilder<'a> {
             mir_stmts.extend(self.build_concrete_stmt(stmt));
         }
 
-        IRNode {
-            kind: IRNodeKind::Program(mir_stmts),
+        MIRNode {
+            kind: MIRNodeKind::Program(mir_stmts),
             span: program.span,
             value_id: None,
             type_id: None
@@ -330,7 +330,7 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn build_concrete_stmt(&mut self, node: &mut AstNode) -> Vec<IRNode> {
+    fn build_concrete_stmt(&mut self, node: &mut AstNode) -> Vec<MIRNode> {
         for child in node.children_mut() {
             self.build_concrete_stmt(child);
         }
@@ -359,68 +359,57 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-impl<'a> IRBuilder<'a> {
-    pub fn build(&mut self, program: &mut AstNode) -> IRNode {
-        self.discover_monomorphic_sites(program);
-        let mut mir_program = self.monomorphize(program);
-
-        let IRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
-        let IRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
-        hoisted_stmts.extend(other_stmts);
-
-        mir_program
-    }
-
-    fn lower_node(&mut self, node: &mut AstNode) -> Option<IRNode> {
+impl<'a> MIRBuilder<'a> {
+    fn lower_node(&mut self, node: &mut AstNode) -> Option<MIRNode> {
         let kind = match &mut node.kind {
-            AstNodeKind::IntegerLiteral(v) => IRNodeKind::IntegerLiteral(*v),
-            AstNodeKind::FloatLiteral(v) => IRNodeKind::FloatLiteral(*v),
-            AstNodeKind::BooleanLiteral(v) => IRNodeKind::BooleanLiteral(*v),
-            AstNodeKind::StringLiteral(v) => IRNodeKind::StringLiteral(v.clone()),
-            AstNodeKind::CharLiteral(v) => IRNodeKind::CharLiteral(*v),
+            AstNodeKind::IntegerLiteral(v) => MIRNodeKind::IntegerLiteral(*v),
+            AstNodeKind::FloatLiteral(v) => MIRNodeKind::FloatLiteral(*v),
+            AstNodeKind::BooleanLiteral(v) => MIRNodeKind::BooleanLiteral(*v),
+            AstNodeKind::StringLiteral(v) => MIRNodeKind::StringLiteral(v.clone()),
+            AstNodeKind::CharLiteral(v) => MIRNodeKind::CharLiteral(*v),
 
-            AstNodeKind::Identifier(name) => IRNodeKind::Identifier(name.clone()),
-            AstNodeKind::SelfExpr => IRNodeKind::SelfExpr,
-            AstNodeKind::HeapExpression(expr) => IRNodeKind::HeapExpression(Box::new(self.lower_node(expr)?)),
+            AstNodeKind::Identifier(name) => MIRNodeKind::Identifier(name.clone()),
+            AstNodeKind::SelfExpr => MIRNodeKind::SelfExpr,
+            AstNodeKind::HeapExpression(expr) => MIRNodeKind::HeapExpression(Box::new(self.lower_node(expr)?)),
             AstNodeKind::ExpressionStatement(expr) => {
-                IRNodeKind::ExpressionStatement(Box::new(self.lower_node(expr)?))
+                MIRNodeKind::ExpressionStatement(Box::new(self.lower_node(expr)?))
             }
 
             AstNodeKind::VariableDeclaration { name, mutable, initializer, .. } => {
-                IRNodeKind::VariableDeclaration {
+                MIRNodeKind::VariableDeclaration {
                     name: name.clone(),
                     mutable: *mutable,
                     initializer: Box::new(self.lower_node(initializer)?),
                 }
             }
 
-            AstNodeKind::UnaryOperation { operator, operand } => IRNodeKind::UnaryOperation {
+            AstNodeKind::UnaryOperation { operator, operand } => MIRNodeKind::UnaryOperation {
                 operator: *operator,
                 operand: Box::new(self.lower_node(operand)?),
             },
-            AstNodeKind::BinaryOperation { operator, left, right } => IRNodeKind::BinaryOperation {
+            AstNodeKind::BinaryOperation { operator, left, right } => MIRNodeKind::BinaryOperation {
                 operator: *operator,
                 left: Box::new(self.lower_node(left)?),
                 right: Box::new(self.lower_node(right)?),
             },
             AstNodeKind::ConditionalOperation { operator, left, right } => {
-                IRNodeKind::ConditionalOperation {
+                MIRNodeKind::ConditionalOperation {
                     operator: *operator,
                     left: Box::new(self.lower_node(left)?),
                     right: Box::new(self.lower_node(right)?),
                 }
             }
 
-            AstNodeKind::TypeCast { expr, .. } => IRNodeKind::TypeCast {
+            AstNodeKind::TypeCast { expr, .. } => MIRNodeKind::TypeCast {
                 expr: Box::new(self.lower_node(expr)?),
                 target_type: node.type_id.clone()?,
             },
 
             AstNodeKind::Block(stmts) => {
-                IRNodeKind::Block(stmts.iter_mut().filter_map(|s| self.lower_node(s)).collect())
+                MIRNodeKind::Block(stmts.iter_mut().filter_map(|s| self.lower_node(s)).collect())
             },
             AstNodeKind::IfStatement { condition, then_branch, else_if_branches, else_branch } => {
-                IRNodeKind::IfStatement {
+                MIRNodeKind::IfStatement {
                     condition: Box::new(self.lower_node(condition)?),
                     then_branch: Box::new(self.lower_node(then_branch)?),
                     else_if_branches: else_if_branches
@@ -432,12 +421,12 @@ impl<'a> IRBuilder<'a> {
                     else_branch: else_branch.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
                 }
             },
-            AstNodeKind::WhileLoop { condition, body } => IRNodeKind::WhileLoop {
+            AstNodeKind::WhileLoop { condition, body } => MIRNodeKind::WhileLoop {
                 condition: Box::new(self.lower_node(condition)?),
                 body: Box::new(self.lower_node(body)?),
             },
             AstNodeKind::ForLoop { initializer, condition, increment, body } => {
-                IRNodeKind::ForLoop {
+                MIRNodeKind::ForLoop {
                     initializer: initializer.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
                     condition: condition.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
                     increment: increment.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
@@ -445,32 +434,32 @@ impl<'a> IRBuilder<'a> {
                 }
             }
             AstNodeKind::Return(expr) => {
-                IRNodeKind::Return(expr.as_mut().map(|e| Box::new(self.lower_node(e).unwrap())))
+                MIRNodeKind::Return(expr.as_mut().map(|e| Box::new(self.lower_node(e).unwrap())))
             }
-            AstNodeKind::Break => IRNodeKind::Break,
-            AstNodeKind::Continue => IRNodeKind::Continue,
+            AstNodeKind::Break => MIRNodeKind::Break,
+            AstNodeKind::Continue => MIRNodeKind::Continue,
 
             AstNodeKind::Function { name, parameters, instance, body, generic_parameters, .. } => {
                 if !generic_parameters.is_empty() {
                     return None;
                 }
 
-                IRNodeKind::Function {
+                MIRNodeKind::Function {
                     name: name.clone(),
                     parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
                     instance: *instance,
                     body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
                 }
             }
-            AstNodeKind::FunctionParameter { name, mutable, .. } => IRNodeKind::FunctionParameter {
+            AstNodeKind::FunctionParameter { name, mutable, .. } => MIRNodeKind::FunctionParameter {
                 name: name.clone(),
                 mutable: *mutable,
             },
-            AstNodeKind::FunctionCall { function, arguments, .. } => IRNodeKind::FunctionCall {
+            AstNodeKind::FunctionCall { function, arguments, .. } => MIRNodeKind::FunctionCall {
                 function: Box::new(self.lower_node(function)?),
                 arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect(),
             },
-            AstNodeKind::FieldAccess { left, right } => IRNodeKind::FieldAccess {
+            AstNodeKind::FieldAccess { left, right } => MIRNodeKind::FieldAccess {
                 left: Box::new(self.lower_node(left)?),
                 right: Box::new(self.lower_node(right)?),
             },
@@ -502,14 +491,14 @@ impl<'a> IRBuilder<'a> {
 
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
-                    return Some(IRNode {
-                        kind: IRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
+                    return Some(MIRNode {
+                        kind: MIRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
                         span: node.span,
                         value_id: node.value_id,
                         type_id: Some(Type::new_base(new_type_symbol_id))
                     });
                 } else if generic_parameters.is_empty() {
-                    IRNodeKind::StructDeclaration {
+                    MIRNodeKind::StructDeclaration {
                         name: name.clone(),
                         fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
                     }
@@ -518,7 +507,7 @@ impl<'a> IRBuilder<'a> {
                 }
             }
             AstNodeKind::StructField { name, qualifier, .. } => {
-                let kind = IRNodeKind::StructField { name: name.clone() };
+                let kind = MIRNodeKind::StructField { name: name.clone() };
 
                 if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
                     let generic_field_type = self.analyzer.symbol_table
@@ -538,7 +527,7 @@ impl<'a> IRBuilder<'a> {
                         Some(node.span),
                     ).unwrap();
 
-                    return Some(IRNode {
+                    return Some(MIRNode {
                         kind,
                         span: node.span,
                         value_id: Some(new_value_symbol_id),
@@ -548,38 +537,15 @@ impl<'a> IRBuilder<'a> {
                     kind
                 }
             },
-            AstNodeKind::StructLiteral { name, fields, generic_arguments } => {
-                if !generic_arguments.is_empty() {
-                    let mangled_name = self.mangle_name(name, generic_arguments);
-                    let type_symbol_id = self.analyzer.symbol_table.find_type_symbol_from_scope(
-                        node.scope_id.unwrap(),
-                        &mangled_name
-                    ).unwrap().id;
+            AstNodeKind::StructLiteral { name, fields, .. } => MIRNodeKind::StructLiteral {
+                name: name.clone(),
+                fields: fields
+                    .iter_mut()
+                    .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                    .collect()
+            },
 
-                    return Some(IRNode {
-                        span: node.span,
-                        value_id: None,
-                        type_id: Some(Type::new_base(type_symbol_id)),
-                        kind: IRNodeKind::StructLiteral {
-                            name: mangled_name,
-                            fields: fields
-                                .iter_mut()
-                                .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                                .collect()
-                        },
-                    });
-                } else {
-                    IRNodeKind::StructLiteral {
-                        name: name.clone(),
-                        fields: fields
-                            .iter_mut()
-                            .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                            .collect()
-                    }
-                }
-            }
-
-            AstNodeKind::EnumDeclaration { name, variants } => IRNodeKind::EnumDeclaration {
+            AstNodeKind::EnumDeclaration { name, variants } => MIRNodeKind::EnumDeclaration {
                 name: name.clone(),
                 variants: variants
                     .iter_mut()
@@ -591,7 +557,7 @@ impl<'a> IRBuilder<'a> {
                     })
                     .collect(),
             },
-            AstNodeKind::EnumVariant(name) => IRNodeKind::EnumVariant(name.clone()),
+            AstNodeKind::EnumVariant(name) => MIRNodeKind::EnumVariant(name.clone()),
 
             AstNodeKind::Program(stmts) => {
                 let mut ir_nodes = vec![];
@@ -613,7 +579,7 @@ impl<'a> IRBuilder<'a> {
                         }
                     }
                 }
-                IRNodeKind::Program(ir_nodes)
+                MIRNodeKind::Program(ir_nodes)
             }
 
             AstNodeKind::ImplDeclaration { .. }
@@ -630,7 +596,7 @@ impl<'a> IRBuilder<'a> {
             | AstNodeKind::GenericParameter { .. } => return None,
         };
 
-        Some(IRNode {
+        Some(MIRNode {
             kind,
             span: node.span,
             value_id: node.value_id,
@@ -639,7 +605,7 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-impl std::fmt::Display for IRBuilder<'_> {
+impl std::fmt::Display for MIRBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\n{}", "Monomorphization Sites:".bold().underline())?;
         if self.monomorphization_ctx.instantiations.is_empty() {
@@ -702,10 +668,23 @@ impl std::fmt::Display for IRBuilder<'_> {
     }
 }
 
+impl<'a> MIRBuilder<'a> {
+    fn concretize_ids(&mut self, program: &mut AstNode) {
 
-/*
-when handling a function, give state to monomorphization_ctx. let it know that its handling the function.
-the thing itself needs to be lowered (function and body). lower it properly using state from monomorphization ctx.
-you should do it for struct monomorphization too.
-consider making dsa HashSet<HashMap<TypeSymbolId, Type>>
-*/
+    }
+}
+
+impl<'a> MIRBuilder<'a> {
+    pub fn build(&mut self, program: &mut AstNode) -> MIRNode {
+        self.discover_monomorphic_sites(program);
+        let mut mir_program = self.monomorphize(program);
+
+        let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
+        let MIRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
+        hoisted_stmts.extend(other_stmts);
+
+        self.concretize_ids(program);
+
+        mir_program
+    }
+}
