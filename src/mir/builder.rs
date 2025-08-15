@@ -7,7 +7,8 @@ use crate::{
         semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
-    mir::ir_node::{MIRNode, MIRNodeKind}
+    mir::ir_node::{MIRNode, MIRNodeKind},
+    utils::kind::QualifierKind,
 };
 
 #[derive(Default)]
@@ -272,7 +273,16 @@ impl<'a> MIRBuilder<'a> {
 
         let AstNodeKind::Program(stmts) = &mut program.kind else { unreachable!(); };
         for stmt in stmts.iter_mut() {
-            mir_stmts.extend(self.build_concrete_stmt(stmt));
+            match &mut stmt.kind {
+                AstNodeKind::ImplDeclaration { associated_functions, generic_parameters, .. } => {
+                    if !generic_parameters.is_empty() {
+                        for func in associated_functions {
+                            mir_stmts.extend(self.build_concrete_stmt(func));
+                        }
+                    }
+                },
+                _ => mir_stmts.extend(self.build_concrete_stmt(stmt))
+            }
         }
 
         MIRNode {
@@ -331,14 +341,22 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn build_concrete_stmt(&mut self, node: &mut AstNode) -> Vec<MIRNode> {
-        for child in node.children_mut() {
-            self.build_concrete_stmt(child);
-        }
-
         let template_symbol_id = match &node.kind {
-            AstNodeKind::StructDeclaration { name, .. }
-                => self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().id,
-            _ => return vec![]
+            AstNodeKind::StructDeclaration { name, .. } => self
+                .analyzer
+                .symbol_table
+                .find_type_symbol_in_scope(name, node.scope_id.unwrap())
+                .unwrap()
+                .id,
+            AstNodeKind::Function { .. } => {
+                let value_symbol = self
+                    .analyzer
+                    .symbol_table
+                    .get_value_symbol(node.value_id.unwrap())
+                    .unwrap();
+                value_symbol.type_id.as_ref().unwrap().get_base_symbol()
+            }
+            _ => return vec![],
         };
         let Some(concrete_types_set) = self.monomorphization_ctx.instantiations.get(&template_symbol_id).cloned() else { return vec![]; };
 
@@ -348,10 +366,12 @@ impl<'a> MIRBuilder<'a> {
             AstNodeKind::StructDeclaration { .. } | AstNodeKind::Function { .. } => {
                 for concrete_types in concrete_types_set {
                     self.monomorphization_ctx.substitution_ctx = Some(Rc::new(concrete_types));
-                    concrete_ir_nodes.push(self.lower_node(node).unwrap());
+                    if let Some(ir_node) = self.lower_node(node) {
+                        concrete_ir_nodes.push(ir_node);
+                    }
                     self.monomorphization_ctx.substitution_ctx = None;
                 }
-            },
+            }
             _ => {}
         }
 
@@ -440,17 +460,97 @@ impl<'a> MIRBuilder<'a> {
             AstNodeKind::Continue => MIRNodeKind::Continue,
 
             AstNodeKind::Function { name, parameters, instance, body, generic_parameters, .. } => {
-                if !generic_parameters.is_empty() {
-                    return None;
+                if let Some(substitutions) = self.monomorphization_ctx.substitution_ctx.clone() {
+                    let template_value_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap().clone();
+                    let template_type = template_value_symbol.type_id.as_ref().unwrap();
+                    let Type::Base { symbol: template_fn_sig_id, .. } = template_type else { unreachable!() };
+                    let template_fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*template_fn_sig_id).unwrap().clone();
+                    let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return_type, .. } = &template_fn_sig_symbol.kind else { unreachable!() };
+
+                    let mangled_name = self.mangle_name(template_type.get_base_symbol(), substitutions.values());
+                    let parent_scope_id = self.analyzer.symbol_table.get_scope(template_value_symbol.scope_id).unwrap().parent.unwrap();
+                    if self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).is_some() {
+                        return None;
+                    }
+
+                    let concrete_params: Vec<Type> = template_params.iter().map(|p| Self::substitute_type(p, &substitutions)).collect();
+                    let concrete_return_type = Self::substitute_type(template_return_type, &substitutions);
+
+                    let original_scope = self.analyzer.symbol_table.current_scope_id;
+                    self.analyzer.symbol_table.current_scope_id = parent_scope_id;
+
+                    let concrete_fn_sig_id = self.analyzer.symbol_table.add_type_symbol(
+                        &mangled_name,
+                        TypeSymbolKind::FunctionSignature {
+                            params: concrete_params.clone(),
+                            return_type: concrete_return_type.clone(),
+                            instance: *instance,
+                        },
+                        vec![],
+                        template_fn_sig_symbol.qualifier,
+                        Some(node.span),
+                    ).unwrap();
+
+                    let new_fn_body_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Function);
+                    
+                    let concrete_fn_value_id = self.analyzer.symbol_table.add_value_symbol(
+                        &mangled_name,
+                        ValueSymbolKind::Function(new_fn_body_scope_id),
+                        false,
+                        template_value_symbol.qualifier,
+                        Some(Type::new_base(concrete_fn_sig_id)),
+                        Some(node.span),
+                    ).unwrap();
+
+                    let mut mir_params = vec![];
+                    for (i, param_node) in parameters.iter_mut().enumerate() {
+                        let AstNodeKind::FunctionParameter { name: param_name, mutable, .. } = &param_node.kind else { unreachable!() };
+                        
+                        let param_type = &concrete_params[i];
+                        let param_value_id = self.analyzer.symbol_table.add_value_symbol(
+                            param_name,
+                            ValueSymbolKind::Variable,
+                            *mutable,
+                            QualifierKind::Private,
+                            Some(param_type.clone()),
+                            Some(param_node.span),
+                        ).unwrap();
+                        
+                        mir_params.push(MIRNode {
+                            kind: MIRNodeKind::FunctionParameter {
+                                name: param_name.clone(),
+                                mutable: *mutable,
+                            },
+                            span: param_node.span,
+                            value_id: Some(param_value_id),
+                            type_id: Some(param_type.clone()),
+                        });
+                    }
+
+                    let mir_body = body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap()));
+
+                    self.analyzer.symbol_table.exit_scope();
+                    self.analyzer.symbol_table.current_scope_id = original_scope;
+
+                    return Some(MIRNode {
+                        kind: MIRNodeKind::Function { name: mangled_name, parameters: mir_params, instance: *instance, body: mir_body },
+                        span: node.span,
+                        value_id: Some(concrete_fn_value_id),
+                        type_id: Some(Type::new_base(concrete_fn_sig_id)),
+                    });
                 }
 
-                MIRNodeKind::Function {
-                    name: name.clone(),
-                    parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
-                    instance: *instance,
-                    body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
+                if generic_parameters.is_empty() {
+                    MIRNodeKind::Function {
+                        name: name.clone(),
+                        parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
+                        instance: *instance,
+                        body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
+                    }
+                } else {
+                    return None;
                 }
-            }
+            },
             AstNodeKind::FunctionParameter { name, mutable, .. } => MIRNodeKind::FunctionParameter {
                 name: name.clone(),
                 mutable: *mutable,
@@ -579,6 +679,7 @@ impl<'a> MIRBuilder<'a> {
                         }
                     }
                 }
+
                 MIRNodeKind::Program(ir_nodes)
             }
 
@@ -602,6 +703,27 @@ impl<'a> MIRBuilder<'a> {
             value_id: node.value_id,
             type_id: node.type_id.clone(),
         })
+    }
+}
+
+impl<'a> MIRBuilder<'a> {
+    fn concretize_ids(&mut self, program: &mut AstNode) {
+
+    }
+}
+
+impl<'a> MIRBuilder<'a> {
+    pub fn build(&mut self, program: &mut AstNode) -> MIRNode {
+        self.discover_monomorphic_sites(program);
+        let mut mir_program = self.monomorphize(program);
+
+        let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
+        let MIRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
+        hoisted_stmts.extend(other_stmts);
+
+        self.concretize_ids(program);
+
+        mir_program
     }
 }
 
@@ -665,26 +787,5 @@ impl std::fmt::Display for MIRBuilder<'_> {
         }
 
         Ok(())
-    }
-}
-
-impl<'a> MIRBuilder<'a> {
-    fn concretize_ids(&mut self, program: &mut AstNode) {
-
-    }
-}
-
-impl<'a> MIRBuilder<'a> {
-    pub fn build(&mut self, program: &mut AstNode) -> MIRNode {
-        self.discover_monomorphic_sites(program);
-        let mut mir_program = self.monomorphize(program);
-
-        let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
-        let MIRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
-        hoisted_stmts.extend(other_stmts);
-
-        self.concretize_ids(program);
-
-        mir_program
     }
 }
