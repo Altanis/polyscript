@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind},
+        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{IRNode, IRNodeKind}
@@ -292,7 +292,7 @@ impl<'a> IRBuilder<'a> {
                 .as_str()
     }
 
-    fn substitute_type(generic_type: &Type, substitutions: &HashMap<TypeSymbolId, Type>) -> Type {
+    fn substitute_type(generic_type: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
         match generic_type {
             Type::Base { symbol, args } => {
                 if let Some(concrete_type) = substitutions.get(symbol) {
@@ -339,87 +339,6 @@ impl<'a> IRBuilder<'a> {
             _ => {}
         }
 
-        /*match &node.kind {
-            AstNodeKind::StructDeclaration { name, fields, .. } => {
-
-                /*let template_symbol = self.analyzer.symbol_table.get_type_symbol(template_symbol_id).unwrap().clone();
-                let original_generic_param_ids = template_symbol.generic_parameters.clone();
-                let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
-
-                for concrete_types in concrete_types_set {
-                    let mangled_name = self.mangle_name(name, &concrete_types);
-
-                    if self.analyzer.symbol_table.find_type_symbol_from_scope(parent_scope_id, &mangled_name).is_some() {
-                        continue;
-                    }
-                    
-                    let substitutions: HashMap<TypeSymbolId, Type> = original_generic_param_ids.iter()
-                        .cloned()
-                        .zip(concrete_types.iter().cloned())
-                        .collect();
-                    
-                    let original_scope = self.analyzer.symbol_table.get_current_scope_id();
-                    self.analyzer.symbol_table.current_scope_id = parent_scope_id;
-                    let new_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Struct);
-
-                    let mut ir_fields = vec![];
-                    for field_node in fields {
-                        let AstNodeKind::StructField { name, qualifier, .. } = &field_node.kind else { unreachable!() };
-                        
-                        let generic_field_type = self.analyzer.symbol_table
-                            .find_value_symbol_in_scope(name, field_node.scope_id.unwrap())
-                            .unwrap()
-                            .type_id
-                            .as_ref()
-                            .unwrap();
-                        let concrete_field_type = Self::substitute_type(generic_field_type, &substitutions);
-
-                        self.analyzer.symbol_table.add_value_symbol(
-                            name,
-                            ValueSymbolKind::StructField,
-                            false,
-                            *qualifier,
-                            Some(concrete_field_type.clone()),
-                            Some(field_node.span),
-                        ).unwrap();
-
-                        ir_fields.push(IRNode {
-                            kind: IRNodeKind::StructField { name: name.clone() },
-                            span: field_node.span,
-                            value_id: None,
-                            type_id: Some(concrete_field_type),
-                        });
-                    }
-
-                    self.analyzer.symbol_table.exit_scope();
-                    
-                    let new_type_symbol_id = self.analyzer.symbol_table.add_type_symbol(
-                        &mangled_name,
-                        TypeSymbolKind::Struct((new_scope_id, vec![])),
-                        vec![],
-                        template_symbol.qualifier,
-                        Some(node.span),
-                    ).unwrap();
-
-                    self.analyzer.symbol_table.current_scope_id = original_scope;
-
-                    let ir_struct_decl = IRNode {
-                        kind: IRNodeKind::StructDeclaration {
-                            name: mangled_name,
-                            fields: ir_fields,
-                        },
-                        span: node.span,
-                        value_id: None,
-                        type_id: Some(Type::new_base(new_type_symbol_id)),
-                    };
-
-                    concrete_ir_nodes.push(ir_struct_decl);
-                }*/
-            },
-            AstNodeKind::Function { .. } => {},
-            _ => {}
-        }*/
-
         concrete_ir_nodes
     }
 }
@@ -427,7 +346,13 @@ impl<'a> IRBuilder<'a> {
 impl<'a> IRBuilder<'a> {
     pub fn build(&mut self, program: &mut AstNode) -> IRNode {
         self.discover_monomorphic_sites(program);
-        self.lower_node(program).unwrap()
+        let mut mir_program = self.monomorphize(program);
+
+        let IRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
+        let IRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
+        hoisted_stmts.extend(other_stmts);
+
+        mir_program
     }
 
     fn lower_node(&mut self, node: &mut AstNode) -> Option<IRNode> {
@@ -535,16 +460,78 @@ impl<'a> IRBuilder<'a> {
             },
 
             AstNodeKind::StructDeclaration { name, fields, generic_parameters } => {
-                if !generic_parameters.is_empty() {
+                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
+                    let template_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().clone();
+                    let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
+
+                    let mangled_name = self.mangle_name(name, substitutions);
+
+                    let original_scope = self.analyzer.symbol_table.get_current_scope_id();
+                    self.analyzer.symbol_table.current_scope_id = parent_scope_id;
+                    let new_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Struct);
+                    
+                    let ir_fields = fields.iter_mut()
+                        .map(|field| self.lower_node(field).unwrap())
+                        .collect();
+
+                    self.analyzer.symbol_table.exit_scope();
+                    
+                    let new_type_symbol_id = self.analyzer.symbol_table.add_type_symbol(
+                        &mangled_name,
+                        TypeSymbolKind::Struct((new_scope_id, vec![])),
+                        vec![],
+                        template_symbol.qualifier,
+                        Some(node.span),
+                    ).unwrap();
+
+                    self.analyzer.symbol_table.current_scope_id = original_scope;
+
+                    return Some(IRNode {
+                        kind: IRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
+                        span: node.span,
+                        value_id: node.value_id,
+                        type_id: Some(Type::new_base(new_type_symbol_id))
+                    });
+                } else if generic_parameters.is_empty() {
+                    IRNodeKind::StructDeclaration {
+                        name: name.clone(),
+                        fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
+                    }
+                } else {
                     return None;
                 }
-
-                IRNodeKind::StructDeclaration {
-                    name: name.clone(),
-                    fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
-                }
             }
-            AstNodeKind::StructField { name, .. } => IRNodeKind::StructField { name: name.clone() },
+            AstNodeKind::StructField { name, qualifier, .. } => {
+                let kind = IRNodeKind::StructField { name: name.clone() };
+
+                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
+                    let generic_field_type = self.analyzer.symbol_table
+                        .find_value_symbol_in_scope(name, node.scope_id.unwrap())
+                        .unwrap()
+                        .type_id
+                        .as_ref()
+                        .unwrap();
+                    let concrete_field_type = Self::substitute_type(generic_field_type, substitutions);
+
+                    let new_value_symbol_id = self.analyzer.symbol_table.add_value_symbol(
+                        name,
+                        ValueSymbolKind::StructField,
+                        false,
+                        *qualifier,
+                        Some(concrete_field_type.clone()),
+                        Some(node.span),
+                    ).unwrap();
+
+                    return Some(IRNode {
+                        kind,
+                        span: node.span,
+                        value_id: Some(new_value_symbol_id),
+                        type_id: Some(concrete_field_type.clone())
+                    });
+                } else {
+                    kind
+                }
+            },
             AstNodeKind::StructLiteral { fields, .. } => {
                 let concrete_struct_type = node.type_id.as_ref().unwrap();
                 let mangled_name = self.analyzer.symbol_table.display_type(concrete_struct_type);
