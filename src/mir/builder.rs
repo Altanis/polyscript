@@ -283,13 +283,13 @@ impl<'a> MIRBuilder<'a> {
         }
     }
 
-    fn mangle_name<I>(&self, name: &str, concrete_types: I) -> String
+    fn mangle_name<I>(&self, id: TypeSymbolId, concrete_types: I) -> String
     where
         I: IntoIterator,
         I::Item: Borrow<Type>
     {
         let mut out = String::new();
-        write!(&mut out, "#{}", name).unwrap();
+        write!(&mut out, "#{}", id).unwrap();
 
         let mut it = concrete_types.into_iter().peekable();
         if it.peek().is_some() {
@@ -469,7 +469,7 @@ impl<'a> MIRBuilder<'a> {
                     let template_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().clone();
                     let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
 
-                    let mangled_name = self.mangle_name(name, substitutions.values());
+                    let mangled_name = self.mangle_name(template_symbol.id, substitutions.values());
 
                     let original_scope = self.analyzer.symbol_table.get_current_scope_id();
                     self.analyzer.symbol_table.current_scope_id = parent_scope_id;
