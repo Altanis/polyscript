@@ -5,8 +5,19 @@
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-
 struct Scalar<T> {
+    x: T;
+}
+
+impl<T> Scalar<T> {
+  fn emit(&self): T { self.x }
+}
+
+let x = Scalar { x: 4 };
+x.emit();
+
+
+/*struct Scalar<T> {
     x: T;
 }
 
@@ -40,4 +51,4 @@ fn identity1<T>(x: T): T { x }
 fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
 
 let clone = identity1([Scalar<char>].new('5'));
-let clone2 = identity2(Scalar { x: true });
+let clone2 = identity2(Scalar { x: true });*/
