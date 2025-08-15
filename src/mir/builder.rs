@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap, HashSet}, rc::Rc};
+use std::{borrow::Borrow, collections::{BTreeMap, HashMap, HashSet}, fmt::Write, rc::Rc};
 
 use colored::Colorize;
 
@@ -283,13 +283,29 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn mangle_name(&self, name: &String, concrete_types: &BTreeMap<TypeSymbolId, Type>) -> String {
-        format!("#{}{}", name, if concrete_types.is_empty() { "" } else { "_" })
-            + concrete_types.values()
-                .map(|ty| self.analyzer.symbol_table.display_type(ty))
-                .collect::<Vec<String>>()
-                .join("_")
-                .as_str()
+    fn mangle_name<I>(&self, name: &str, concrete_types: I) -> String
+    where
+        I: IntoIterator,
+        I::Item: Borrow<Type>
+    {
+        let mut out = String::new();
+        write!(&mut out, "#{}", name).unwrap();
+
+        let mut it = concrete_types.into_iter().peekable();
+        if it.peek().is_some() {
+            out.push('_');
+        }
+        
+        for (i, ty) in it.enumerate() {
+            if i > 0 {
+                out.push('_');
+            }
+
+            let s = self.analyzer.symbol_table.display_type(ty.borrow());
+            out.push_str(&s);
+        }
+
+        out
     }
 
     fn substitute_type(generic_type: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
@@ -464,7 +480,7 @@ impl<'a> IRBuilder<'a> {
                     let template_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().clone();
                     let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
 
-                    let mangled_name = self.mangle_name(name, substitutions);
+                    let mangled_name = self.mangle_name(name, substitutions.values());
 
                     let original_scope = self.analyzer.symbol_table.get_current_scope_id();
                     self.analyzer.symbol_table.current_scope_id = parent_scope_id;
@@ -532,16 +548,34 @@ impl<'a> IRBuilder<'a> {
                     kind
                 }
             },
-            AstNodeKind::StructLiteral { fields, .. } => {
-                let concrete_struct_type = node.type_id.as_ref().unwrap();
-                let mangled_name = self.analyzer.symbol_table.display_type(concrete_struct_type);
+            AstNodeKind::StructLiteral { name, fields, generic_arguments } => {
+                if !generic_arguments.is_empty() {
+                    let mangled_name = self.mangle_name(name, generic_arguments);
+                    let type_symbol_id = self.analyzer.symbol_table.find_type_symbol_from_scope(
+                        node.scope_id.unwrap(),
+                        &mangled_name
+                    ).unwrap().id;
 
-                IRNodeKind::StructLiteral {
-                    name: mangled_name,
-                    fields: fields
-                        .iter_mut()
-                        .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                        .collect(),
+                    return Some(IRNode {
+                        span: node.span,
+                        value_id: None,
+                        type_id: Some(Type::new_base(type_symbol_id)),
+                        kind: IRNodeKind::StructLiteral {
+                            name: mangled_name,
+                            fields: fields
+                                .iter_mut()
+                                .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                                .collect()
+                        },
+                    });
+                } else {
+                    IRNodeKind::StructLiteral {
+                        name: name.clone(),
+                        fields: fields
+                            .iter_mut()
+                            .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                            .collect()
+                    }
                 }
             }
 
