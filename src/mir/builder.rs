@@ -302,7 +302,8 @@ impl<'a> IRBuilder<'a> {
             }
 
             let s = self.analyzer.symbol_table.display_type(ty.borrow());
-            out.push_str(&s);
+            let sanitized = s.replace(|c: char| !c.is_alphanumeric(), "_");
+            out.push_str(&sanitized);
         }
 
         out
@@ -331,28 +332,32 @@ impl<'a> IRBuilder<'a> {
     }
 
     fn build_concrete_stmt(&mut self, node: &mut AstNode) -> Vec<IRNode> {
-        for child in node.children_mut() {
-            self.build_concrete_stmt(child);
-        }
-
+        let mut concrete_ir_nodes: Vec<IRNode> = node.children_mut()
+            .into_iter()
+            .flat_map(|child| self.build_concrete_stmt(child))
+            .collect();
+            
         let template_symbol_id = match &node.kind {
-            AstNodeKind::StructDeclaration { name, .. }
-                => self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().id,
-            _ => return vec![]
-        };
-        let Some(concrete_types_set) = self.monomorphization_ctx.instantiations.get(&template_symbol_id).cloned() else { return vec![]; };
-
-        let mut concrete_ir_nodes = vec![];
-
-        match &node.kind {
-            AstNodeKind::StructDeclaration { .. } | AstNodeKind::Function { .. } => {
-                for concrete_types in concrete_types_set {
-                    self.monomorphization_ctx.substitution_ctx = Some(Rc::new(concrete_types));
-                    concrete_ir_nodes.push(self.lower_node(node).unwrap());
-                    self.monomorphization_ctx.substitution_ctx = None;
-                }
+            AstNodeKind::StructDeclaration { name, .. } => {
+                 self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().id
             },
-            _ => {}
+            AstNodeKind::Function { .. } => {
+                 let val_sym = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                 val_sym.type_id.as_ref().unwrap().get_base_symbol()
+            },
+            _ => return concrete_ir_nodes
+        };
+        
+        let Some(instantiations) = self.monomorphization_ctx.instantiations.get(&template_symbol_id).cloned() else { 
+            return concrete_ir_nodes; 
+        };
+
+        for substitution_map in instantiations {
+            self.monomorphization_ctx.substitution_ctx = Some(Rc::new(substitution_map));
+            if let Some(ir_node) = self.lower_node(&mut node.clone()) {
+                concrete_ir_nodes.push(ir_node);
+            }
+            self.monomorphization_ctx.substitution_ctx = None;
         }
 
         concrete_ir_nodes
@@ -372,6 +377,27 @@ impl<'a> IRBuilder<'a> {
     }
 
     fn lower_node(&mut self, node: &mut AstNode) -> Option<IRNode> {
+        let concrete_type_id = if let Some(ty) = &node.type_id {
+            if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
+                Some(Self::substitute_type(ty, substitutions))
+            } else if let Type::Base { symbol, args, .. } = ty {
+                let template_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                if !template_symbol.generic_parameters.is_empty() && !args.is_empty() {
+                    let template_name = self.analyzer.symbol_table.get_type_name(template_symbol.name_id);
+                    let mangled_name = self.mangle_name(template_name, args);
+                    let mono_symbol = self.analyzer.symbol_table.find_type_symbol(&mangled_name)
+                        .unwrap_or_else(|| panic!("couldn't find monomorphized symbol for {}", mangled_name));
+                    Some(Type::new_base(mono_symbol.id))
+                } else {
+                    node.type_id.clone()
+                }
+            } else {
+                node.type_id.clone()
+            }
+        } else {
+            None
+        };
+
         let kind = match &mut node.kind {
             AstNodeKind::IntegerLiteral(v) => IRNodeKind::IntegerLiteral(*v),
             AstNodeKind::FloatLiteral(v) => IRNodeKind::FloatLiteral(*v),
@@ -451,24 +477,62 @@ impl<'a> IRBuilder<'a> {
             AstNodeKind::Continue => IRNodeKind::Continue,
 
             AstNodeKind::Function { name, parameters, instance, body, generic_parameters, .. } => {
-                if !generic_parameters.is_empty() {
-                    return None;
+                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
+                    let template_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                    let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
+                    let mangled_name = self.mangle_name(name, substitutions.values());
+                    
+                    let original_scope = self.analyzer.symbol_table.get_current_scope_id();
+                    self.analyzer.symbol_table.current_scope_id = parent_scope_id;
+                    self.analyzer.symbol_table.enter_scope(ScopeKind::Function);
+                    
+                    let ir_params = parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect();
+                    let ir_body = body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap()));
+                    
+                    self.analyzer.symbol_table.exit_scope();
+                    self.analyzer.symbol_table.current_scope_id = original_scope;
+                    
+                    return Some(IRNode {
+                        kind: IRNodeKind::Function { name: mangled_name, parameters: ir_params, instance: *instance, body: ir_body },
+                        span: node.span, value_id: node.value_id, type_id: concrete_type_id
+                    });
+                } else if generic_parameters.is_empty() {
+                     IRNodeKind::Function {
+                        name: name.clone(),
+                        parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
+                        instance: *instance,
+                        body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
+                    }
+                } else {
+                    return None
                 }
-
-                IRNodeKind::Function {
-                    name: name.clone(),
-                    parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
-                    instance: *instance,
-                    body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
-                }
-            }
+            },
             AstNodeKind::FunctionParameter { name, mutable, .. } => IRNodeKind::FunctionParameter {
                 name: name.clone(),
                 mutable: *mutable,
             },
-            AstNodeKind::FunctionCall { function, arguments, .. } => IRNodeKind::FunctionCall {
-                function: Box::new(self.lower_node(function)?),
-                arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect(),
+            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+                let mut ir_func = self.lower_node(function)?;
+                if !generic_arguments.is_empty() {
+                    // doesn't work for method access
+                    let func_name = function.get_name().unwrap();
+                    let mangled_name = self.mangle_name(&func_name, generic_arguments);
+                    
+                    match &mut ir_func.kind {
+                        IRNodeKind::Identifier(_) => ir_func.kind = IRNodeKind::Identifier(mangled_name),
+                        IRNodeKind::FieldAccess { right, .. } => {
+                            if let IRNodeKind::Identifier(_) = &mut right.kind {
+                                right.kind = IRNodeKind::Identifier(mangled_name);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                
+                IRNodeKind::FunctionCall {
+                    function: Box::new(ir_func),
+                    arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect(),
+                }
             },
             AstNodeKind::FieldAccess { left, right } => IRNodeKind::FieldAccess {
                 left: Box::new(self.lower_node(left)?),
@@ -548,9 +612,15 @@ impl<'a> IRBuilder<'a> {
                     kind
                 }
             },
-            AstNodeKind::StructLiteral { name, fields, .. } => {
+            AstNodeKind::StructLiteral { name, fields, generic_arguments } => {
+                let final_name = if generic_arguments.is_empty() {
+                    name.clone()
+                } else {
+                    self.mangle_name(name, generic_arguments)
+                };
+                
                 IRNodeKind::StructLiteral {
-                    name: name.clone(),
+                    name: final_name,
                     fields: fields
                         .iter_mut()
                         .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
@@ -613,7 +683,7 @@ impl<'a> IRBuilder<'a> {
             kind,
             span: node.span,
             value_id: node.value_id,
-            type_id: node.type_id.clone(),
+            type_id: concrete_type_id
         })
     }
 }
@@ -680,11 +750,3 @@ impl std::fmt::Display for IRBuilder<'_> {
         Ok(())
     }
 }
-
-
-/*
-when handling a function, give state to monomorphization_ctx. let it know that its handling the function.
-the thing itself needs to be lowered (function and body). lower it properly using state from monomorphization ctx.
-you should do it for struct monomorphization too.
-consider making dsa HashSet<HashMap<TypeSymbolId, Type>>
-*/
