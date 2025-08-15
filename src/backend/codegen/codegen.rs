@@ -607,7 +607,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         let merge_block = self.context.append_basic_block(function, "");
         
-        let mut incoming_phis = Vec::new();
+        let mut incoming_phis = vec![];
 
         let cond_val = self.compile_node(condition).unwrap().into_int_value();
         let then_block = self.context.append_basic_block(function, "");
@@ -997,7 +997,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         function_node: &AstNode,
         arguments: &[AstNode],
     ) -> Vec<BasicValueEnum<'ctx>> {
-        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = Vec::new();
+        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = vec![];
 
         if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
             && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
@@ -1215,7 +1215,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Some(init_val)
             },
             AstNodeKind::FieldAccess { left, .. } => self.compile_field_access(stmt, left),
-            AstNodeKind::FunctionCall { function, arguments } => {
+            AstNodeKind::FunctionCall { function, arguments, .. } => {
                 self.compile_function_call(function, arguments, stmt.type_id.as_ref())
             }
             AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,

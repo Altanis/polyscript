@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct MonomorphizationContext {
-    substitutions: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
+    instantiations: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
 }
 
 pub struct IRBuilder<'a> {
@@ -46,9 +46,9 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn discover_monomorphic_sites(&mut self, program: &AstNode) {
-        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
-        for stmt in stmts.iter() {
+    fn discover_monomorphic_sites(&mut self, program: &mut AstNode) {
+        let AstNodeKind::Program(stmts) = &mut program.kind else { unreachable!(); };
+        for stmt in stmts.iter_mut() {
             self.collect_monomorphization_sites(stmt);
         }
     }
@@ -116,9 +116,9 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn collect_monomorphization_sites(&mut self, node: &AstNode) {
-        match &node.kind {
-            AstNodeKind::FunctionCall { function, arguments } => {
+    fn collect_monomorphization_sites(&mut self, node: &mut AstNode) {
+        match &mut node.kind {
+            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
                 let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) else { return; };
                 let Some(template_fn_type) = fn_value_symbol.type_id.as_ref() else { return; };
 
@@ -177,7 +177,7 @@ impl<'a> IRBuilder<'a> {
                     );
                 }
 
-                let mut ordered_generic_ids: Vec<TypeSymbolId> = Vec::new();
+                let mut ordered_generic_ids: Vec<TypeSymbolId> = vec![];
 
                 if has_receiver {
                     let template_receiver_ty = &template_params[0];
@@ -200,7 +200,7 @@ impl<'a> IRBuilder<'a> {
                     name != "Self"
                 });
 
-                let mut ordered_args: Vec<Type> = Vec::new();
+                let mut ordered_args: Vec<Type> = vec![];
                 for gid in ordered_generic_ids {
                     let Some(ty) = generic_id_to_concrete_type.get(&gid) else { return; };
                     if !self.type_is_fully_concrete(ty) { return; }
@@ -208,14 +208,16 @@ impl<'a> IRBuilder<'a> {
                 }
 
                 if !ordered_args.is_empty() {
+                    *generic_arguments = ordered_args.clone();
+
                     self.monomorphization_ctx
-                        .substitutions
+                        .instantiations
                         .entry(*fn_symbol_id)
                         .or_default()
                         .insert(ordered_args);
                 }
             },
-            AstNodeKind::StructLiteral { .. } | AstNodeKind::TypeReference { .. } => {
+            AstNodeKind::StructLiteral { generic_arguments, .. } | AstNodeKind::TypeReference { generic_arguments, .. } => {
                 if let Some(Type::Base { symbol, args, .. }) = &node.type_id {
                     let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
                     
@@ -224,8 +226,10 @@ impl<'a> IRBuilder<'a> {
                     }
 
                     if args.iter().all(|arg| self.type_is_fully_concrete(arg)) {
+                        *generic_arguments = args.clone();
+
                         self.monomorphization_ctx
-                            .substitutions
+                            .instantiations
                             .entry(*symbol)
                             .or_default()
                             .insert(args.clone());
@@ -235,27 +239,43 @@ impl<'a> IRBuilder<'a> {
             _ => {}
         }
 
-        for child in node.children().iter() {
+        for child in node.children_mut() {
             self.collect_monomorphization_sites(child);
         }
     }
 }
 
 impl<'a> IRBuilder<'a> {
-    pub fn monomorphize(&mut self, program: &AstNode) {
+    fn monomorphize(&mut self, program: &mut AstNode) {
+        let AstNodeKind::Program(stmts) = &mut program.kind else { unreachable!(); };
+        for stmt in stmts.iter_mut() {
+            self.build_concrete_stmt(stmt);
+        }
+    }
 
+    fn build_concrete_stmt(&mut self, node: &mut AstNode) {
+        for child in node.children_mut() {
+            self.build_concrete_stmt(child);
+        }
+
+        let Some(value_id) = node.value_id else { return; };
+        if !self.monomorphization_ctx.instantiations.contains_key(&value_id) { return; }
+
+        // match &node.kind {
+
+        // }
     }
 }
 
 impl<'a> IRBuilder<'a> {
-    pub fn build(&mut self, program: &AstNode) -> Option<IRNode> {
+    pub fn build(&mut self, program: &mut AstNode) -> Option<IRNode> {
         self.discover_monomorphic_sites(program);
         self.monomorphize(program);
         self.lower_node(program)
     }
 
-    fn lower_node(&mut self, node: &AstNode) -> Option<IRNode> {
-        let kind = match &node.kind {
+    fn lower_node(&mut self, node: &mut AstNode) -> Option<IRNode> {
+        let kind = match &mut node.kind {
             AstNodeKind::IntegerLiteral(v) => IRNodeKind::IntegerLiteral(*v),
             AstNodeKind::FloatLiteral(v) => IRNodeKind::FloatLiteral(*v),
             AstNodeKind::BooleanLiteral(v) => IRNodeKind::BooleanLiteral(*v),
@@ -300,35 +320,35 @@ impl<'a> IRBuilder<'a> {
             },
 
             AstNodeKind::Block(stmts) => {
-                IRNodeKind::Block(stmts.iter().filter_map(|s| self.lower_node(s)).collect())
-            }
+                IRNodeKind::Block(stmts.iter_mut().filter_map(|s| self.lower_node(s)).collect())
+            },
             AstNodeKind::IfStatement { condition, then_branch, else_if_branches, else_branch } => {
                 IRNodeKind::IfStatement {
                     condition: Box::new(self.lower_node(condition)?),
                     then_branch: Box::new(self.lower_node(then_branch)?),
                     else_if_branches: else_if_branches
-                        .iter()
+                        .iter_mut()
                         .filter_map(|(c, b)| {
                             Some((Box::new(self.lower_node(c)?), Box::new(self.lower_node(b)?)))
                         })
                         .collect(),
-                    else_branch: else_branch.as_ref().map(|b| Box::new(self.lower_node(b).unwrap())),
+                    else_branch: else_branch.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
                 }
-            }
+            },
             AstNodeKind::WhileLoop { condition, body } => IRNodeKind::WhileLoop {
                 condition: Box::new(self.lower_node(condition)?),
                 body: Box::new(self.lower_node(body)?),
             },
             AstNodeKind::ForLoop { initializer, condition, increment, body } => {
                 IRNodeKind::ForLoop {
-                    initializer: initializer.as_ref().map(|n| Box::new(self.lower_node(n).unwrap())),
-                    condition: condition.as_ref().map(|n| Box::new(self.lower_node(n).unwrap())),
-                    increment: increment.as_ref().map(|n| Box::new(self.lower_node(n).unwrap())),
+                    initializer: initializer.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
+                    condition: condition.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
+                    increment: increment.as_mut().map(|n| Box::new(self.lower_node(n).unwrap())),
                     body: Box::new(self.lower_node(body)?),
                 }
             }
             AstNodeKind::Return(expr) => {
-                IRNodeKind::Return(expr.as_ref().map(|e| Box::new(self.lower_node(e).unwrap())))
+                IRNodeKind::Return(expr.as_mut().map(|e| Box::new(self.lower_node(e).unwrap())))
             }
             AstNodeKind::Break => IRNodeKind::Break,
             AstNodeKind::Continue => IRNodeKind::Continue,
@@ -340,18 +360,18 @@ impl<'a> IRBuilder<'a> {
 
                 IRNodeKind::Function {
                     name: name.clone(),
-                    parameters: parameters.iter().filter_map(|p| self.lower_node(p)).collect(),
+                    parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
                     instance: *instance,
-                    body: body.as_ref().map(|b| Box::new(self.lower_node(b).unwrap())),
+                    body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
                 }
             }
             AstNodeKind::FunctionParameter { name, mutable, .. } => IRNodeKind::FunctionParameter {
                 name: name.clone(),
                 mutable: *mutable,
             },
-            AstNodeKind::FunctionCall { function, arguments } => IRNodeKind::FunctionCall {
+            AstNodeKind::FunctionCall { function, arguments, .. } => IRNodeKind::FunctionCall {
                 function: Box::new(self.lower_node(function)?),
-                arguments: arguments.iter().filter_map(|a| self.lower_node(a)).collect(),
+                arguments: arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect(),
             },
             AstNodeKind::FieldAccess { left, right } => IRNodeKind::FieldAccess {
                 left: Box::new(self.lower_node(left)?),
@@ -365,7 +385,7 @@ impl<'a> IRBuilder<'a> {
 
                 IRNodeKind::StructDeclaration {
                     name: name.clone(),
-                    fields: fields.iter().filter_map(|f| self.lower_node(f)).collect(),
+                    fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
                 }
             }
             AstNodeKind::StructField { name, .. } => IRNodeKind::StructField { name: name.clone() },
@@ -376,7 +396,7 @@ impl<'a> IRBuilder<'a> {
                 IRNodeKind::StructLiteral {
                     name: mangled_name,
                     fields: fields
-                        .iter()
+                        .iter_mut()
                         .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
                         .collect(),
                 }
@@ -385,11 +405,11 @@ impl<'a> IRBuilder<'a> {
             AstNodeKind::EnumDeclaration { name, variants } => IRNodeKind::EnumDeclaration {
                 name: name.clone(),
                 variants: variants
-                    .iter()
+                    .iter_mut()
                     .map(|(k, (v, e))| {
                         (
                             k.clone(),
-                            (self.lower_node(v).unwrap(), e.as_ref().map(|expr| self.lower_node(expr).unwrap())),
+                            (self.lower_node(v).unwrap(), e.as_mut().map(|expr| self.lower_node(expr).unwrap())),
                         )
                     })
                     .collect(),
@@ -397,7 +417,26 @@ impl<'a> IRBuilder<'a> {
             AstNodeKind::EnumVariant(name) => IRNodeKind::EnumVariant(name.clone()),
 
             AstNodeKind::Program(stmts) => {
-                IRNodeKind::Program(stmts.iter().filter_map(|s| self.lower_node(s)).collect())
+                let mut ir_nodes = vec![];
+                for stmt in stmts {
+                    match &mut stmt.kind {
+                        AstNodeKind::ImplDeclaration { associated_functions, generic_parameters, .. } => {
+                            if generic_parameters.is_empty() {
+                                for func in associated_functions {
+                                    if let Some(ir_func) = self.lower_node(func) {
+                                        ir_nodes.push(ir_func);
+                                    }
+                                }
+                            }
+                        },
+                        _ => {
+                            if let Some(ir_node) = self.lower_node(stmt) {
+                                ir_nodes.push(ir_node);
+                            }
+                        }
+                    }
+                }
+                IRNodeKind::Program(ir_nodes)
             }
 
             AstNodeKind::ImplDeclaration { .. }
@@ -426,15 +465,15 @@ impl<'a> IRBuilder<'a> {
 impl std::fmt::Display for IRBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\n{}", "Monomorphization Sites:".bold().underline())?;
-        if self.monomorphization_ctx.substitutions.is_empty() {
+        if self.monomorphization_ctx.instantiations.is_empty() {
             return writeln!(f, "  {}", "(no monomorphization sites found)".dimmed());
         }
 
-        let mut keys: Vec<_> = self.monomorphization_ctx.substitutions.keys().cloned().collect();
+        let mut keys: Vec<_> = self.monomorphization_ctx.instantiations.keys().cloned().collect();
         keys.sort();
 
         for symbol_id in keys {
-            let instantiations = &self.monomorphization_ctx.substitutions[&symbol_id];
+            let instantiations = &self.monomorphization_ctx.instantiations[&symbol_id];
             let symbol = self.analyzer.symbol_table.get_type_symbol(symbol_id).unwrap();
             let name = self.analyzer.symbol_table.get_type_name(symbol.name_id);
             

@@ -193,7 +193,8 @@ impl Parser {
                     span: lhs.span.set_end_from_span(self.previous().get_span()),
                     kind: AstNodeKind::FunctionCall {
                         function: boxed!(lhs),
-                        arguments
+                        arguments,
+                        generic_arguments: vec![]
                     },
                     type_id: None,
                     value_id: None,
@@ -425,7 +426,7 @@ impl Parser {
                     self.advance();
 
                     Ok(AstNode {
-                        kind: AstNodeKind::StructLiteral { name, fields },
+                        kind: AstNodeKind::StructLiteral { name, fields, generic_arguments: vec![] },
                         span: span.set_end_from_span(self.previous().get_span()),
                         type_id: None,
                         value_id: None,
@@ -676,6 +677,7 @@ impl Parser {
                             type_name: type_reference.get_value().to_string(),
                             generic_types,
                             reference_kind,
+                            generic_arguments: vec![]
                         })
                     }
                 },
@@ -691,6 +693,7 @@ impl Parser {
                         type_name: type_reference.get_value().to_string(),
                         generic_types,
                         reference_kind,
+                        generic_arguments: vec![]
                     })
                 },
                 TokenKind::Keyword(KeywordKind::Fn) => {
@@ -827,7 +830,7 @@ impl Parser {
                 parameters,
                 return_type,
                 instance,
-                body,
+                body
             })
         })
     }
@@ -845,7 +848,7 @@ impl Parser {
                 parameters,
                 return_type,
                 instance,
-                body,
+                body
             })
         })
     }
@@ -1323,7 +1326,7 @@ impl Parser {
                 parameters,
                 return_type,
                 instance,
-                body,
+                body
             })
         })
     }
@@ -1456,7 +1459,7 @@ impl Parser {
                 parameters,
                 return_type,
                 instance,
-                body: None,
+                body: None
             })
         })
     }

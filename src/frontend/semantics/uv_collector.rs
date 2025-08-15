@@ -1380,6 +1380,7 @@ impl SemanticAnalyzer {
                 type_name,
                 generic_types,
                 reference_kind,
+                ..
             } => self.collect_uv_type_reference(
                 uv_id,
                 expr.scope_id.unwrap(),

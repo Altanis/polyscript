@@ -137,6 +137,7 @@ impl SemanticAnalyzer {
                 return_type,
                 body,
                 instance,
+                ..
             } = &mut node.kind
             {
                 (
@@ -498,7 +499,7 @@ impl SemanticAnalyzer {
                 &[node.span],
             );
 
-            let AstNodeKind::TypeReference { type_name, generic_types, reference_kind } = &constraint.kind else {
+            let AstNodeKind::TypeReference { type_name, generic_types, reference_kind, .. } = &constraint.kind else {
                 return Err(constraint_error);
             };
 
@@ -604,6 +605,7 @@ impl SemanticAnalyzer {
                 type_name,
                 generic_types,
                 reference_kind,
+                ..
             } => {
                 let args = generic_types
                     .iter_mut()
@@ -877,7 +879,8 @@ impl SemanticAnalyzer {
                 parameters,
                 body,
                 instance,
-                return_type
+                return_type,
+                ..
             } = &mut func_node.kind
             {
                 let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);

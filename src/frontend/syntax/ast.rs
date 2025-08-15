@@ -81,7 +81,7 @@ pub enum AstNodeKind {
         parameters: Vec<AstNode>,
         return_type: Option<BoxedAstNode>,
         instance: Option<ReferenceKind>,
-        body: Option<BoxedAstNode>,
+        body: Option<BoxedAstNode>
     },
     /// A type that denotes the signature of a function.
     FunctionPointer {
@@ -107,7 +107,8 @@ pub enum AstNodeKind {
     },
     StructLiteral {
         name: String,
-        fields: IndexMap<String, AstNode>
+        fields: IndexMap<String, AstNode>,
+        generic_arguments: Vec<Type>
     },
 
     EnumDeclaration {
@@ -150,7 +151,8 @@ pub enum AstNodeKind {
     /// A function call (i.e. `f()`).
     FunctionCall {
         function: BoxedAstNode,
-        arguments: Vec<AstNode>
+        arguments: Vec<AstNode>,
+        generic_arguments: Vec<Type>
     },
 
     TraitDeclaration {
@@ -175,6 +177,7 @@ pub enum AstNodeKind {
         type_name: String,
         generic_types: Vec<AstNode>,
         reference_kind: ReferenceKind,
+        generic_arguments: Vec<Type>
     },
     TypeDeclaration {
         name: String,
@@ -658,7 +661,7 @@ impl AstNode {
                 write!(f, ": ")?;
                 type_annotation.fmt_with_indent(f, 0, table)?;
             }
-            AstNodeKind::StructLiteral { name, fields } => {
+            AstNodeKind::StructLiteral { name, fields, .. } => {
                 write!(f, "{}{}{}", indent_str, name.yellow(), " ".dimmed())?;
                 write!(f, "{}", "{".dimmed())?;
 
@@ -694,6 +697,7 @@ impl AstNode {
                 type_name,
                 generic_types,
                 reference_kind,
+                ..
             } => {
                 let type_name = match reference_kind {
                     ReferenceKind::Value => type_name.clone(),
@@ -742,7 +746,7 @@ impl AstNode {
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
             }
-            AstNodeKind::FunctionCall { function, arguments } => {
+            AstNodeKind::FunctionCall { function, arguments, .. } => {
                 write!(f, "{}", indent_str)?;
                 function.fmt_with_indent(f, 0, table)?;
                 write!(f, "(")?;
