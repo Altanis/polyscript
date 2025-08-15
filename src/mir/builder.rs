@@ -637,12 +637,41 @@ impl<'a> MIRBuilder<'a> {
                     kind
                 }
             },
-            AstNodeKind::StructLiteral { name, fields, .. } => MIRNodeKind::StructLiteral {
-                name: name.clone(),
-                fields: fields
-                    .iter_mut()
-                    .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                    .collect()
+            AstNodeKind::StructLiteral { name, fields, generic_arguments } => {
+                if !generic_arguments.is_empty() {
+                    let generic_type_symbol_id = self.analyzer.symbol_table.find_type_symbol_from_scope(
+                        node.scope_id.unwrap(),
+                        name
+                    ).unwrap().id;
+
+                    let mangled_name = self.mangle_name(generic_type_symbol_id, generic_arguments);
+
+                    let concrete_type_symbol_id = self.analyzer.symbol_table.find_type_symbol_from_scope(
+                        node.scope_id.unwrap(),
+                        &mangled_name
+                    ).unwrap().id;
+
+                    return Some(MIRNode {
+                        span: node.span,
+                        value_id: None,
+                        type_id: Some(Type::new_base(concrete_type_symbol_id)),
+                        kind: MIRNodeKind::StructLiteral {
+                            name: mangled_name,
+                            fields: fields
+                                .iter_mut()
+                                .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                                .collect()
+                        },
+                    });
+                } else {
+                    MIRNodeKind::StructLiteral {
+                        name: name.clone(),
+                        fields: fields
+                            .iter_mut()
+                            .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                            .collect()
+                    }
+                }
             },
 
             AstNodeKind::EnumDeclaration { name, variants } => MIRNodeKind::EnumDeclaration {
