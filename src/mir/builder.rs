@@ -548,36 +548,15 @@ impl<'a> IRBuilder<'a> {
                     kind
                 }
             },
-            AstNodeKind::StructLiteral { name, fields, generic_arguments } => {
-                if !generic_arguments.is_empty() {
-                    let mangled_name = self.mangle_name(name, generic_arguments);
-                    let type_symbol_id = self.analyzer.symbol_table.find_type_symbol_from_scope(
-                        node.scope_id.unwrap(),
-                        &mangled_name
-                    ).unwrap().id;
-
-                    return Some(IRNode {
-                        span: node.span,
-                        value_id: None,
-                        type_id: Some(Type::new_base(type_symbol_id)),
-                        kind: IRNodeKind::StructLiteral {
-                            name: mangled_name,
-                            fields: fields
-                                .iter_mut()
-                                .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                                .collect()
-                        },
-                    });
-                } else {
-                    IRNodeKind::StructLiteral {
-                        name: name.clone(),
-                        fields: fields
-                            .iter_mut()
-                            .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
-                            .collect()
-                    }
+            AstNodeKind::StructLiteral { name, fields, .. } => {
+                IRNodeKind::StructLiteral {
+                    name: name.clone(),
+                    fields: fields
+                        .iter_mut()
+                        .map(|(k, v)| (k.clone(), self.lower_node(v).unwrap()))
+                        .collect()
                 }
-            }
+            },
 
             AstNodeKind::EnumDeclaration { name, variants } => IRNodeKind::EnumDeclaration {
                 name: name.clone(),
@@ -629,7 +608,7 @@ impl<'a> IRBuilder<'a> {
             | AstNodeKind::SelfType(_)
             | AstNodeKind::GenericParameter { .. } => return None,
         };
-
+        
         Some(IRNode {
             kind,
             span: node.span,
