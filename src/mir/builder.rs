@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
+        semantics::analyzer::{SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{IRNode, IRNodeKind}
@@ -97,7 +97,7 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn collect_generic_ids_in_order(&self, ty: &Type, out: &mut Vec<TypeSymbolId>) {
+    fn collect_generic_ids(&self, ty: &Type, out: &mut Vec<TypeSymbolId>) {
         match ty {
             Type::Base { symbol, args } => {
                 match self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind {
@@ -108,12 +108,12 @@ impl<'a> IRBuilder<'a> {
                     },
                     _ => {
                         for a in args {
-                            self.collect_generic_ids_in_order(a, out);
+                            self.collect_generic_ids(a, out);
                         }
                     }
                 }
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => self.collect_generic_ids_in_order(inner, out)
+            Type::Reference(inner) | Type::MutableReference(inner) => self.collect_generic_ids(inner, out)
         }
     }
 
@@ -186,14 +186,14 @@ impl<'a> IRBuilder<'a> {
                     while let Type::Reference(inner) | Type::MutableReference(inner) = base_template_receiver_ty {
                         base_template_receiver_ty = inner;
                     }
-                    self.collect_generic_ids_in_order(base_template_receiver_ty, &mut ordered_generic_ids);
+                    self.collect_generic_ids(base_template_receiver_ty, &mut ordered_generic_ids);
                 }
 
                 for template_param in params_to_zip.iter() {
-                    self.collect_generic_ids_in_order(template_param, &mut ordered_generic_ids);
+                    self.collect_generic_ids(template_param, &mut ordered_generic_ids);
                 }
 
-                self.collect_generic_ids_in_order(template_return, &mut ordered_generic_ids);
+                self.collect_generic_ids(template_return, &mut ordered_generic_ids);
 
                 ordered_generic_ids.retain(|&gid| {
                     let sym = self.analyzer.symbol_table.get_type_symbol(gid).unwrap();
@@ -201,22 +201,27 @@ impl<'a> IRBuilder<'a> {
                     name != "Self"
                 });
 
-                let mut ordered_args: Vec<Type> = vec![];
-                let mut instantiation_map = BTreeMap::new();
+                let ordered_args_option: Option<Vec<Type>> = ordered_generic_ids
+                    .iter()
+                    .map(|gid| {
+                        let ty = generic_id_to_concrete_type.get(gid)?;
+                        if !self.type_is_fully_concrete(ty) { return None; }
 
-                for gid in &ordered_generic_ids {
-                    let Some(ty) = generic_id_to_concrete_type.get(gid) else { return; };
-                    if !self.type_is_fully_concrete(ty) { return; }
-                    
-                    ordered_args.push(ty.clone());
-                    instantiation_map.insert(*gid, ty.clone());
-                }
+                        Some(ty.clone())
+                    })
+                    .collect();
+
+                let Some(ordered_args) = ordered_args_option else { return };
 
                 if !ordered_args.is_empty() {
-                    *generic_arguments = ordered_args;
-                }
+                    let instantiation_map: BTreeMap<TypeSymbolId, Type> = ordered_generic_ids
+                        .iter()
+                        .cloned()
+                        .zip(ordered_args.iter().cloned())
+                        .collect();
 
-                if !instantiation_map.is_empty() {
+                    *generic_arguments = ordered_args;
+
                     self.monomorphization_ctx
                         .instantiations
                         .entry(*fn_symbol_id)
