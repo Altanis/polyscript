@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct MonomorphizationContext {
-    substitutions: HashMap<TypeSymbolId, HashSet<(Vec<Type>, Vec<Type>)>>
+    substitutions: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
 }
 
 pub struct IRBuilder<'a> {
@@ -96,6 +96,26 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
+    fn collect_generic_ids_in_order(&self, ty: &Type, out: &mut Vec<TypeSymbolId>) {
+        match ty {
+            Type::Base { symbol, args } => {
+                match self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind {
+                    TypeSymbolKind::Generic(_) => {
+                        if !out.contains(symbol) {
+                            out.push(*symbol);
+                        }
+                    },
+                    _ => {
+                        for a in args {
+                            self.collect_generic_ids_in_order(a, out);
+                        }
+                    }
+                }
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => self.collect_generic_ids_in_order(inner, out)
+        }
+    }
+
     fn collect_monomorphization_sites(&mut self, node: &AstNode) {
         match &node.kind {
             AstNodeKind::FunctionCall { function, arguments } => {
@@ -157,36 +177,42 @@ impl<'a> IRBuilder<'a> {
                     );
                 }
 
-                let ValueSymbolKind::Function(fn_scope_id) = fn_value_symbol.kind else { return };
+                let mut ordered_generic_ids: Vec<TypeSymbolId> = Vec::new();
 
-                let mut parent_generic_ids = Vec::new();
-                let mut local_generic_ids = Vec::new();
-
-                for &generic_param_id in generic_id_to_concrete_type.keys() {
-                    let generic_param_symbol = self.analyzer.symbol_table.get_type_symbol(generic_param_id).unwrap();
-                    if generic_param_symbol.scope_id == fn_scope_id {
-                        local_generic_ids.push(generic_param_id);
-                    } else {
-                        parent_generic_ids.push(generic_param_id);
+                if has_receiver {
+                    let template_receiver_ty = &template_params[0];
+                    let mut base_template_receiver_ty = template_receiver_ty;
+                    while let Type::Reference(inner) | Type::MutableReference(inner) = base_template_receiver_ty {
+                        base_template_receiver_ty = inner;
                     }
+                    self.collect_generic_ids_in_order(base_template_receiver_ty, &mut ordered_generic_ids);
                 }
 
-                parent_generic_ids.sort();
-                local_generic_ids.sort();
+                for template_param in params_to_zip.iter() {
+                    self.collect_generic_ids_in_order(template_param, &mut ordered_generic_ids);
+                }
 
-                let parent_args: Vec<Type> = parent_generic_ids.iter().map(|id| generic_id_to_concrete_type[id].clone()).collect();
-                let local_args: Vec<Type> = local_generic_ids.iter().map(|id| generic_id_to_concrete_type[id].clone()).collect();
+                self.collect_generic_ids_in_order(template_return, &mut ordered_generic_ids);
 
+                ordered_generic_ids.retain(|&gid| {
+                    let sym = self.analyzer.symbol_table.get_type_symbol(gid).unwrap();
+                    let name = self.analyzer.symbol_table.get_type_name(sym.name_id);
+                    name != "Self"
+                });
 
-                if (!local_args.is_empty() || !parent_args.is_empty()) &&
-                   local_args.iter().all(|t| self.type_is_fully_concrete(t)) &&
-                   parent_args.iter().all(|t| self.type_is_fully_concrete(t))
-                {
+                let mut ordered_args: Vec<Type> = Vec::new();
+                for gid in ordered_generic_ids {
+                    let Some(ty) = generic_id_to_concrete_type.get(&gid) else { return; };
+                    if !self.type_is_fully_concrete(ty) { return; }
+                    ordered_args.push(ty.clone());
+                }
+
+                if !ordered_args.is_empty() {
                     self.monomorphization_ctx
                         .substitutions
                         .entry(*fn_symbol_id)
                         .or_default()
-                        .insert((parent_args, local_args));
+                        .insert(ordered_args);
                 }
             },
             AstNodeKind::StructLiteral { .. } | AstNodeKind::TypeReference { .. } => {
@@ -202,7 +228,7 @@ impl<'a> IRBuilder<'a> {
                             .substitutions
                             .entry(*symbol)
                             .or_default()
-                            .insert((vec![], args.clone()));
+                            .insert(args.clone());
                     }
                 }
             },
@@ -421,37 +447,21 @@ impl std::fmt::Display for IRBuilder<'_> {
             }
             
             let mut sorted_instantiations: Vec<_> = instantiations.iter().collect();
-            sorted_instantiations.sort_by_key(|(parent_args, local_args)| {
-                let p_str: String = parent_args.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect();
-                let l_str: String = local_args.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect();
-                (p_str, l_str)
+            sorted_instantiations.sort_by_key(|args_vec| {
+                args_vec.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect::<String>()
             });
-            
-            for (parent_args, local_args) in sorted_instantiations {
-                write!(f, "    - ")?;
 
-                if parent_args.is_empty() {
-                    write!(f, "Parent: {} ", "[]".dimmed())?;
+            for args_vec in sorted_instantiations {
+                write!(f, "    - ")?;
+                if args_vec.is_empty() {
+                    writeln!(f, "{}", "[]".dimmed())?;
                 } else {
-                    let parent_args_str = parent_args
+                    let args_str = args_vec
                         .iter()
                         .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_blue().to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    write!(f, "Parent: <{}> ", parent_args_str)?;
-                }
-                
-                write!(f, "{}", "/".dimmed())?;
-
-                if local_args.is_empty() {
-                    writeln!(f, " Local: {}", "[]".dimmed())?;
-                } else {
-                    let local_args_str = local_args
-                        .iter()
-                        .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_green().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    writeln!(f, " Local: <{}>", local_args_str)?;
+                    writeln!(f, "<{}>", args_str)?;
                 }
             }
         }
