@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{BTreeMap, HashMap, HashSet}, rc::Rc};
 
 use colored::Colorize;
 
@@ -12,7 +12,8 @@ use crate::{
 
 #[derive(Default)]
 pub struct MonomorphizationContext {
-    instantiations: HashMap<TypeSymbolId, HashSet<Vec<Type>>>
+    instantiations: HashMap<TypeSymbolId, HashSet<BTreeMap<TypeSymbolId, Type>>>,
+    substitution_ctx: Option<Rc<BTreeMap<TypeSymbolId, Type>>>
 }
 
 pub struct IRBuilder<'a> {
@@ -201,20 +202,26 @@ impl<'a> IRBuilder<'a> {
                 });
 
                 let mut ordered_args: Vec<Type> = vec![];
-                for gid in ordered_generic_ids {
-                    let Some(ty) = generic_id_to_concrete_type.get(&gid) else { return; };
+                let mut instantiation_map = BTreeMap::new();
+
+                for gid in &ordered_generic_ids {
+                    let Some(ty) = generic_id_to_concrete_type.get(gid) else { return; };
                     if !self.type_is_fully_concrete(ty) { return; }
+                    
                     ordered_args.push(ty.clone());
+                    instantiation_map.insert(*gid, ty.clone());
                 }
 
                 if !ordered_args.is_empty() {
-                    *generic_arguments = ordered_args.clone();
+                    *generic_arguments = ordered_args;
+                }
 
+                if !instantiation_map.is_empty() {
                     self.monomorphization_ctx
                         .instantiations
                         .entry(*fn_symbol_id)
                         .or_default()
-                        .insert(ordered_args);
+                        .insert(instantiation_map);
                 }
             },
             AstNodeKind::StructLiteral { generic_arguments, .. } | AstNodeKind::TypeReference { generic_arguments, .. } => {
@@ -228,11 +235,20 @@ impl<'a> IRBuilder<'a> {
                     if args.iter().all(|arg| self.type_is_fully_concrete(arg)) {
                         *generic_arguments = args.clone();
 
-                        self.monomorphization_ctx
-                            .instantiations
-                            .entry(*symbol)
-                            .or_default()
-                            .insert(args.clone());
+                        let instantiation_map: BTreeMap<TypeSymbolId, Type> = type_symbol
+                            .generic_parameters
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(&gid, ty)| (gid, ty.clone()))
+                            .collect();
+                        
+                        if !instantiation_map.is_empty() {
+                            self.monomorphization_ctx
+                                .instantiations
+                                .entry(*symbol)
+                                .or_default()
+                                .insert(instantiation_map);
+                        }
                     }
                 }
             },
@@ -262,9 +278,9 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    fn mangle_name(&self, name: &String, concrete_types: &[Type]) -> String {
+    fn mangle_name(&self, name: &String, concrete_types: &BTreeMap<TypeSymbolId, Type>) -> String {
         format!("#{}{}", name, if concrete_types.is_empty() { "" } else { "_" })
-            + concrete_types.iter()
+            + concrete_types.values()
                 .map(|ty| self.analyzer.symbol_table.display_type(ty))
                 .collect::<Vec<String>>()
                 .join("_")
@@ -308,8 +324,20 @@ impl<'a> IRBuilder<'a> {
         let mut concrete_ir_nodes = vec![];
 
         match &node.kind {
+            AstNodeKind::StructDeclaration { .. } | AstNodeKind::Function { .. } => {
+                for concrete_types in concrete_types_set {
+                    self.monomorphization_ctx.substitution_ctx = Some(Rc::new(concrete_types));
+                    concrete_ir_nodes.push(self.lower_node(node).unwrap());
+                    self.monomorphization_ctx.substitution_ctx = None;
+                }
+            },
+            _ => {}
+        }
+
+        /*match &node.kind {
             AstNodeKind::StructDeclaration { name, fields, .. } => {
-                let template_symbol = self.analyzer.symbol_table.get_type_symbol(template_symbol_id).unwrap().clone();
+
+                /*let template_symbol = self.analyzer.symbol_table.get_type_symbol(template_symbol_id).unwrap().clone();
                 let original_generic_param_ids = template_symbol.generic_parameters.clone();
                 let parent_scope_id = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap().parent.unwrap();
 
@@ -381,11 +409,11 @@ impl<'a> IRBuilder<'a> {
                     };
 
                     concrete_ir_nodes.push(ir_struct_decl);
-                }
+                }*/
             },
             AstNodeKind::Function { .. } => {},
             _ => {}
-        }
+        }*/
 
         concrete_ir_nodes
     }
@@ -394,13 +422,7 @@ impl<'a> IRBuilder<'a> {
 impl<'a> IRBuilder<'a> {
     pub fn build(&mut self, program: &mut AstNode) -> IRNode {
         self.discover_monomorphic_sites(program);
-        let mut mir_program = self.monomorphize(program);
-
-        let IRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
-        let IRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
-        hoisted_stmts.extend(other_stmts);
-
-        mir_program
+        self.lower_node(program).unwrap()
     }
 
     fn lower_node(&mut self, node: &mut AstNode) -> Option<IRNode> {
@@ -622,18 +644,27 @@ impl std::fmt::Display for IRBuilder<'_> {
             }
             
             let mut sorted_instantiations: Vec<_> = instantiations.iter().collect();
-            sorted_instantiations.sort_by_key(|args_vec| {
-                args_vec.iter().map(|t| self.analyzer.symbol_table.display_type(t)).collect::<String>()
+            sorted_instantiations.sort_by_key(|map| {
+                let mut content = map.iter().collect::<Vec<_>>();
+                content.sort_by_key(|(k, _)| *k);
+                content.iter().map(|(_, t)| self.analyzer.symbol_table.display_type(t)).collect::<String>()
             });
 
-            for args_vec in sorted_instantiations {
+            for instantiation_map in sorted_instantiations {
                 write!(f, "    - ")?;
-                if args_vec.is_empty() {
-                    writeln!(f, "{}", "[]".dimmed())?;
+                if instantiation_map.is_empty() {
+                    writeln!(f, "{}", "<>".dimmed())?;
                 } else {
-                    let args_str = args_vec
+                    let mut items: Vec<_> = instantiation_map.iter().collect();
+                    items.sort_by_key(|(k, _)| *k);
+
+                    let args_str = items
                         .iter()
-                        .map(|ty| self.analyzer.symbol_table.display_type(ty).bright_blue().to_string())
+                        .map(|(gid, ty)| {
+                            let g_sym = self.analyzer.symbol_table.get_type_symbol(**gid).unwrap();
+                            let g_name = self.analyzer.symbol_table.get_type_name(g_sym.name_id);
+                            format!("{}: {}", g_name.yellow(), self.analyzer.symbol_table.display_type(ty).bright_blue())
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     writeln!(f, "<{}>", args_str)?;
@@ -644,3 +675,11 @@ impl std::fmt::Display for IRBuilder<'_> {
         Ok(())
     }
 }
+
+
+/*
+when handling a function, give state to monomorphization_ctx. let it know that its handling the function.
+the thing itself needs to be lowered (function and body). lower it properly using state from monomorphization ctx.
+you should do it for struct monomorphization too.
+consider making dsa HashSet<HashMap<TypeSymbolId, Type>>
+*/
