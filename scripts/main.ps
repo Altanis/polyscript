@@ -4,10 +4,3 @@
 // can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
-
-
-fn not<T: Not>(x: T): [T as Not].Output {
-    !x
-}
-
-not(3);

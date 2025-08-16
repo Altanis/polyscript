@@ -33,3 +33,9 @@ fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
 
 let clone = identity1([Scalar<char>].new('5'));
 let clone2 = identity2(Scalar { x: true });
+
+fn not<T: Not>(x: T): [T as Not].Output {
+    !x
+}
+
+not(3);
