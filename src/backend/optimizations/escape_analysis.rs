@@ -1,14 +1,12 @@
 use crate::{
-    frontend::{
-        semantics::analyzer::{
+    frontend::semantics::analyzer::{
             AllocationKind, ScopeKind, SemanticAnalyzer, ValueSymbolId, ValueSymbolKind,
         },
-        syntax::ast::{AstNode, AstNodeKind},
-    },
-    utils::kind::Operation,
+    mir::ir_node::{MIRNode, MIRNodeKind},
+    utils::kind::Operation
 };
 
-pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
     loop {
         if !analysis_pass(analyzer, program) {
             break;
@@ -22,7 +20,7 @@ pub fn init(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
     }
 }
 
-fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut AstNode) -> bool {
+fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> bool {
     let mut changed = false;
 
     for child in node.children_mut() {
@@ -32,27 +30,27 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut AstNode) -> bool {
     }
 
     match &mut node.kind {
-        AstNodeKind::Return(Some(expr)) => {
-            if let Some(function_scope) = get_function_scope(analyzer, node.scope_id.unwrap()) {
+        MIRNodeKind::Return(Some(expr)) => {
+            if let Some(function_scope) = get_function_scope(analyzer, node.scope_id) {
                 check_for_escape(analyzer, expr, function_scope, true, &mut changed);
             }
         }
 
-        AstNodeKind::Function { body: Some(body_node), .. } => {
-            if let AstNodeKind::Block(statements) = &mut body_node.kind
+        MIRNodeKind::Function { body: Some(body_node), .. } => {
+            if let MIRNodeKind::Block(statements) = &mut body_node.kind
                 && let Some(last_expr) = statements.last_mut()
-                && !matches!(last_expr.kind, AstNodeKind::ExpressionStatement(_))
-                && let Some(function_scope) = get_function_scope(analyzer, node.scope_id.unwrap())
+                && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
+                && let Some(function_scope) = get_function_scope(analyzer, node.scope_id)
             {
                 check_for_escape(analyzer, last_expr, function_scope, true, &mut changed);
             }
         }
 
-        AstNodeKind::VariableDeclaration { initializer, .. } => {
-            let destination_scope = node.scope_id.unwrap();
+        MIRNodeKind::VariableDeclaration { initializer, .. } => {
+            let destination_scope = node.scope_id;
             check_for_escape(analyzer, initializer, destination_scope, false, &mut changed);
 
-            if let AstNodeKind::HeapExpression(_) = &initializer.kind
+            if let MIRNodeKind::HeapExpression(_) = &initializer.kind
                 && move_to_heap(analyzer, node.value_id.unwrap())
             {
                 changed = true;
@@ -66,13 +64,13 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut AstNode) -> bool {
 
 fn check_for_escape(
     analyzer: &mut SemanticAnalyzer,
-    expr: &mut AstNode,
+    expr: &mut MIRNode,
     destination_scope: usize,
     is_return_or_heap_assign: bool,
     changed: &mut bool,
 ) {
     match &mut expr.kind {
-        AstNodeKind::Identifier(_) => {
+        MIRNodeKind::Identifier(_) => {
             if let Some(var_id) = expr.value_id {
                 let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
                 let should_heapify = if is_return_or_heap_assign {
@@ -88,7 +86,7 @@ fn check_for_escape(
                 }
             }
         },
-        AstNodeKind::UnaryOperation { operator, operand }
+        MIRNodeKind::UnaryOperation { operator, operand }
             if *operator == Operation::ImmutableAddressOf
                 || *operator == Operation::MutableAddressOf =>
         {
@@ -107,9 +105,9 @@ fn check_for_escape(
                 }
             }
         },
-        AstNodeKind::Block(statements) => {
+        MIRNodeKind::Block(statements) => {
             if let Some(last_expr) = statements.last_mut()
-                && !matches!(last_expr.kind, AstNodeKind::ExpressionStatement(_))
+                && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
             {
                 check_for_escape(
                     analyzer,
@@ -120,7 +118,7 @@ fn check_for_escape(
                 );
             }
         },
-        AstNodeKind::IfStatement {
+        MIRNodeKind::IfStatement {
             then_branch,
             else_if_branches,
             else_branch,
@@ -156,11 +154,11 @@ fn check_for_escape(
     }
 }
 
-fn get_base_variable(place: &AstNode) -> Option<ValueSymbolId> {
+fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
     match &place.kind {
-        AstNodeKind::Identifier(_) => place.value_id,
-        AstNodeKind::FieldAccess { left, .. } => get_base_variable(left),
-        AstNodeKind::UnaryOperation { operator, .. } if *operator == Operation::Dereference => None,
+        MIRNodeKind::Identifier(_) => place.value_id,
+        MIRNodeKind::FieldAccess { left, .. } => get_base_variable(left),
+        MIRNodeKind::UnaryOperation { operator, .. } if *operator == Operation::Dereference => None,
         _ => None,
     }
 }

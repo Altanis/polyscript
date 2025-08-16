@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::{
-    frontend::semantics::analyzer::{PrimitiveKind, SymbolTable, Type, TypeSymbolKind, ValueSymbolId},
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, TypeSymbolKind, ValueSymbolId},
     utils::kind::*,
 };
 use colored::Colorize;
@@ -114,7 +114,8 @@ pub struct MIRNode {
     pub kind: MIRNodeKind,
     pub span: Span,
     pub value_id: Option<ValueSymbolId>,
-    pub type_id: Option<Type>
+    pub type_id: Option<Type>,
+    pub scope_id: ScopeId
 }
 
 impl MIRNode {

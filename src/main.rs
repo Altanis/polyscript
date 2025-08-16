@@ -87,7 +87,7 @@ fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyze
     (builder, program)
 }
 
-fn optimize(program: &mut AstNode, analyzer: &mut SemanticAnalyzer) {
+fn optimize(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
     escape_analysis::init(program, analyzer);
 }
 
@@ -153,10 +153,11 @@ fn test_main_script() {
                 println!("{}", format_str);
             }
 
-            let (ir_builder, mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
-
+            let (ir_builder, mut mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
             let ir_builder_str = format!("{}", ir_builder);
             std::mem::drop(ir_builder);
+
+            optimize(&mut mir_program, &mut analyzer);
 
             println!("--- SEMANTIC ANALYZER ---");
             println!("{}", analyzer);
@@ -169,7 +170,6 @@ fn test_main_script() {
             let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
             println!("{}", format_str);
 
-            optimize(&mut program, &mut analyzer);
             compile_ast(program, &analyzer);
         }
     }
@@ -277,7 +277,8 @@ fn test_escape_analysis() {
     let (lined_source, tokens) = generate_tokens(code.to_string());
     let program = parse_tokens(lined_source.clone(), tokens);
     let (mut program, mut analyzer) = analyze_ast(lined_source, program);
-    optimize(&mut program, &mut analyzer);
+    let (_, mut mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
+    optimize(&mut mir_program, &mut analyzer);
 
     let expected = [
         ("f",              crate::frontend::semantics::analyzer::AllocationKind::Heap),

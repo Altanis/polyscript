@@ -301,7 +301,8 @@ impl<'a> MIRBuilder<'a> {
             kind: MIRNodeKind::Program(mir_stmts),
             span: program.span,
             value_id: None,
-            type_id: None
+            type_id: None,
+            scope_id: 0
         }
     }
 
@@ -570,6 +571,7 @@ impl<'a> MIRBuilder<'a> {
                             span: param_node.span,
                             value_id: Some(param_value_id),
                             type_id: Some(param_type.clone()),
+                            scope_id: node.scope_id.unwrap()
                         });
                     }
 
@@ -596,6 +598,7 @@ impl<'a> MIRBuilder<'a> {
                         span: node.span,
                         value_id: Some(concrete_fn_value_id),
                         type_id: Some(Type::new_base(concrete_fn_sig_id)),
+                        scope_id: node.scope_id.unwrap()
                     });
                 }
 
@@ -646,6 +649,7 @@ impl<'a> MIRBuilder<'a> {
                         span: function.span,
                         value_id: Some(mir_fn_value_id),
                         type_id: Some(mir_fn_type),
+                        scope_id: node.scope_id.unwrap()
                     }
                 } else {
                     MIRNode {
@@ -653,6 +657,7 @@ impl<'a> MIRBuilder<'a> {
                         span: function.span,
                         value_id: Some(mir_fn_value_id),
                         type_id: Some(mir_fn_type),
+                        scope_id: node.scope_id.unwrap()
                     }
                 };
                 
@@ -702,7 +707,8 @@ impl<'a> MIRBuilder<'a> {
                         kind: MIRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
                         span: node.span,
                         value_id: node.value_id,
-                        type_id: Some(Type::new_base(new_type_symbol_id))
+                        type_id: Some(Type::new_base(new_type_symbol_id)),
+                        scope_id: node.scope_id.unwrap()
                     });
                 } else if generic_parameters.is_empty() {
                     MIRNodeKind::StructDeclaration {
@@ -740,7 +746,8 @@ impl<'a> MIRBuilder<'a> {
                         kind,
                         span: node.span,
                         value_id: Some(new_value_symbol_id),
-                        type_id: Some(concrete_field_type.clone())
+                        type_id: Some(concrete_field_type.clone()),
+                        scope_id: node.scope_id.unwrap()
                     });
                 } else {
                     kind
@@ -764,6 +771,7 @@ impl<'a> MIRBuilder<'a> {
                         span: node.span,
                         value_id: None,
                         type_id: Some(Type::new_base(concrete_type_symbol_id)),
+                        scope_id: node.scope_id.unwrap(),
                         kind: MIRNodeKind::StructLiteral {
                             name: mangled_name,
                             fields: fields
@@ -840,6 +848,7 @@ impl<'a> MIRBuilder<'a> {
             span: node.span,
             value_id: node.value_id,
             type_id: node.type_id.clone(),
+            scope_id: node.scope_id.unwrap()
         })
     }
 }
