@@ -73,6 +73,19 @@ impl<'a> MIRBuilder<'a> {
         template_ty: &Type,
         substitutions: &mut HashMap<TypeSymbolId, Type>,
     ) {
+        if let Type::Base { symbol: template_symbol, .. } = template_ty {
+            let template_type_symbol = self
+                .analyzer
+                .symbol_table
+                .get_type_symbol(*template_symbol)
+                .unwrap();
+
+            if let TypeSymbolKind::Generic(_) = template_type_symbol.kind {
+                substitutions.insert(*template_symbol, concrete_ty.clone());
+                return;
+            }
+        }
+
         match (concrete_ty, template_ty) {
             (
                 Type::Base {
@@ -84,17 +97,6 @@ impl<'a> MIRBuilder<'a> {
                     args: template_args,
                 },
             ) => {
-                let template_type_symbol = self
-                    .analyzer
-                    .symbol_table
-                    .get_type_symbol(*template_symbol)
-                    .unwrap();
-
-                if let TypeSymbolKind::Generic(_) = template_type_symbol.kind {
-                    substitutions.insert(*template_symbol, concrete_ty.clone());
-                    return;
-                }
-
                 if concrete_symbol == template_symbol && concrete_args.len() == template_args.len() {
                     for (c_arg, t_arg) in concrete_args.iter().zip(template_args.iter()) {
                         self.collect_generic_mappings(c_arg, t_arg, substitutions);
@@ -103,6 +105,7 @@ impl<'a> MIRBuilder<'a> {
             },
             (Type::Reference(c_inner), Type::Reference(t_inner))
                 | (Type::MutableReference(c_inner), Type::MutableReference(t_inner))
+                | (Type::MutableReference(c_inner), Type::Reference(t_inner))
             => {
                 self.collect_generic_mappings(c_inner, t_inner, substitutions);
             },
