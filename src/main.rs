@@ -151,9 +151,6 @@ fn test_main_script() {
                 let mut format_str = String::new();
                 let _ = program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
                 println!("{}", format_str);
-
-                println!("--- SEMANTIC ANALYZER ---");
-                println!("{}", analyzer);
             }
 
             let (ir_builder, mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
@@ -165,6 +162,9 @@ fn test_main_script() {
             let mut format_str = String::new();
             let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
             println!("{}", format_str);
+
+            println!("--- SEMANTIC ANALYZER ---");
+            println!("{}", analyzer);
 
             optimize(&mut program, &mut analyzer);
             compile_ast(program, &analyzer);
