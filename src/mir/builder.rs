@@ -479,14 +479,20 @@ impl<'a> MIRBuilder<'a> {
                     let template_fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*template_fn_sig_id).unwrap().clone();
                     let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return_type, .. } = &template_fn_sig_symbol.kind else { unreachable!() };
 
-                    let mangled_name = self.mangle_name(template_type.get_base_symbol(), substitutions.values());
+                    let mangled_name = self.mangle_name(template_fn_sig_symbol.id, substitutions.values());
                     let parent_scope_id = self.analyzer.symbol_table.get_scope(template_value_symbol.scope_id).unwrap().id;
                     if self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).is_some() {
                         return None;
                     }
 
-                    let concrete_params: Vec<Type> = template_params.iter().map(|p| Self::substitute_type(p, &substitutions)).collect();
-                    let concrete_return_type = Self::substitute_type(template_return_type, &substitutions);
+                    let concrete_params_unresolved: Vec<Type> = template_params.iter().map(|p| Self::substitute_type(p, &substitutions)).collect();
+                    let concrete_return_type_unresolved = Self::substitute_type(template_return_type, &substitutions);
+
+                    let concrete_params: Vec<Type> = concrete_params_unresolved
+                        .iter()
+                        .map(|p| self.resolve_concrete_type_recursively(p))
+                        .collect();
+                    let concrete_return_type = self.resolve_concrete_type_recursively(&concrete_return_type_unresolved);
 
                     let original_scope = self.analyzer.symbol_table.current_scope_id;
                     self.analyzer.symbol_table.current_scope_id = parent_scope_id;
@@ -835,7 +841,7 @@ impl<'a> MIRBuilder<'a> {
 
         if let MIRNodeKind::Function { .. } = &node.kind
             && let Some(fn_id) = node.value_id
-            && let Some((_template_id, subs)) = self.fn_template_map.get(&fn_id)
+            && let Some((_, subs)) = self.fn_template_map.get(&fn_id)
         {
             is_new_context = true;
             old_subs = self.concretize_substitutions.replace(subs.clone());
@@ -849,6 +855,14 @@ impl<'a> MIRBuilder<'a> {
             self.concretize_node(child);
         }
         
+        if let Some(ty) = &mut node.type_id {
+            let mut resolved_ty = ty.clone();
+            if let Some(subs) = &self.concretize_substitutions {
+                resolved_ty = Self::substitute_type(&resolved_ty, subs);
+            }
+            *ty = self.resolve_concrete_type_recursively(&resolved_ty);
+        }
+
         if let Some(subs) = &self.concretize_substitutions {
             if let Some(ty) = &mut node.type_id {
                 let substituted = Self::substitute_type(ty, subs);
