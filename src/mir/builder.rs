@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolKind},
+        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{MIRNode, MIRNodeKind},
@@ -19,14 +19,26 @@ pub struct MonomorphizationContext {
 
 pub struct MIRBuilder<'a> {
     analyzer: &'a mut SemanticAnalyzer,
-    monomorphization_ctx: MonomorphizationContext
+    monomorphization_ctx: MonomorphizationContext,
+
+    fn_template_map: HashMap<ValueSymbolId, (ValueSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>,
+    fn_param_remaps: HashMap<ValueSymbolId, HashMap<ValueSymbolId, ValueSymbolId>>,
+    struct_template_map: HashMap<TypeSymbolId, (TypeSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>,
+
+    concretize_substitutions: Option<Rc<BTreeMap<TypeSymbolId, Type>>>,
+    concretize_value_remap: HashMap<ValueSymbolId, ValueSymbolId>
 }
 
 impl<'a> MIRBuilder<'a> {
     pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
         Self {
             analyzer,
-            monomorphization_ctx: MonomorphizationContext::default()
+            monomorphization_ctx: MonomorphizationContext::default(),
+            fn_template_map: HashMap::new(),
+            fn_param_remaps: HashMap::new(),
+            struct_template_map: HashMap::new(),
+            concretize_substitutions: None,
+            concretize_value_remap: HashMap::new(),
         }
     }
 }
@@ -494,6 +506,8 @@ impl<'a> MIRBuilder<'a> {
                     let new_fn_body_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Function);
 
                     let mut mir_params = vec![];
+                    let mut param_remap = HashMap::new();
+
                     for (i, param_node) in parameters.iter_mut().enumerate() {
                         let AstNodeKind::FunctionParameter { name: param_name, mutable, .. } = &param_node.kind else { unreachable!() };
                         
@@ -506,6 +520,8 @@ impl<'a> MIRBuilder<'a> {
                             Some(param_type.clone()),
                             Some(param_node.span),
                         ).unwrap();
+
+                        param_remap.insert(param_node.value_id.unwrap(), param_value_id);
                         
                         mir_params.push(MIRNode {
                             kind: MIRNodeKind::FunctionParameter {
@@ -530,6 +546,9 @@ impl<'a> MIRBuilder<'a> {
                         Some(Type::new_base(concrete_fn_sig_id)),
                         Some(node.span),
                     ).unwrap();
+
+                    self.fn_template_map.insert(concrete_fn_value_id, (template_value_symbol.id, substitutions.clone()));
+                    self.fn_param_remaps.insert(concrete_fn_value_id, param_remap);
 
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
@@ -609,7 +628,7 @@ impl<'a> MIRBuilder<'a> {
             },
 
             AstNodeKind::StructDeclaration { name, fields, generic_parameters } => {
-                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx {
+                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
                     let template_symbol = self.analyzer.symbol_table.find_type_symbol_in_scope(name, node.scope_id.unwrap()).unwrap().clone();
                     let declaration_scope_id = template_symbol.scope_id;
 
@@ -637,6 +656,7 @@ impl<'a> MIRBuilder<'a> {
                         Some(node.span),
                     ).unwrap();
 
+                    self.struct_template_map.insert(new_type_symbol_id, (template_symbol.id, substitutions.clone()));
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
                     return Some(MIRNode {
@@ -784,20 +804,85 @@ impl<'a> MIRBuilder<'a> {
 }
 
 impl<'a> MIRBuilder<'a> {
+    fn resolve_concrete_type_recursively(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Base { symbol, args } => {
+                let new_args: Vec<_> = args.iter().map(|a| self.resolve_concrete_type_recursively(a)).collect();
+                
+                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                if !type_symbol.generic_parameters.is_empty() && !new_args.is_empty()
+                    && new_args.iter().all(|a| self.type_is_fully_concrete(a))
+                {
+                    let mangled_name = self.mangle_name(*symbol, &new_args);
+                    let decl_scope_id = self.analyzer.symbol_table.get_scope(type_symbol.scope_id).unwrap().id;
+                    
+                    if let Some(concrete_symbol) = self.analyzer.symbol_table.find_type_symbol_from_scope(decl_scope_id, &mangled_name) {
+                        return Type::new_base(concrete_symbol.id);
+                    }
+                }
+                
+                Type::Base { symbol: *symbol, args: new_args }
+            },
+            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_concrete_type_recursively(inner))),
+            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_concrete_type_recursively(inner))),
+        }
+    }
+
     fn concretize_node(&mut self, node: &mut MIRNode) {
+        let mut old_subs = None;
+        let mut old_remap = HashMap::new();
+        let mut is_new_context = false;
+
+        if let MIRNodeKind::Function { .. } = &node.kind
+            && let Some(fn_id) = node.value_id
+            && let Some((_template_id, subs)) = self.fn_template_map.get(&fn_id)
+        {
+            is_new_context = true;
+            old_subs = self.concretize_substitutions.replace(subs.clone());
+            
+            if let Some(param_map) = self.fn_param_remaps.get(&fn_id) {
+                old_remap = std::mem::replace(&mut self.concretize_value_remap, param_map.clone());
+            }
+        }
+
         for child in node.children_mut() {
             self.concretize_node(child);
         }
+        
+        if let Some(subs) = &self.concretize_substitutions {
+            if let Some(ty) = &mut node.type_id {
+                let substituted = Self::substitute_type(ty, subs);
+                *ty = self.resolve_concrete_type_recursively(&substituted);
+            }
 
-        /* REQUIREMENTS:
-         * 1. Types that contain generic templates must map to the corresponding monomorph.
-            * Scalar<int> => speciifc monomorph for Scalar when T = int
-            * fn(&Scalar<int>): int => recursive searching through a type to find Scalar<int>. if needed, create a new type and use that id for the node
-            * Scalar<T> => ignore for now
-         * 2. Values must be replaced properly.
-            * A ValueSymbolId pointing to a struct field on a generic struct. Map to the correct monomorph. Ensure type is updated properly
-            * A ValuieSymbolId pointing to a parameter in a generic function. Map to the correct parameter. Ensure type is updated.
-         */
+            if let Some(val_id) = &mut node.value_id && let Some(remapped_id) = self.concretize_value_remap.get(val_id) {
+                *val_id = *remapped_id;
+            }
+        }
+        
+        if let MIRNodeKind::FieldAccess { left, .. } = &mut node.kind {
+            let mut base_ty = left.type_id.as_ref().unwrap();
+            while let Type::Reference(inner) | Type::MutableReference(inner) = base_ty {
+                base_ty = inner;
+            }
+            let Type::Base { symbol: concrete_struct_id, .. } = base_ty else { return; };
+            let concrete_struct_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_struct_id).unwrap();
+            let TypeSymbolKind::Struct((scope_id, _)) = concrete_struct_symbol.kind else { return; };
+            
+            let generic_field_id = node.value_id.unwrap();
+            let generic_field_symbol = self.analyzer.symbol_table.get_value_symbol(generic_field_id).unwrap();
+            let field_name = self.analyzer.symbol_table.get_value_name(generic_field_symbol.name_id);
+            
+            let concrete_field_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(scope_id, field_name).unwrap().clone();
+            
+            node.value_id = Some(concrete_field_symbol.id);
+            node.type_id = concrete_field_symbol.type_id.clone();
+        }
+
+        if is_new_context {
+            self.concretize_substitutions = old_subs;
+            self.concretize_value_remap = old_remap;
+        }
     }
 
     fn concretize_ids(&mut self, program: &mut MIRNode) {
