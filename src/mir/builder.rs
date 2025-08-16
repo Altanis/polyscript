@@ -789,39 +789,15 @@ impl<'a> MIRBuilder<'a> {
             self.concretize_node(child);
         }
 
-        if let Some(ty) = &node.type_id {
-            node.type_id = Some(self.resolve_concrete_type(ty));
-        }
-    }
-
-    fn resolve_concrete_type(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Base { symbol, args } => {
-                let resolved_args: Vec<Type> = args.iter().map(|arg| self.resolve_concrete_type(arg)).collect();
-                if resolved_args.is_empty() {
-                    return ty.clone();
-                }
-
-                let template_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                
-                if !matches!(template_symbol.kind, TypeSymbolKind::Struct(_) | TypeSymbolKind::FunctionSignature {..}) {
-                    return Type::Base { symbol: *symbol, args: resolved_args };
-                }
-
-                let mangled_name = self.mangle_name(*symbol, &resolved_args);
-
-                let scope = self.analyzer.symbol_table.get_scope(template_symbol.scope_id).unwrap();
-                let parent_scope_id = scope.parent.unwrap_or(template_symbol.scope_id);
-
-                if let Some(concrete_symbol) = self.analyzer.symbol_table.find_type_symbol_from_scope(parent_scope_id, &mangled_name) {
-                    return Type::new_base(concrete_symbol.id);
-                }
-
-                Type::Base { symbol: *symbol, args: resolved_args }
-            },
-            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_concrete_type(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_concrete_type(inner)))
-        }
+        /* REQUIREMENTS:
+         * 1. Types that contain generic templates must map to the corresponding monomorph.
+            * Scalar<int> => speciifc monomorph for Scalar when T = int
+            * fn(&Scalar<int>): int => recursive searching through a type to find Scalar<int>. if needed, create a new type and use that id for the node
+            * Scalar<T> => ignore for now
+         * 2. Values must be replaced properly.
+            * A ValueSymbolId pointing to a struct field on a generic struct. Map to the correct monomorph. Ensure type is updated properly
+            * A ValuieSymbolId pointing to a parameter in a generic function. Map to the correct parameter. Ensure type is updated.
+         */
     }
 
     fn concretize_ids(&mut self, program: &mut MIRNode) {
