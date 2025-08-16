@@ -155,16 +155,19 @@ fn test_main_script() {
 
             let (ir_builder, mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
 
+            let ir_builder_str = format!("{}", ir_builder);
+            std::mem::drop(ir_builder);
+
+            println!("--- SEMANTIC ANALYZER ---");
+            println!("{}", analyzer);
+
             println!("--- MIR BUILDER ---");
-            println!("{}", ir_builder);
+            println!("{}", ir_builder_str);
 
             println!("--- MIR PROGRAM ---");
             let mut format_str = String::new();
             let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
             println!("{}", format_str);
-
-            println!("--- SEMANTIC ANALYZER ---");
-            println!("{}", analyzer);
 
             optimize(&mut program, &mut analyzer);
             compile_ast(program, &analyzer);

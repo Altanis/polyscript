@@ -1,0 +1,35 @@
+struct Scalar<T> {
+    x: T;
+}
+
+trait Numeric<T> {
+    fn get_number(&self): T;
+}
+
+impl<T> Scalar<T> {
+    fn new(x: T): Self {
+        Scalar { x }
+    }
+
+    fn get_num(&self): T {
+        self.x
+    }
+}
+
+impl<T> Numeric<T> for Scalar<T> {
+    fn get_number(&self): T {
+        self.x
+    }
+}
+
+let scalar = Scalar { x: 4 };
+let num = scalar.get_num(); // should invoke get_num (parent: [int])
+
+let s2 = Scalar { x: "84" };
+let num2 = s2.get_number(); // should invoke get_number (parent: [string])
+
+fn identity1<T>(x: T): T { x }
+fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
+
+let clone = identity1([Scalar<char>].new('5'));
+let clone2 = identity2(Scalar { x: true });
