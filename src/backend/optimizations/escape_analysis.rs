@@ -3,15 +3,22 @@ use crate::{
             AllocationKind, ScopeKind, SemanticAnalyzer, ValueSymbolId, ValueSymbolKind,
         },
     mir::ir_node::{MIRNode, MIRNodeKind},
-    utils::{error::Error, kind::Operation}
+    utils::{error::{Error, BoxedError, ErrorKind}, kind::Operation}
 };
 
 pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error> {
-    let errors = vec![];
+    let mut errors = vec![];
 
     loop {
-        if !analysis_pass(analyzer, program) {
-            break;
+        match analysis_pass(analyzer, program) {
+            Ok(changed) => {
+                if !changed {
+                    break;
+                }
+            },
+            Err(e) => {
+                errors.push(*e);
+            }
         }
     }
 
@@ -24,19 +31,20 @@ pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error
     errors
 }
 
-fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> bool {
+fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<bool, BoxedError> {
     let mut changed = false;
 
     for child in node.children_mut() {
-        if analysis_pass(analyzer, child) {
-            changed = true;
-        }
+        changed |= analysis_pass(analyzer, child)?;
     }
 
     match &mut node.kind {
         MIRNodeKind::Return(Some(expr)) => {
             if let Some(function_scope) = get_function_scope(analyzer, node.scope_id) {
-                check_for_escape(analyzer, expr, function_scope, true, &mut changed);
+                match check_for_escape(analyzer, expr, function_scope, true) {
+                    Ok(c) => changed |= c,
+                    Err(e) => return Err(e),
+                }
             }
         }
 
@@ -46,24 +54,31 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> bool {
                 && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
                 && let Some(function_scope) = get_function_scope(analyzer, node.scope_id)
             {
-                check_for_escape(analyzer, last_expr, function_scope, true, &mut changed);
+                match check_for_escape(analyzer, last_expr, function_scope, true) {
+                    Ok(c) => changed |= c,
+                    Err(e) => return Err(e),
+                }
             }
         }
 
         MIRNodeKind::VariableDeclaration { initializer, .. } => {
             let destination_scope = node.scope_id;
-            check_for_escape(analyzer, initializer, destination_scope, false, &mut changed);
+            match check_for_escape(analyzer, initializer, destination_scope, false) {
+                Ok(c) => changed |= c,
+                Err(e) => return Err(e),
+            }
 
-            if let MIRNodeKind::HeapExpression(_) = &initializer.kind
-                && move_to_heap(analyzer, node.value_id.unwrap())
-            {
-                changed = true;
+            if let MIRNodeKind::HeapExpression(_) = &initializer.kind {
+                 match move_to_heap(analyzer, node.value_id.unwrap()) {
+                    Ok(c) => changed |= c,
+                    Err(e) => return Err(e),
+                 }
             }
         }
         _ => {}
     }
 
-    changed
+    Ok(changed)
 }
 
 fn check_for_escape(
@@ -71,8 +86,8 @@ fn check_for_escape(
     expr: &mut MIRNode,
     destination_scope: usize,
     is_return_or_heap_assign: bool,
-    changed: &mut bool,
-) {
+) -> Result<bool, BoxedError> {
+    let mut changed = false;
     match &mut expr.kind {
         MIRNodeKind::Identifier(_) => {
             if let Some(var_id) = expr.value_id {
@@ -83,10 +98,11 @@ fn check_for_escape(
                     is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
                 };
 
-                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify
-                    && move_to_heap(analyzer, var_id)
-                {
-                    *changed = true;
+                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
+                    match move_to_heap(analyzer, var_id) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
+                    }
                 }
             }
         },
@@ -102,10 +118,11 @@ fn check_for_escape(
                     is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
                 };
 
-                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify
-                    && move_to_heap(analyzer, var_id)
-                {
-                    *changed = true;
+                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
+                    match move_to_heap(analyzer, var_id) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
+                    }
                 }
             }
         },
@@ -113,13 +130,12 @@ fn check_for_escape(
             if let Some(last_expr) = statements.last_mut()
                 && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
             {
-                check_for_escape(
+                changed |= check_for_escape(
                     analyzer,
                     last_expr,
                     destination_scope,
                     is_return_or_heap_assign,
-                    changed,
-                );
+                )?;
             }
         },
         MIRNodeKind::IfStatement {
@@ -128,45 +144,42 @@ fn check_for_escape(
             else_branch,
             ..
         } => {
-            check_for_escape(
+            changed |= check_for_escape(
                 analyzer,
                 then_branch,
                 destination_scope,
                 is_return_or_heap_assign,
-                changed,
-            );
+            )?;
             for (_, branch) in else_if_branches {
-                check_for_escape(
+                changed |= check_for_escape(
                     analyzer,
                     branch,
                     destination_scope,
                     is_return_or_heap_assign,
-                    changed,
-                );
+                )?;
             }
             if let Some(branch) = else_branch {
-                check_for_escape(
+                changed |= check_for_escape(
                     analyzer,
                     branch,
                     destination_scope,
                     is_return_or_heap_assign,
-                    changed,
-                );
+                )?;
             }
         },
         MIRNodeKind::FunctionCall { function: _, arguments } => {
             for arg in arguments {
-                check_for_escape(
+                changed |= check_for_escape(
                     analyzer,
                     arg,
                     destination_scope,
                     is_return_or_heap_assign,
-                    changed,
-                );
+                )?;
             }
         },
         _ => {}
     }
+    Ok(changed)
 }
 
 fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
@@ -178,14 +191,30 @@ fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
     }
 }
 
-fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> bool {
-    let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
-    if symbol.allocation_kind != AllocationKind::Heap {
-        symbol.allocation_kind = AllocationKind::Heap;
-        return true;
+fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Result<bool, BoxedError> {
+    let symbol_info = {
+        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+        (
+            symbol.kind,
+            symbol.allocation_kind,
+            symbol.name_id,
+            symbol.span,
+        )
+    };
+
+    if symbol_info.0 == ValueSymbolKind::Variable && symbol_info.1 != AllocationKind::Heap {
+        analyzer
+            .symbol_table
+            .get_value_symbol_mut(var_id)
+            .unwrap()
+            .allocation_kind = AllocationKind::Heap;
+
+        let name = analyzer.symbol_table.get_value_name(symbol_info.2).to_string();
+        let span = symbol_info.3.unwrap_or_default();
+        return Err(analyzer.create_error(ErrorKind::NeedsHeapAllocation(name), span, &[span]));
     }
 
-    false
+    Ok(false)
 }
 
 fn get_function_scope(analyzer: &SemanticAnalyzer, scope_id: usize) -> Option<usize> {
