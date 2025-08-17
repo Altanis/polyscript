@@ -820,7 +820,6 @@ impl SemanticAnalyzer {
         scope_id: ScopeId,
         type_name: &str,
         generic_types: &mut [AstNode],
-        reference_kind: &mut ReferenceKind,
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
@@ -846,14 +845,8 @@ impl SemanticAnalyzer {
 
         let base_symbol = Type::Base { symbol, args };
 
-        let constraint = match reference_kind {
-            ReferenceKind::Value => base_symbol,
-            ReferenceKind::Reference => Type::Reference(boxed!(base_symbol)),
-            ReferenceKind::MutableReference => Type::MutableReference(boxed!(base_symbol)),
-        };
-
         self.unification_context.register_constraint(
-            Constraint::Equality(Type::new_base(uv_id), constraint),
+            Constraint::Equality(Type::new_base(uv_id), base_symbol),
             info,
         );
 
@@ -1372,17 +1365,27 @@ impl SemanticAnalyzer {
             PathQualifier { .. } => {
                 return Err(self.create_error(ErrorKind::InvalidPathQualifier, expr.span, &[expr.span]))
             },
+            ReferenceType { mutable, inner } => {
+                let inner_type = self.collect_uvs(inner)?;
+                let ref_type = if *mutable {
+                    Type::MutableReference(Box::new(inner_type))
+                } else {
+                    Type::Reference(Box::new(inner_type))
+                };
+                self.unification_context.register_constraint(
+                    Constraint::Equality(uv.clone(), ref_type),
+                    info,
+                );
+            },
             TypeReference {
                 type_name,
                 generic_types,
-                reference_kind,
                 ..
             } => self.collect_uv_type_reference(
                 uv_id,
                 expr.scope_id.unwrap(),
                 type_name,
                 generic_types,
-                reference_kind,
                 expr.span,
                 info,
             )?,

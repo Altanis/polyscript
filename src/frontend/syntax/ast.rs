@@ -173,11 +173,14 @@ pub enum AstNodeKind {
         constraints: Vec<AstNode>,
     },
 
+    ReferenceType {
+        mutable: bool,
+        inner: BoxedAstNode,
+    },
     TypeReference {
         type_name: String,
         generic_types: Vec<AstNode>,
-        reference_kind: ReferenceKind,
-        generic_arguments: Vec<Type>
+        generic_arguments: Vec<Type>,
     },
     TypeDeclaration {
         name: String,
@@ -240,6 +243,7 @@ impl AstNode {
 
             AstNodeKind::GenericParameter { name, .. } => Some(name.clone()),
 
+            AstNodeKind::ReferenceType { inner, .. } => inner.get_name(),
             AstNodeKind::TypeReference { type_name, .. } => Some(type_name.clone()),
             AstNodeKind::TypeDeclaration { name, .. } => Some(name.clone()),
 
@@ -693,18 +697,20 @@ impl AstNode {
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
+            AstNodeKind::ReferenceType { mutable, inner } => {
+                write!(f, "{}", indent_str)?;
+                if *mutable {
+                    write!(f, "&mut ")?;
+                } else {
+                    write!(f, "&")?;
+                }
+                inner.fmt_with_indent(f, 0, table)?;
+            },
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,
-                reference_kind,
                 ..
             } => {
-                let type_name = match reference_kind {
-                    ReferenceKind::Value => type_name.clone(),
-                    ReferenceKind::MutableReference => format!("&mut {type_name}"),
-                    ReferenceKind::Reference => format!("&{type_name}"),
-                };
-
                 write!(f, "{}{}", indent_str, type_name.bright_blue())?;
                 if !generic_types.is_empty() {
                     write!(f, "[")?;
@@ -1144,6 +1150,7 @@ impl AstNode {
 
             TraitType(_) => vec![],
 
+            ReferenceType { inner, .. } => vec![inner.as_mut()],
             TypeReference { generic_types, .. } => generic_types.iter_mut().collect(),
 
             TypeDeclaration {
@@ -1457,6 +1464,7 @@ impl AstNode {
 
             TraitType(_) => vec![],
 
+            ReferenceType { inner, .. } => vec![inner.as_ref()],
             TypeReference { generic_types, .. } => generic_types.iter().collect(),
 
             TypeDeclaration {

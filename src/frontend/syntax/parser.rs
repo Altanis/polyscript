@@ -268,9 +268,20 @@ impl Parser {
     }
 
     fn parse_prefix(&mut self) -> Result<AstNode, BoxedError> {
+        if self.peek().get_token_kind() == TokenKind::Operator(Operation::And) {
+            let span = self.peek().get_span();
+            let amp = Token::new(
+                "&".to_string(),
+                TokenKind::Operator(Operation::BitwiseAnd),
+                span,
+            );
+            self.tokens[self.current] = amp.clone();
+            self.tokens.insert(self.current + 1, amp);
+        }
+
         let token = self.peek();
         let span = self.create_span_from_current_token();
-
+        
         match token.get_token_kind() {
             TokenKind::OpenBracket => {
                 return self.spanned_node(|parser| {
@@ -661,20 +672,37 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<AstNode, BoxedError> {
+        let start_span = self.peek().get_span();
+
+        if self.peek().get_token_kind() == TokenKind::Operator(Operation::And) {
+            let span = self.peek().get_span();
+            let amp = Token::new(
+                "&".to_string(),
+                TokenKind::Operator(Operation::BitwiseAnd),
+                span,
+            );
+            self.tokens[self.current] = amp.clone();
+            self.tokens.insert(self.current + 1, amp);
+        }
+
+        if self.match_token(TokenKind::Operator(Operation::BitwiseAnd)) {
+            let mutable = self.match_token(TokenKind::Keyword(KeywordKind::Mut));
+            let inner_type = self.parse_type()?;
+            let span = start_span.set_end_from_span(inner_type.span);
+            return Ok(AstNode {
+                kind: AstNodeKind::ReferenceType {
+                    mutable,
+                    inner: boxed!(inner_type),
+                },
+                span,
+                type_id: None,
+                value_id: None,
+                scope_id: None,
+                id: self.get_next_node_id(),
+            });
+        }
+
         self.spanned_node(|parser| {
-            let mut reference_kind = ReferenceKind::Value;
-
-            if parser.peek().get_token_kind() == TokenKind::Operator(Operation::BitwiseAnd) {
-                parser.advance();
-
-                if parser.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut) {
-                    parser.advance();
-                    reference_kind = ReferenceKind::MutableReference;
-                } else {
-                    reference_kind = ReferenceKind::Reference;
-                }
-            }
-
             let type_reference = parser.advance().clone();
 
             match type_reference.get_token_kind() {
@@ -708,8 +736,7 @@ impl Parser {
                         Ok(AstNodeKind::TypeReference {
                             type_name: type_reference.get_value().to_string(),
                             generic_types,
-                            reference_kind,
-                            generic_arguments: vec![]
+                            generic_arguments: vec![],
                         })
                     }
                 },
@@ -724,20 +751,21 @@ impl Parser {
                     Ok(AstNodeKind::TypeReference {
                         type_name: type_reference.get_value().to_string(),
                         generic_types,
-                        reference_kind,
-                        generic_arguments: vec![]
+                        generic_arguments: vec![],
                     })
                 },
                 TokenKind::Keyword(KeywordKind::Fn) => {
                     let mut params = vec![];
 
                     parser.consume(TokenKind::OpenParenthesis)?;
-                    loop {
-                        params.push(parser.parse_type()?);
-                        if parser.peek().get_token_kind() == TokenKind::Comma {
-                            parser.advance();
-                        } else {
-                            break;
+                    if parser.peek().get_token_kind() != TokenKind::CloseParenthesis {
+                        loop {
+                            params.push(parser.parse_type()?);
+                            if parser.peek().get_token_kind() == TokenKind::Comma {
+                                parser.advance();
+                            } else {
+                                break;
+                            }
                         }
                     }
                     parser.consume(TokenKind::CloseParenthesis)?;

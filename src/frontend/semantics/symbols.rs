@@ -6,7 +6,7 @@ use crate::{
     },
     utils::{
         error::*,
-        kind::{QualifierKind, ReferenceKind, Span},
+        kind::{QualifierKind, Span},
     },
 };
 use indexmap::IndexMap;
@@ -499,13 +499,9 @@ impl SemanticAnalyzer {
                 &[node.span],
             );
 
-            let AstNodeKind::TypeReference { type_name, generic_types, reference_kind, .. } = &constraint.kind else {
+            let AstNodeKind::TypeReference { type_name, generic_types, .. } = &constraint.kind else {
                 return Err(constraint_error);
             };
-
-            if *reference_kind != ReferenceKind::Value {
-                return Err(constraint_error);
-            }
 
             let mut scope_id = Some(self.symbol_table.current_scope_id);
             let mut type_symbol = None;
@@ -601,10 +597,17 @@ impl SemanticAnalyzer {
 
     fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
         match &mut node.kind {
+            AstNodeKind::ReferenceType { mutable, inner } => {
+                let inner_type = self.get_type_from_ast(inner)?;
+                Ok(if *mutable {
+                    Type::MutableReference(Box::new(inner_type))
+                } else {
+                    Type::Reference(Box::new(inner_type))
+                })
+            },
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,
-                reference_kind,
                 ..
             } => {
                 let args = generic_types
@@ -628,11 +631,7 @@ impl SemanticAnalyzer {
                     args,
                 };
 
-                Ok(match reference_kind {
-                    ReferenceKind::Value => base_type,
-                    ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
-                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
-                })
+                Ok(base_type)
             },
             AstNodeKind::FunctionPointer { params, return_type } => {
                 let param_types = params

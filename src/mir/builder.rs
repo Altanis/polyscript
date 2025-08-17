@@ -840,6 +840,7 @@ impl<'a> MIRBuilder<'a> {
             | AstNodeKind::TraitConstant { .. }
             | AstNodeKind::TraitType(_)
             | AstNodeKind::PathQualifier { .. }
+            | AstNodeKind::ReferenceType { .. }
             | AstNodeKind::TypeReference { .. }
             | AstNodeKind::FunctionPointer { .. }
             | AstNodeKind::SelfType(_)
