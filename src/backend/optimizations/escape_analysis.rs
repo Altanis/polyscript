@@ -3,10 +3,12 @@ use crate::{
             AllocationKind, ScopeKind, SemanticAnalyzer, ValueSymbolId, ValueSymbolKind,
         },
     mir::ir_node::{MIRNode, MIRNodeKind},
-    utils::kind::Operation
+    utils::{error::Error, kind::Operation}
 };
 
-pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
+pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error> {
+    let errors = vec![];
+
     loop {
         if !analysis_pass(analyzer, program) {
             break;
@@ -18,6 +20,8 @@ pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
             symbol.allocation_kind = AllocationKind::Stack;
         }
     }
+
+    errors
 }
 
 fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> bool {

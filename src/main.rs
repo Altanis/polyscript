@@ -88,7 +88,15 @@ fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyze
 }
 
 fn optimize(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
-    escape_analysis::init(program, analyzer);
+    let errs = escape_analysis::init(program, analyzer);
+    if !errs.is_empty() {
+        println!("{} errors emitted... printing:", errs.len());
+        for err in errs {
+            eprintln!("{}", err);
+        }
+
+        std::process::exit(1);
+    }
 }
 
 fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {

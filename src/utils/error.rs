@@ -59,7 +59,8 @@ pub enum ErrorKind {
     MutatingImmutableData(String),
     ExpectedValue,
     PrivateMemberAccess(String, String),
-    VariableOfVoidType
+    VariableOfVoidType,
+    NeedsHeapAllocation(String)
 }
 
 impl ErrorKind {
@@ -180,7 +181,8 @@ impl ErrorKind {
             ErrorKind::MutatingImmutableData(ident) => format!("cannot mutable immutable data {ident}"),
             ErrorKind::ExpectedValue => "expected a value".to_string(),
             ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty),
-            ErrorKind::VariableOfVoidType => "variable cannot take on void type".to_string()
+            ErrorKind::VariableOfVoidType => "variable cannot take on void type".to_string(),
+            ErrorKind::NeedsHeapAllocation(value_symbol) => format!("{value_symbol} needs to be heap allocated")
         }
     }
 }
