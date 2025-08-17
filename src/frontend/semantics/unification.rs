@@ -208,6 +208,25 @@ impl SemanticAnalyzer {
             }
         }
     }
+
+    fn check_and_disallow_mut_str(&mut self, ty: &Type, info: ConstraintInfo) -> Result<(), BoxedError> {
+        let resolved_ty = self.resolve_type(ty);
+        if let Type::MutableReference(inner) = resolved_ty {
+            let resolved_inner = self.resolve_type(&inner);
+            if let Type::Base { symbol, .. } = resolved_inner
+                && let Some(type_symbol) = self.symbol_table.get_type_symbol(symbol)
+                && matches!(type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::StaticString))
+            {
+                return Err(self.create_error(
+                    ErrorKind::MutatingImmutableData("[variable is of a static type, str]".to_string()),
+                    info.span,
+                    &[info.span],
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl SemanticAnalyzer {
@@ -486,6 +505,8 @@ impl SemanticAnalyzer {
         ty: Type,
         info: ConstraintInfo,
     ) -> Result<Type, BoxedError> {
+        self.check_and_disallow_mut_str(&ty, info)?;
+
         if self.occurs_check(uv_id, &ty) {
             return Err(self.type_mismatch_error(
                 &Type::new_base(uv_id),
@@ -1255,6 +1276,9 @@ impl SemanticAnalyzer {
     }
 
     fn unify(&mut self, t1: Type, t2: Type, info: ConstraintInfo) -> Result<Type, BoxedError> {
+        self.check_and_disallow_mut_str(&t1, info)?;
+        self.check_and_disallow_mut_str(&t2, info)?;
+
         let t1 = self.resolve_type(&t1);
         let t2 = self.resolve_type(&t2);
 
