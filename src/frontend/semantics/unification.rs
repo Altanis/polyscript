@@ -420,27 +420,27 @@ impl SemanticAnalyzer {
     /// Recursively resolves a type by applying substitutions for unification variables
     /// and expanding type aliases until a concrete type or a unification variable is reached.
     fn resolve_type(&mut self, ty: &Type) -> Type {
-        let uc_substitutions = self.unification_context.substitutions.clone();
-        let mut current_ty = self.apply_substitution(ty, &uc_substitutions);
+        let mut current_ty = ty.clone();
 
         loop {
-            let Type::Base { symbol, args } = &current_ty else { break; };
+            let original_ty_in_loop = current_ty.clone();
 
-            if self.is_uv(*symbol) {
-                break;
+            let uc_substitutions = self.unification_context.substitutions.clone();
+            current_ty = self.apply_substitution(&current_ty, &uc_substitutions);
+
+            if let Type::Base { symbol, args } = &current_ty && !self.is_uv(*symbol) {
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
+                if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &type_symbol.kind {
+                    let substitutions = self.create_generic_substitution_map(
+                        &type_symbol.generic_parameters,
+                        args,
+                    );
+
+                    current_ty = self.apply_substitution(aliased_type, &substitutions);
+                }
             }
 
-            let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
-
-            if let TypeSymbolKind::TypeAlias((_, Some(aliased_type))) = &type_symbol.kind {
-                let substitutions = self.create_generic_substitution_map(
-                    &type_symbol.generic_parameters,
-                    args
-                );
-
-                let substituted_alias = self.apply_substitution(aliased_type, &substitutions);
-                current_ty = self.apply_substitution(&substituted_alias, &uc_substitutions);
-            } else {
+            if current_ty == original_ty_in_loop {
                 break;
             }
         }
@@ -1325,6 +1325,10 @@ impl SemanticAnalyzer {
             (Type::MutableReference(inner1), Type::MutableReference(inner2)) => {
                 let unified = self.unify(*inner1, *inner2, info)?;
                 Ok(Type::MutableReference(Box::new(unified)))
+            },
+            (Type::MutableReference(p_inner), Type::Reference(e_inner)) => {
+                let unified_inner = self.unify(*p_inner, *e_inner, info)?;
+                Ok(Type::Reference(Box::new(unified_inner)))
             },
 
             (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),

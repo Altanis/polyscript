@@ -223,7 +223,7 @@ impl SemanticAnalyzer {
         if let Some(annot) = type_annotation {
             let annot_type = self.collect_uvs(annot)?;
 
-            self.unification_context.register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::Equality(init_type, annot_type.clone()), info);
             self.unification_context.register_constraint(Constraint::NonVoidEquality(symbol_uv.clone(), annot_type), info);
         } else {
             self.unification_context.register_constraint(Constraint::NonVoidEquality(symbol_uv.clone(), init_type), info);

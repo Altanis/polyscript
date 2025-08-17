@@ -14,11 +14,6 @@ fn modifies_ref(r: &mut int) {
     *r = 1;
 }
 
-fn test15() {
-    let q15 = 700;
-    modifies_ref(&mut q15);
-}
-
 fn test16(cond: bool): &int {
     let a16: int = 800;
     let b16: int = 801;
