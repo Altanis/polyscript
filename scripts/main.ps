@@ -1,27 +1,13 @@
-// refine escape analysis + emit errors
-// can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // builder doesn't handle iife ( (fn() {})() )
 // [Scalar<int>].new("%") works for some reason
 // compiler thinks let num = (Scalar { x: 4 }).get_num(); is static access
-// separate strings from primitives
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
 // stdlib
 // arrays + vectors + Indexable trait
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
 
-// why dis compile?
-/*struct Struct {}
-
-fn x(y: &Struct) {
-    let z: Struct = *y;
-    let a: &mut Struct = &mut z;
-}*/
-
-/*fn mets(): int {
-    let escapee = 5;
-    escapee
-}*/
-
-let x = "y";
-let z = &mut x;
+fn mets(): &str {
+    let escapee = "5";
+    &escapee
+}

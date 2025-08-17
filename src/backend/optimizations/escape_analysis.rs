@@ -1,10 +1,26 @@
 use crate::{
     frontend::semantics::analyzer::{
-            AllocationKind, ScopeKind, SemanticAnalyzer, ValueSymbolId, ValueSymbolKind,
+            AllocationKind, PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind
         },
     mir::ir_node::{MIRNode, MIRNodeKind},
-    utils::{error::{Error, BoxedError, ErrorKind}, kind::Operation}
+    utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
 };
+
+fn is_primitive(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
+    if let Type::Base { symbol, .. } = ty && let Some(type_symbol) = analyzer.symbol_table.get_type_symbol(*symbol) {
+        return matches!(type_symbol.kind, TypeSymbolKind::Primitive(_));
+    }
+
+    false
+}
+
+fn is_str_primitive(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
+    if let Type::Base { symbol, .. } = ty && let Some(type_symbol) = analyzer.symbol_table.get_type_symbol(*symbol) {
+        return matches!(type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::StaticString));
+    }
+
+    false
+}
 
 pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error> {
     let mut errors = vec![];
@@ -99,9 +115,12 @@ fn check_for_escape(
                 };
 
                 if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
-                    match move_to_heap(analyzer, var_id) {
-                        Ok(c) => changed |= c,
-                        Err(e) => return Err(e),
+                    let symbol_type = symbol.type_id.as_ref().unwrap();
+                    if !is_primitive(analyzer, symbol_type) {
+                        match move_to_heap(analyzer, var_id) {
+                            Ok(c) => changed |= c,
+                            Err(e) => return Err(e),
+                        }
                     }
                 }
             }
@@ -119,9 +138,12 @@ fn check_for_escape(
                 };
 
                 if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
-                    match move_to_heap(analyzer, var_id) {
-                        Ok(c) => changed |= c,
-                        Err(e) => return Err(e),
+                    let symbol_type = symbol.type_id.as_ref().unwrap();
+                    if !is_primitive(analyzer, symbol_type) {
+                        match move_to_heap(analyzer, var_id) {
+                            Ok(c) => changed |= c,
+                            Err(e) => return Err(e),
+                        }
                     }
                 }
             }
