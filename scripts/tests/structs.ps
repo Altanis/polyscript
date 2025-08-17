@@ -28,7 +28,7 @@ impl Vector2D {
         return Vector2D { x, y };
     }
 
-    public fn do_nothing(this) {}
+    public fn do_nothing(&self) {}
 }
 
 let vector = Vector2D.new(3, 4).do_nothing();

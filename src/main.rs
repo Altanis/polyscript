@@ -191,10 +191,12 @@ fn assert_scripts_work() {
     for path in paths {
         println!("Asserting {} compiles well...", path.display());
 
-        let program = fs::read_to_string(&path).expect("Invalid source file.");
-        let (lined_source, tokens) = generate_tokens(program);
-        let _ = parse_tokens(lined_source.clone(), tokens);
-        // let (_, program) = analyze_tokens(lined_source, program_node);
+        let code = fs::read_to_string(&path).expect("Invalid source file.");
+        let (lined_source, tokens) = generate_tokens(code.to_string());
+        let program = parse_tokens(lined_source.clone(), tokens);
+        let (mut program, mut analyzer) = analyze_ast(lined_source, program);
+        let (_, mut mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
+        optimize(&mut mir_program, &mut analyzer);
 
         // println!("{}", program);
     }

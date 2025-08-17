@@ -144,6 +144,38 @@ impl Parser {
         self.parse_binding_power(Operation::Assign.binding_power().0)
     }
 
+    fn consume_generic_greater(&mut self) -> Result<(), BoxedError> {
+        use crate::utils::kind::{Operation, Token, TokenKind};
+
+        match self.peek().get_token_kind() {
+            TokenKind::Operator(Operation::GreaterThan) => {
+                self.advance();
+                Ok(())
+            },
+            TokenKind::Operator(Operation::RightBitShift) => {
+                let span = self.peek().get_span();
+                let gt = Token::new(">".to_string(), TokenKind::Operator(Operation::GreaterThan), span);
+
+                self.tokens[self.current] = gt.clone();
+                self.tokens.insert(self.current + 1, gt);
+
+                self.advance();
+                Ok(())
+            },
+            _ => {
+                let span = self.previous().get_span();
+                Err(self.generate_error(
+                    ErrorKind::UnexpectedToken(
+                        self.peek().get_value().to_string(),
+                        format!("{}", self.peek().get_token_kind()),
+                        format!("a token of type {}", TokenKind::Operator(Operation::GreaterThan)),
+                    ),
+                    span,
+                ))
+            }
+        }
+    }
+
     fn parse_binding_power(&mut self, min_bp: u8) -> Result<AstNode, BoxedError> {
         let mut lhs = self.parse_prefix()?;
 
@@ -1016,7 +1048,7 @@ impl Parser {
             }
         }
 
-        self.consume(TokenKind::Operator(Operation::GreaterThan))?;
+        self.consume_generic_greater()?;
 
         Ok(parameters)
     }
@@ -1040,7 +1072,7 @@ impl Parser {
             }
         }
 
-        self.consume(TokenKind::Operator(Operation::GreaterThan))?;
+        self.consume_generic_greater()?;
 
         Ok(types)
     }
