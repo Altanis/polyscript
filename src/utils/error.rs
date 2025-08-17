@@ -58,7 +58,8 @@ pub enum ErrorKind {
     UnusedGenericParameter(String),
     MutatingImmutableData(String),
     ExpectedValue,
-    PrivateMemberAccess(String, String)
+    PrivateMemberAccess(String, String),
+    VariableOfVoidType
 }
 
 impl ErrorKind {
@@ -178,7 +179,8 @@ impl ErrorKind {
             ErrorKind::UnusedGenericParameter(name) => format!("unused generic parameter `{}`", name),
             ErrorKind::MutatingImmutableData(ident) => format!("cannot mutable immutable data {ident}"),
             ErrorKind::ExpectedValue => "expected a value".to_string(),
-            ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty)
+            ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty),
+            ErrorKind::VariableOfVoidType => "variable cannot take on void type".to_string()
         }
     }
 }

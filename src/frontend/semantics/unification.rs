@@ -1213,6 +1213,25 @@ impl SemanticAnalyzer {
                 self.unify(t1, t2, info)?;
                 Ok(true)
             },
+            Constraint::NonVoidEquality(t1, t2) => {
+                let unified_type = self.unify(t1, t2, info)?;
+                let resolved_unified_type = self.resolve_type(&unified_type);
+
+                if self.type_contains_uvs(&resolved_unified_type) {
+                    return Ok(false);
+                }
+
+                let void_type_id = self.get_primitive_type(PrimitiveKind::Void);
+                if resolved_unified_type.get_base_symbol() == void_type_id {
+                    return Err(self.create_error(
+                        ErrorKind::VariableOfVoidType,
+                        info.span,
+                        &[info.span],
+                    ));
+                }
+                
+                Ok(true)
+            },
             Constraint::FunctionSignature(callee_ty, params, return_ty) => {
                 self.unify_function_signature(callee_ty, params, return_ty, info)
             },

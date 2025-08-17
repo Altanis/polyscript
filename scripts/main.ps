@@ -1,9 +1,9 @@
+// can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
+// builder doesn't handle iife ( (fn() {})() )
 // [Scalar<int>].new("%") works for some reason
 // compiler thinks let num = (Scalar { x: 4 }).get_num(); is static access
-// can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
 
-fn add<T: Add<T>>(x: T, y: T) {
-    x + y;
-}
+fn wow() {}
+let x = wow();

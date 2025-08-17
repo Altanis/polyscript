@@ -12,10 +12,6 @@ use crate::{
 };
 
 impl SemanticAnalyzer {
-    fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
-        self.builtin_types[primitive as usize]
-    }
-
     fn get_type_and_value_tuple(&self, scope_id: ScopeId, name: &str, span: Span) -> Result<(ValueSymbolId, Type), BoxedError> {
         match self.symbol_table.find_value_symbol_from_scope(scope_id, name) {
             Some(value_symbol) => match value_symbol.type_id.clone() {
@@ -228,9 +224,9 @@ impl SemanticAnalyzer {
             let annot_type = self.collect_uvs(annot)?;
 
             self.unification_context.register_constraint(Constraint::Equality(annot_type.clone(), init_type), info);
-            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), annot_type), info);
+            self.unification_context.register_constraint(Constraint::NonVoidEquality(symbol_uv.clone(), annot_type), info);
         } else {
-            self.unification_context.register_constraint(Constraint::Equality(symbol_uv.clone(), init_type), info);
+            self.unification_context.register_constraint(Constraint::NonVoidEquality(symbol_uv.clone(), init_type), info);
         }
 
         self.symbol_table

@@ -916,6 +916,8 @@ impl TraitRegistry {
 pub enum Constraint {
     /// Two types are equal.
     Equality(Type, Type),
+    /// Two types are equal, but they cannot be equal to void.
+    NonVoidEquality(Type, Type),
     /// A type denotes a function call on an instance.
     MethodCall(Type, Type, Vec<Type>, Type),
     /// A type denotes a function pointer.
@@ -1041,6 +1043,10 @@ impl SemanticAnalyzer {
             type_names_interner.map.remove(name_to_remove.as_ref());
             type_names_interner.vec[name_id] = Rc::from("[deleted_uv]");
         }
+    }
+
+    pub fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
+        self.builtin_types[primitive as usize]
     }
 
     pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
@@ -1368,6 +1374,13 @@ impl Constraint {
                         "{} {} {}",
                         self.t.display_type(lhs).yellow(),
                         "=".blue(),
+                        self.t.display_type(rhs).yellow()
+                    ),
+                    NonVoidEquality(lhs, rhs) => write!(
+                        f,
+                        "{} {} {} [non-void]",
+                        self.t.display_type(lhs).yellow(),
+                        "!".blue(),
                         self.t.display_type(rhs).yellow()
                     ),
                     MethodCall(instance, callee, ps, r) => {
