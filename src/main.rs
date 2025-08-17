@@ -269,8 +269,8 @@ fn test_escape_analysis() {
         }
         
         fn test9(): &int {
-            let val = 10;
-            return id(&val);
+            let ester = 10;
+            return id(&ester);
         }
         "#;
 
@@ -294,8 +294,10 @@ fn test_escape_analysis() {
         ("my_a",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("my_b",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("my_c",           crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("val",            crate::frontend::semantics::analyzer::AllocationKind::Heap)
+        ("ester",          crate::frontend::semantics::analyzer::AllocationKind::Heap)
     ];
+
+    println!("{}", analyzer.symbol_table);
 
     for (name, alloc_type) in expected {
         for (&id, _) in analyzer.symbol_table.scopes.iter() {

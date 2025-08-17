@@ -4,10 +4,3 @@
 // can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // generics need to be constrained to traits properly
 // memory safety (reference counting)
-
-fn id<T>(x: T): T {
-    return x;
-}
-
-let x = 5;
-id(&x);

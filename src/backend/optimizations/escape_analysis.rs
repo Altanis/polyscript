@@ -150,6 +150,17 @@ fn check_for_escape(
                 );
             }
         },
+        MIRNodeKind::FunctionCall { function: _, arguments } => {
+            for arg in arguments {
+                check_for_escape(
+                    analyzer,
+                    arg,
+                    destination_scope,
+                    is_return_or_heap_assign,
+                    changed,
+                );
+            }
+        },
         _ => {}
     }
 }
