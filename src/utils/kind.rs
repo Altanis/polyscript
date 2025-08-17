@@ -21,7 +21,7 @@ pub const FIELD_ACCESS_TOKEN: char = '.';
 pub const INT_TYPE: &str = "int";
 pub const FLOAT_TYPE: &str = "float";
 pub const BOOL_TYPE: &str = "bool";
-pub const STRING_TYPE: &str = "string";
+pub const STATIC_STRING_TYPE: &str = "str";
 pub const CHAR_TYPE: &str = "char";
 pub const VOID_TYPE: &str = "void"; // NOTE: Programs may not use this type.
 pub const NEVER_TYPE: &str = "never"; // NOTE: Programs may not use this type.
@@ -341,17 +341,14 @@ impl Operation {
                 | ImmutableAddressOf | MutableAddressOf | As => None,
             },
 
-            String => match self {
-                Plus => Some(String),
+            StaticString => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
-
-                PlusEq => Some(Void),
 
                 Neg | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
                 | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf | As => None,
+                | MutableAddressOf | As | Plus | PlusEq => None,
             },
 
             Char => match self {

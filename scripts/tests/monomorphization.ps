@@ -26,7 +26,7 @@ let scalar = Scalar { x: 4 };
 let num = scalar.get_num(); // should invoke get_num (parent: [int])
 
 let s2 = Scalar { x: "84" };
-let num2 = s2.get_number(); // should invoke get_number (parent: [string])
+let num2 = s2.get_number(); // should invoke get_number (parent: [str])
 
 fn identity1<T>(x: T): T { x }
 fn identity2<T>(x: Scalar<T>): Scalar<T> { x }

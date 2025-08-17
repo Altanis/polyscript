@@ -1274,7 +1274,7 @@ impl SemanticAnalyzer {
             StringLiteral(_) => self.unification_context.register_constraint(
                 Constraint::Equality(
                     uv.clone(),
-                    Type::new_base(self.get_primitive_type(PrimitiveKind::String)),
+                    Type::new_base(self.get_primitive_type(PrimitiveKind::StaticString)),
                 ),
                 info,
             ),

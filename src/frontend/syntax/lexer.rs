@@ -480,7 +480,7 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Bool),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
-            STRING_TYPE => Ok(Token::new(
+            STATIC_STRING_TYPE => Ok(Token::new(
                 word,
                 TokenKind::Keyword(KeywordKind::String),
                 span.set_end_from_values(self.index, self.line, self.column),

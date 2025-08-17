@@ -254,7 +254,7 @@ fn test_escape_analysis() {
             helper_test6(&my_config);
         }
 
-        struct Message { public content: string; }
+        struct Message { public content: str; }
         fn test7(): Message {
             if (true) {
                 let m = Message { content: "hello" };

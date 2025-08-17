@@ -75,7 +75,7 @@ pub enum PrimitiveKind {
     Int,
     Float,
     Bool,
-    String,
+    StaticString,
     Char,
     Void,
     Never
@@ -87,7 +87,7 @@ impl PrimitiveKind {
             PrimitiveKind::Int => INT_TYPE,
             PrimitiveKind::Float => FLOAT_TYPE,
             PrimitiveKind::Bool => BOOL_TYPE,
-            PrimitiveKind::String => STRING_TYPE,
+            PrimitiveKind::StaticString => STATIC_STRING_TYPE,
             PrimitiveKind::Char => CHAR_TYPE,
             PrimitiveKind::Void => VOID_TYPE,
             PrimitiveKind::Never => NEVER_TYPE

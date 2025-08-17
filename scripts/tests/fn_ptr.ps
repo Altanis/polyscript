@@ -15,7 +15,7 @@ fn identity_generic<T>(x: T): T {
     return x;
 }
 
-let identity_string: IdentitySignature<string> = identity_generic;
+let identity_string: IdentitySignature<str> = identity_generic;
 
 let s = adder(5, 3);
 let y = identity_string("s");

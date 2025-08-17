@@ -94,7 +94,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         PrimitiveKind::Float => self.context.f64_type().as_basic_type_enum(),
                         PrimitiveKind::Bool => self.context.bool_type().as_basic_type_enum(),
                         PrimitiveKind::Char => self.context.i8_type().as_basic_type_enum(),
-                        PrimitiveKind::String => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                        PrimitiveKind::StaticString => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                         PrimitiveKind::Void | PrimitiveKind::Never => return None,
                     },
                     TypeSymbolKind::Struct((scope_id, _)) => {
