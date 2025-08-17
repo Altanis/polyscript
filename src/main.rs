@@ -217,7 +217,7 @@ fn test_escape_analysis() {
         struct Point { x: int; }
         fn test2() {
             let p2 = Point { x: 2 };
-            let x = p2.x;
+            let x2 = p2.x;
         }
 
         fn create_point(): Point {
@@ -286,7 +286,7 @@ fn test_escape_analysis() {
         ("f",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
         ("outer_ref",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("p2",             crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("x",              crate::frontend::semantics::analyzer::AllocationKind::Stack),
+        ("x2",              crate::frontend::semantics::analyzer::AllocationKind::Stack),
         ("p3",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
         ("p4",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
         ("outer_instance", crate::frontend::semantics::analyzer::AllocationKind::Heap),
@@ -323,6 +323,6 @@ fn main() {
     }
 
     // assert_scripts_work();
-    // test_main_script();
-    test_escape_analysis();
+    test_main_script();
+    // test_escape_analysis();
 }
