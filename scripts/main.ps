@@ -1,9 +1,13 @@
+// refine escape analysis + emit errors
 // can assign things void value (i.e. let x = (fn() {})() compiles when it shouldnt)
 // builder doesn't handle iife ( (fn() {})() )
 // [Scalar<int>].new("%") works for some reason
 // compiler thinks let num = (Scalar { x: 4 }).get_num(); is static access
-// generics need to be constrained to traits properly
+// separate strings from primitives
 // memory safety (reference counting)
+// real compiler that takes file input + import/export system
+// stdlib
+// arrays + vectors + Indexable trait
 
 fn wow() {}
 let x = wow();

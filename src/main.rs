@@ -323,6 +323,6 @@ fn main() {
     }
 
     // assert_scripts_work();
-    test_main_script();
-    // test_escape_analysis();
+    // test_main_script();
+    test_escape_analysis();
 }

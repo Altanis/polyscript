@@ -215,6 +215,103 @@ impl MIRNode {
             ExpressionStatement(expr) => vec![expr.as_mut()],
         }
     }
+
+    pub fn children(&self) -> Vec<&MIRNode> {
+        use MIRNodeKind::*;
+        match &self.kind {
+            IntegerLiteral(_)
+            | FloatLiteral(_)
+            | BooleanLiteral(_)
+            | StringLiteral(_)
+            | CharLiteral(_)
+            | Identifier(_)
+            | EnumVariant(_)
+            | SelfExpr
+            | Break
+            | Continue
+            | StructField { .. }
+            | FunctionParameter { .. } => vec![],
+
+            Program(nodes) => nodes.iter().collect(),
+
+            VariableDeclaration { initializer, .. } => vec![initializer.as_ref()],
+            UnaryOperation { operand, .. } => vec![operand.as_ref()],
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
+                vec![left.as_ref(), right.as_ref()]
+            }
+            HeapExpression(expr) => vec![expr.as_ref()],
+            TypeCast { expr, .. } => vec![expr.as_ref()],
+            Block(nodes) => nodes.iter().collect(),
+            IfStatement {
+                condition,
+                then_branch,
+                else_if_branches,
+                else_branch,
+            } => {
+                let mut children = vec![condition.as_ref(), then_branch.as_ref()];
+                for (c, b) in else_if_branches.iter() {
+                    children.push(c.as_ref());
+                    children.push(b.as_ref());
+                }
+                if let Some(e) = else_branch.as_ref() {
+                    children.push(e);
+                }
+                children
+            }
+            ForLoop {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => {
+                let mut children = vec![];
+                if let Some(i) = initializer.as_ref() {
+                    children.push(i.as_ref());
+                }
+                if let Some(c) = condition.as_ref() {
+                    children.push(c.as_ref());
+                }
+                if let Some(i) = increment.as_ref() {
+                    children.push(i.as_ref());
+                }
+                children.push(body);
+                children
+            }
+            WhileLoop { condition, body } => vec![condition.as_ref(), body.as_ref()],
+            Return(expr) => expr.as_ref().map_or(vec![], |e| vec![e]),
+            Function {
+                parameters, body, ..
+            } => {
+                let mut children = parameters.iter().collect::<Vec<_>>();
+                if let Some(b) = body.as_ref() {
+                    children.push(b);
+                }
+                children
+            }
+            StructDeclaration { fields, .. } => fields.iter().collect(),
+            StructLiteral { fields, .. } => fields.values().collect(),
+            EnumDeclaration { variants, .. } => variants
+                .iter()
+                .flat_map(|(_, (v_node, e_node_opt))| {
+                    let mut nodes: Vec<&MIRNode> = vec![v_node];
+                    if let Some(e_node) = e_node_opt.as_ref() {
+                        nodes.push(e_node);
+                    }
+                    nodes.into_iter()
+                })
+                .collect(),
+            FieldAccess { left, right } => vec![left.as_ref(), right.as_ref()],
+            FunctionCall {
+                function,
+                arguments,
+            } => {
+                let mut children = vec![function.as_ref()];
+                children.extend(arguments.iter());
+                children
+            }
+            ExpressionStatement(expr) => vec![expr.as_ref()],
+        }
+    }
 }
 
 impl std::fmt::Display for MIRNode {
