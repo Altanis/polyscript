@@ -621,52 +621,60 @@ impl<'a> MIRBuilder<'a> {
                 mutable: *mutable,
             },
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
-                let fn_value_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap().clone();
-                let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
-                let Type::Base { symbol: fn_sig_id, .. } = fn_type else { unreachable!() };
-                let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
-                let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind else { unreachable!() };
+                if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
+                    let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
-                let is_method_call = instance.is_some() && matches!(&function.kind, AstNodeKind::FieldAccess { .. });
+                    let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
+                    let Type::Base { symbol: fn_sig_id, .. } = fn_type else { unreachable!() };
+                    let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
+                    let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind else { unreachable!() };
 
-                let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
-                
-                let (mir_fn_name, mir_fn_value_id, mir_fn_type) = if !generic_arguments.is_empty() {
-                    let mangled_name = self.mangle_name(*fn_sig_id, generic_arguments);
-                    let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().id;
-                    let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
-                    (mangled_name, monomorphized_fn_value_symbol.id, monomorphized_fn_value_symbol.type_id.unwrap())
-                } else {
-                    let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
-                    (name, fn_value_symbol.id, fn_type.clone())
-                };
+                    let is_method_call = instance.is_some() && matches!(&function.kind, AstNodeKind::FieldAccess { .. });
 
-                let mir_function_expr = if is_method_call {
-                    let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
+                    let (mir_fn_name, mir_fn_value_id, mir_fn_type) = if !generic_arguments.is_empty() {
+                        let mangled_name = self.mangle_name(*fn_sig_id, generic_arguments);
+                        let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().id;
+                        let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
+                        (mangled_name, monomorphized_fn_value_symbol.id, monomorphized_fn_value_symbol.type_id.unwrap())
+                    } else {
+                        let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
+                        (name, fn_value_symbol.id, fn_type.clone())
+                    };
 
-                    let instance_mir = self.lower_node(left)?;
-                    mir_arguments.insert(0, instance_mir);
+                    let mir_function_expr = if is_method_call {
+                        let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
+                        let instance_mir = self.lower_node(left)?;
+                        mir_arguments.insert(0, instance_mir);
+                        
+                        MIRNode {
+                            kind: MIRNodeKind::Identifier(mir_fn_name),
+                            span: function.span,
+                            value_id: Some(mir_fn_value_id),
+                            type_id: Some(mir_fn_type),
+                            scope_id: node.scope_id.unwrap()
+                        }
+                    } else {
+                        MIRNode {
+                            kind: MIRNodeKind::Identifier(mir_fn_name),
+                            span: function.span,
+                            value_id: Some(mir_fn_value_id),
+                            type_id: Some(mir_fn_type),
+                            scope_id: node.scope_id.unwrap()
+                        }
+                    };
                     
-                    MIRNode {
-                        kind: MIRNodeKind::Identifier(mir_fn_name),
-                        span: function.span,
-                        value_id: Some(mir_fn_value_id),
-                        type_id: Some(mir_fn_type),
-                        scope_id: node.scope_id.unwrap()
+                    MIRNodeKind::FunctionCall {
+                        function: Box::new(mir_function_expr),
+                        arguments: mir_arguments,
                     }
                 } else {
-                    MIRNode {
-                        kind: MIRNodeKind::Identifier(mir_fn_name),
-                        span: function.span,
-                        value_id: Some(mir_fn_value_id),
-                        type_id: Some(mir_fn_type),
-                        scope_id: node.scope_id.unwrap()
+                    let mir_function_expr = self.lower_node(function)?;
+                    let mir_arguments = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
+                    
+                    MIRNodeKind::FunctionCall {
+                        function: Box::new(mir_function_expr),
+                        arguments: mir_arguments,
                     }
-                };
-                
-                MIRNodeKind::FunctionCall {
-                    function: Box::new(mir_function_expr),
-                    arguments: mir_arguments,
                 }
             },
             AstNodeKind::FieldAccess { left, right } => MIRNodeKind::FieldAccess {

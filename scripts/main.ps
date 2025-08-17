@@ -1,13 +1,10 @@
-// builder doesn't handle iife ( (fn() {})() )
 // [Scalar<int>].new("%") works for some reason
 // compiler thinks let num = (Scalar { x: 4 }).get_num(); is static access
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
 // stdlib
+    // io + math + vec + hashmap + string
 // arrays + vectors + Indexable trait
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
-
-fn mets(): &str {
-    let escapee = "5";
-    &escapee
-}
+    // impl Add<str> for str {} inside file
+// maybe add prelude system
