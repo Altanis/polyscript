@@ -1,4 +1,3 @@
-// [Scalar<int>].new("%") works for some reason
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
 // default traits such as Clone, Default, ToString
@@ -9,9 +8,9 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar<T> {}
-impl<T> Scalar<T> {
-    fn take_input(&self, t: T) {}
+struct Scalar<T, U> {}
+impl<T> Scalar<T, str> {
+    fn take_input(t: T) {}
 }
 
-(Scalar {}).take_input(4);
+[Scalar<int, str>].take_input(1);

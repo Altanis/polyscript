@@ -13,8 +13,8 @@ enum CanonicalType {
 }
 
 enum MemberResolution {
-    Value(Type, ValueSymbolId),
-    Type(Type),
+    Value(Type, ValueSymbolId, ScopeId),
+    Type(Type, ScopeId)
 }
 
 impl SemanticAnalyzer {
@@ -703,9 +703,9 @@ impl SemanticAnalyzer {
 
                     if let Some(resolution) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
                         match resolution {
-                            MemberResolution::Type(resolved_member_type)
+                            MemberResolution::Type(resolved_member_type, _)
                                 => self.unify(concrete_ty, resolved_member_type, info)?,
-                            MemberResolution::Value(_, _) => unreachable!()
+                            MemberResolution::Value(_, _, _) => unreachable!()
                         };
                     } else {
                         return Err(self.create_error(
@@ -815,7 +815,7 @@ impl SemanticAnalyzer {
             };
             
             if is_match {
-                return Ok(Some(MemberResolution::Value(symbol_type, value_symbol.id)));
+                return Ok(Some(MemberResolution::Value(symbol_type, value_symbol.id, scope_id)));
             }
         }
         
@@ -836,7 +836,7 @@ impl SemanticAnalyzer {
             }
             
             let resolved_type = self.resolve_type(&Type::new_base(type_symbol.id));
-            return Ok(Some(MemberResolution::Type(resolved_type)));
+            return Ok(Some(MemberResolution::Type(resolved_type, scope_id)));
         }
         
         Ok(None)
@@ -858,12 +858,13 @@ impl SemanticAnalyzer {
 
                 if let Some(resolution) = self.find_member_in_impl_scope(imp.scope_id, member_name, is_static_access, info)? {
                     let concrete_resolution = match resolution {
-                        MemberResolution::Value(member_type, member_id) => MemberResolution::Value(
+                        MemberResolution::Value(member_type, member_id, scope_id) => MemberResolution::Value(
                             self.apply_substitution(&member_type, &substitutions),
                             member_id,
+                            scope_id,
                         ),
-                        MemberResolution::Type(member_type) => {
-                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                        MemberResolution::Type(member_type, scope_id) => {
+                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions), scope_id)
                         }
                     };
 
@@ -898,11 +899,11 @@ impl SemanticAnalyzer {
                 if let Some(resolution) = self.find_member_in_impl_scope(trait_impl.impl_scope_id, member_name, is_static_access, info)?
                 {
                     let concrete_resolution = match resolution {
-                        MemberResolution::Value(member_type, member_id) => {
-                            MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                        MemberResolution::Value(member_type, member_id, scope_id) => {
+                            MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id, scope_id)
                         }
-                        MemberResolution::Type(member_type) => {
-                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                        MemberResolution::Type(member_type, scope_id) => {
+                            MemberResolution::Type(self.apply_substitution(&member_type, &substitutions), scope_id)
                         }
                     };
 
@@ -950,7 +951,7 @@ impl SemanticAnalyzer {
 
                     let substitutions = self.create_generic_substitution_map(&base_symbol.generic_parameters, &concrete_args);
                     let concrete_field_type = self.apply_substitution(field_symbol.type_id.as_ref().unwrap(), &substitutions);
-                    return Ok(Some(MemberResolution::Value(concrete_field_type, field_symbol.id)));
+                    return Ok(Some(MemberResolution::Value(concrete_field_type, field_symbol.id, *scope_id)));
                 }
                 
                 if let Some(resolution) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
@@ -961,7 +962,7 @@ impl SemanticAnalyzer {
                 if is_static_access
                     && let Some(variant_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, *scope_id)
                 {
-                    return Ok(Some(MemberResolution::Value(base_type.clone(), variant_symbol.id)));
+                    return Ok(Some(MemberResolution::Value(base_type.clone(), variant_symbol.id, *scope_id)));
                 }
                 
                 if let Some(resolution) = self.find_member_in_inherent_impls(base_type, impls, member_name, is_static_access, info)? {
@@ -978,11 +979,11 @@ impl SemanticAnalyzer {
                         let substitutions = HashMap::from([(self_in_trait_id, base_type.clone())]);
                         
                         let concrete_resolution = match resolution {
-                            MemberResolution::Value(member_type, member_id) => {
-                                MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                            MemberResolution::Value(member_type, member_id, scope_id) => {
+                                MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id, scope_id)
                             }
-                            MemberResolution::Type(member_type) => {
-                                MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                            MemberResolution::Type(member_type, scope_id) => {
+                                MemberResolution::Type(self.apply_substitution(&member_type, &substitutions), scope_id)
                             }
                         };
 
@@ -1034,11 +1035,11 @@ impl SemanticAnalyzer {
             let substitutions = HashMap::from([(self_in_trait_id, ty.clone())]);
     
             let concrete_resolution = match resolution {
-                MemberResolution::Value(member_type, member_id) => {
-                    MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id)
+                MemberResolution::Value(member_type, member_id, scope_id) => {
+                    MemberResolution::Value(self.apply_substitution(&member_type, &substitutions), member_id, scope_id)
                 },
-                MemberResolution::Type(member_type) => {
-                    MemberResolution::Type(self.apply_substitution(&member_type, &substitutions))
+                MemberResolution::Type(member_type, scope_id) => {
+                    MemberResolution::Type(self.apply_substitution(&member_type, &substitutions), scope_id)
                 }
             };
     
@@ -1091,7 +1092,7 @@ impl SemanticAnalyzer {
     
                     if matches!(value_symbol.kind, ValueSymbolKind::Function(_) | ValueSymbolKind::Variable) {
                         let member_type = value_symbol.type_id.as_ref().unwrap();
-                        let resolution = MemberResolution::Value(self.apply_substitution(member_type, &substitutions), value_symbol.id);
+                        let resolution = MemberResolution::Value(self.apply_substitution(member_type, &substitutions), value_symbol.id, scope_id);
                         return Ok(Some(resolution));
                     }
                 }
@@ -1111,7 +1112,7 @@ impl SemanticAnalyzer {
                     }
                     
                     let member_type = Type::new_base(type_symbol.id);
-                    let resolution = MemberResolution::Type(self.apply_substitution(&member_type, &substitutions));
+                    let resolution = MemberResolution::Type(self.apply_substitution(&member_type, &substitutions), scope_id);
                     return Ok(Some(resolution));
                 }
             } else {
@@ -1308,7 +1309,7 @@ impl SemanticAnalyzer {
                         }
                     }
     
-                    if let Some(MemberResolution::Type(resolved_member_type)) 
+                    if let Some(MemberResolution::Type(resolved_member_type, _)) 
                         = self.find_member_in_trait_impl(&opaque_ty, &opaque_tr, &member, info)?
                     {
                         return self.unify(resolved_member_type, other_type, info);
@@ -1608,8 +1609,8 @@ impl SemanticAnalyzer {
 
         if let Some(resolution) = member_resolution_opt {
             let member_ty = match resolution {
-                MemberResolution::Value(ty, _) => ty,
-                MemberResolution::Type(ty) => ty,
+                MemberResolution::Value(ty, _, _) => ty,
+                MemberResolution::Type(ty, _) => ty,
             };
 
             self.unify(result_ty, member_ty, info)?;
@@ -1705,10 +1706,37 @@ impl SemanticAnalyzer {
         };
 
         if let Some(resolution) = member_resolution_opt {
-            let member_ty = match resolution {
-                MemberResolution::Value(ty, _) => ty,
-                MemberResolution::Type(ty) => ty,
+            let (member_ty, scope_id) = match &resolution {
+                MemberResolution::Value(ty, _, scope_id) => (ty, *scope_id),
+                MemberResolution::Type(ty, scope_id) => (ty, *scope_id),
             };
+            let mut member_ty = self.resolve_type(member_ty);
+
+            if self.is_uv(member_ty.get_base_symbol()) {
+                return Ok(false);
+            }
+
+            let kind = &self.symbol_table.get_type_symbol(resolved_ty.get_base_symbol()).unwrap().kind;
+            if let Some(impls) = match kind {
+                TypeSymbolKind::Struct((_, impls)) | TypeSymbolKind::Enum((_, impls)) => Some(impls),
+                _ => None
+            } {
+                let concrete_parameters = if let Type::Base { args, .. } = &resolved_ty {
+                    args.clone()
+                } else {
+                    unreachable!()
+                };
+
+                let generic_parameters: Vec<TypeSymbolId> = impls.iter()
+                    .find(|imp| imp.scope_id == scope_id)
+                    .unwrap()
+                    .specialization
+                    .clone();
+
+                let substitution_map: HashMap<TypeSymbolId, Type> = generic_parameters.into_iter().zip(concrete_parameters).collect();
+                member_ty = self.apply_substitution(&member_ty, &substitution_map);
+            }
+            
             self.unify(result_ty, member_ty, info)?;
             Ok(true)
         } else {
@@ -1943,8 +1971,8 @@ impl SemanticAnalyzer {
             };
 
             match resolution_opt {
-                Some(MemberResolution::Value(_, member_id)) => node.value_id = Some(member_id),
-                Some(MemberResolution::Type(_)) => {},
+                Some(MemberResolution::Value(_, member_id, _)) => node.value_id = Some(member_id),
+                Some(MemberResolution::Type(_, _)) => {},
                 None => {
                     let type_name = self.symbol_table.display_type(left.type_id.as_ref().unwrap());
                      return Err(self.create_error(
