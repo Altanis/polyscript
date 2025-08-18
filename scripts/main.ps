@@ -8,9 +8,14 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar<T, U> {}
-impl<T> Scalar<T, str> {
-    fn take_input(t: T) {}
+struct Scalar<T> {}
+
+impl Scalar<str> {
+    const YOUR_NAME: str = "int";
 }
 
-[Scalar<int, str>].take_input(1);
+impl Scalar<int> {
+    const YOUR_NAME: int = 4;
+}
+
+let y = [Scalar<int>].YOUR_NAME;

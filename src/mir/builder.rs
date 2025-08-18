@@ -450,8 +450,7 @@ impl<'a> MIRBuilder<'a> {
                     mutable: *mutable,
                     initializer: Box::new(self.lower_node(initializer)?),
                 }
-            }
-
+            },
             AstNodeKind::UnaryOperation { operator, operand } => MIRNodeKind::UnaryOperation {
                 operator: *operator,
                 operand: Box::new(self.lower_node(operand)?),
@@ -992,18 +991,39 @@ impl<'a> MIRBuilder<'a> {
             while let Type::Reference(inner) | Type::MutableReference(inner) = base_ty {
                 base_ty = inner;
             }
-            let Type::Base { symbol: concrete_struct_id, .. } = base_ty else { return; };
-            let concrete_struct_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_struct_id).unwrap();
-            let TypeSymbolKind::Struct((scope_id, _)) = concrete_struct_symbol.kind else { return; };
-            
-            let generic_field_id = node.value_id.unwrap();
-            let generic_field_symbol = self.analyzer.symbol_table.get_value_symbol(generic_field_id).unwrap();
-            let field_name = self.analyzer.symbol_table.get_value_name(generic_field_symbol.name_id);
-            
-            let concrete_field_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(scope_id, field_name).unwrap().clone();
-            
-            node.value_id = Some(concrete_field_symbol.id);
-            node.type_id = concrete_field_symbol.type_id.clone();
+
+            let Type::Base { symbol: concrete_base_id, .. } = base_ty else { return; };
+
+            let generic_member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+            let generic_member_scope = self.analyzer.symbol_table.get_scope(generic_member_symbol.scope_id).unwrap();
+
+            if generic_member_scope.kind == ScopeKind::Struct {
+                let concrete_base_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_base_id).unwrap();
+                if let TypeSymbolKind::Struct((concrete_scope_id, _)) = concrete_base_symbol.kind {
+                    let field_name = self.analyzer.symbol_table.get_value_name(generic_member_symbol.name_id);
+                    if let Some(concrete_field_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope(field_name, concrete_scope_id) {
+                        node.value_id = Some(concrete_field_symbol.id);
+                        node.type_id = concrete_field_symbol.type_id.clone();
+                    }
+                }
+            } else {
+                let concrete_member_type = node.type_id.as_ref().unwrap();
+                let Type::Base { symbol: concrete_member_type_id, .. } = concrete_member_type else { return; };
+                
+                let concrete_member_type_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_member_type_id).unwrap();
+                let concrete_member_name = self.analyzer.symbol_table.get_type_name(concrete_member_type_symbol.name_id);
+                
+                let mut search_scope = generic_member_scope;
+                while search_scope.kind != ScopeKind::Impl {
+                    search_scope = self.analyzer.symbol_table.get_scope(search_scope.parent.unwrap()).unwrap();
+                }
+
+                let parent_of_impl_scope_id = self.analyzer.symbol_table.get_scope(search_scope.id).unwrap().parent.unwrap();
+                
+                if let Some(concrete_member_value_symbol) = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_of_impl_scope_id, concrete_member_name) {
+                    node.value_id = Some(concrete_member_value_symbol.id);
+                }
+            }
         }
 
         if is_new_context {
