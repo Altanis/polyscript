@@ -1130,31 +1130,35 @@ impl SemanticAnalyzer {
             .generate_uv_type(&mut self.symbol_table, span);
 
         let mut is_method_call = false;
-        if let AstNodeKind::FieldAccess { left, .. } = &mut function_node.kind
-            && let AstNodeKind::Identifier(left_name) = &left.kind
-            && self
-                .symbol_table
-                .find_type_symbol_from_scope(left.scope_id.unwrap(), left_name)
-                .is_none()
-        {
-            is_method_call = true;
+        if let AstNodeKind::FieldAccess { left, .. } = &mut function_node.kind {
+            let is_static_path = match &left.kind {
+                AstNodeKind::Identifier(name) => self
+                    .symbol_table
+                    .find_type_symbol_from_scope(left.scope_id.unwrap(), name)
+                    .is_some(),
+                AstNodeKind::PathQualifier { .. } => true,
+                _ => false,
+            };
 
-            let instance_type = left
-                .type_id
-                .clone()
-                .expect("instance in method call should have a type");
+            if !is_static_path {
+                is_method_call = true;
 
-            self.unification_context.register_constraint(
-                Constraint::MethodCall(
-                    instance_type,
-                    function_type.clone(),
-                    argument_types.clone(),
-                    return_uv_type.clone(),
-                ),
-                info,
-            );
-        }
+                let instance_type = left
+                    .type_id
+                    .clone()
+                    .expect("instance in method call should have a type");
 
+                self.unification_context.register_constraint(
+                    Constraint::MethodCall(
+                        instance_type,
+                        function_type.clone(),
+                        argument_types.clone(),
+                        return_uv_type.clone(),
+                    ),
+                    info,
+                );
+            }
+         }
         if !is_method_call {
             self.unification_context.register_constraint(
                 Constraint::FunctionSignature(function_type, argument_types, return_uv_type.clone()),

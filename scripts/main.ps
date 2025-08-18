@@ -1,10 +1,17 @@
 // [Scalar<int>].new("%") works for some reason
-// compiler thinks let num = (Scalar { x: 4 }).get_num(); is static access
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
+// default traits such as Clone, Default, ToString
 // stdlib
     // io + math + vec + hashmap + string
 // arrays + vectors + Indexable trait
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
     // impl Add<str> for str {} inside file
 // maybe add prelude system
+
+struct Scalar<T> {}
+impl<T> Scalar<T> {
+    fn take_input(&self, t: T) {}
+}
+
+(Scalar {}).take_input(4);
