@@ -3,12 +3,12 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
-use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
 use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
-use crate::frontend::syntax::ast::{AstNode, AstNodeKind, BoxedAstNode};
+use crate::mir::ir_node::{BoxedMIRNode, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
@@ -275,7 +275,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         panic!("unresolved identiifer during codegen");
     }
 
-    fn compile_variable_declaration(&mut self, initializer: &BoxedAstNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_variable_declaration(&mut self, initializer: &BoxedMIRNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let ty = symbol.type_id.as_ref().unwrap();
 
@@ -284,7 +284,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let ty = self.map_semantic_type(ty).unwrap();
                 self.builder.build_alloca(ty, "").unwrap()
             },
-            AllocationKind::Heap if matches!(initializer.kind, AstNodeKind::HeapExpression(_)) => {
+            AllocationKind::Heap if matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) => {
                 let ty = self.map_semantic_type(ty).unwrap();
                 self.builder.build_alloca(ty, "").unwrap()
             },
@@ -304,22 +304,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         None
     }
 
-    fn compile_place_expression(&mut self, node: &AstNode) -> Option<PointerValue<'ctx>> {
+    fn compile_place_expression(&mut self, node: &MIRNode) -> Option<PointerValue<'ctx>> {
         match &node.kind {
-            AstNodeKind::Identifier(_) => {
+            MIRNodeKind::Identifier(_) => {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
-            AstNodeKind::SelfExpr => {
+            MIRNodeKind::SelfExpr => {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
-            AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
+            MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let ptr_to_ptr = self.compile_node(operand).unwrap().into_pointer_value();
                 let inner_ptr_type = self.map_semantic_type(node.type_id.as_ref().unwrap()).unwrap();
                 Some(self.builder.build_load(inner_ptr_type, ptr_to_ptr, "").unwrap().into_pointer_value())
             },
-            AstNodeKind::FieldAccess { left, .. } => {
+            MIRNodeKind::FieldAccess { left, .. } => {
                 let struct_ptr = self.compile_place_expression(left)?;
     
                 let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
@@ -353,7 +353,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_unary_operation(&mut self, operator: Operation, operand_node: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_unary_operation(&mut self, operator: Operation, operand_node: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         if operator == Operation::ImmutableAddressOf || operator == Operation::MutableAddressOf {
             let ptr = self.compile_place_expression(operand_node).unwrap();
             return Some(ptr.as_basic_value_enum());
@@ -445,7 +445,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_binary_operation(&mut self, operator: Operation, left_node: &BoxedAstNode, right_node: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_binary_operation(&mut self, operator: Operation, left_node: &BoxedMIRNode, right_node: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         if operator == Operation::Assign {
             let target_ptr = self.compile_place_expression(left_node).unwrap();
             let value_to_store = self.compile_node(right_node).unwrap();
@@ -501,7 +501,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(self.compile_core_binary_op(operator, left, right, is_float))
     }
 
-    fn compile_conditional_operation(&mut self, operator: Operation, left: &BoxedAstNode, right: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_conditional_operation(&mut self, operator: Operation, left: &BoxedMIRNode, right: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
     
         match operator {
@@ -572,7 +572,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_heap_expression(&mut self, inner_expr: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let inner_type = inner_expr.type_id.as_ref().unwrap();
         let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
 
@@ -585,7 +585,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(raw_ptr.as_basic_value_enum())
     }
 
-    fn compile_block(&mut self, stmts: &[AstNode]) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_block(&mut self, stmts: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         let mut last_val = None;
 
         for stmt in stmts {
@@ -597,10 +597,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_if_statement(
         &mut self,
-        condition: &BoxedAstNode,
-        then_branch: &BoxedAstNode,
-        else_if_branches: &[(BoxedAstNode, BoxedAstNode)],
-        else_branch: &Option<BoxedAstNode>,
+        condition: &BoxedMIRNode,
+        then_branch: &BoxedMIRNode,
+        else_if_branches: &[(BoxedMIRNode, BoxedMIRNode)],
+        else_branch: &Option<BoxedMIRNode>,
         return_type: Option<&Type>,
     ) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
@@ -675,7 +675,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         None
     }
 
-    fn compile_while_loop(&mut self, condition: &BoxedAstNode, body: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_while_loop(&mut self, condition: &BoxedMIRNode, body: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
         let cond_block = self.context.append_basic_block(function, "");
@@ -707,10 +707,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_for_loop(
         &mut self,
-        initializer: &Option<BoxedAstNode>,
-        condition: &Option<BoxedAstNode>,
-        increment: &Option<BoxedAstNode>,
-        body: &BoxedAstNode,
+        initializer: &Option<BoxedMIRNode>,
+        condition: &Option<BoxedMIRNode>,
+        increment: &Option<BoxedMIRNode>,
+        body: &BoxedMIRNode,
     ) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
@@ -758,7 +758,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         None
     }
 
-    fn compile_type_cast(&mut self, expr: &BoxedAstNode, target_type: &Type) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_type_cast(&mut self, expr: &BoxedMIRNode, target_type: &Type) -> Option<BasicValueEnum<'ctx>> {
         let source_val = self.compile_node(expr).unwrap();
         let source_type = expr.type_id.as_ref().unwrap();
 
@@ -816,15 +816,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_struct_declaration(&mut self, struct_node: &AstNode) {
+    fn compile_struct_declaration(&mut self, struct_node: &MIRNode) {
         let struct_type = struct_node.type_id.as_ref().unwrap();
         self.map_semantic_type(struct_type);
     }
 
-    fn compile_enum_declaration(&mut self, enum_node: &AstNode) {
-        let AstNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
+    fn compile_enum_declaration(&mut self, enum_node: &MIRNode) {
+        let MIRNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
 
-        let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id.unwrap(), name).unwrap();
+        let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id, name).unwrap();
         let enum_llvm_type = self.map_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
 
         let TypeSymbolKind::Enum((scope_id, _)) = enum_type_symbol.kind else { unreachable!(); };
@@ -832,7 +832,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut current_discriminant: i64 = 0;
 
         for (variant_name, (_variant_node, initializer_opt)) in variants.iter() {
-            if let Some(initializer) = initializer_opt && let AstNodeKind::IntegerLiteral(val) = initializer.kind {
+            if let Some(initializer) = initializer_opt && let MIRNodeKind::IntegerLiteral(val) = initializer.kind {
                 current_discriminant = val;
             }
 
@@ -844,7 +844,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_function_declaration(&mut self, node: &AstNode) {
+    fn compile_function_declaration(&mut self, node: &MIRNode) {
         let value_id = node.value_id.unwrap();
         
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
@@ -857,8 +857,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.functions.insert(value_id, function);
     }
 
-    fn compile_function_body(&mut self, node: &'a AstNode) {
-        let AstNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
+    fn compile_function_body(&mut self, node: &'a MIRNode) {
+        let MIRNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
         let fn_symbol_id = node.value_id.unwrap();
 
         let function = self.functions[&fn_symbol_id];
@@ -896,7 +896,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.variables = old_vars;
     }
 
-    fn compile_struct_literal(&mut self, struct_type: &Type, fields: &indexmap::IndexMap<String, AstNode>) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_struct_literal(&mut self, struct_type: &Type, fields: &indexmap::IndexMap<String, MIRNode>) -> Option<BasicValueEnum<'ctx>> {
         let llvm_struct_type = self.map_semantic_type(struct_type).unwrap().into_struct_type();
         let mut aggregate = llvm_struct_type.get_undef();
 
@@ -931,130 +931,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         Some(aggregate.into())
     }
-
-    fn compile_field_access(&mut self, node: &AstNode, left: &BoxedAstNode) -> Option<BasicValueEnum<'ctx>> {
-        if let AstNodeKind::PathQualifier { .. } = &left.kind {
-            let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
-            return match member_symbol.kind {
-                ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
-                ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
-                _ => unreachable!()
-            };
-        }
-    
-        let is_static_access = if let AstNodeKind::Identifier(name) = &left.kind {
-            self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some()
-        } else {
-            false
-        };
-    
-        let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
-    
-        if is_static_access {
-            return match member_symbol.kind {
-                ValueSymbolKind::EnumVariant | ValueSymbolKind::Variable => Some(*self.constants.get(&member_symbol.id).unwrap()),
-                ValueSymbolKind::Function(_) => Some(self.functions.get(&member_symbol.id).unwrap().as_global_value().as_basic_value_enum()),
-                _ => unreachable!(),
-            };
-        }
-        
-        match member_symbol.kind {
-            ValueSymbolKind::Function(_) => {
-                let fn_id = node.value_id.unwrap();
-                Some(self.functions.get(&fn_id).unwrap().as_global_value().as_basic_value_enum())
-            },
-            ValueSymbolKind::StructField => {
-                let struct_ptr = self.compile_place_expression(left).unwrap();
-    
-                let member_scope = self.analyzer.symbol_table.get_scope(member_symbol.scope_id).unwrap();
-                let mut sorted_field_symbols: Vec<_> = member_scope.values.values()
-                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
-                    .collect();
-                sorted_field_symbols.sort_by_key(|s| s.span.unwrap().start);
-                
-                let field_index = sorted_field_symbols
-                    .iter()
-                    .position(|s| s.id == member_symbol.id)
-                    .unwrap() as u32;
-    
-                let base_type = match left.type_id.as_ref().unwrap() {
-                    Type::Reference(inner) | Type::MutableReference(inner) => &**inner,
-                    _ => left.type_id.as_ref().unwrap(),
-                };
-                let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
-                
-                let field_ptr = self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, "").unwrap();
-                let field_type = self.map_semantic_type(member_symbol.type_id.as_ref().unwrap()).unwrap();
-                
-                Some(self.builder.build_load(field_type, field_ptr, "").unwrap())
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn prepare_call_arguments(
-        &mut self,
-        function_node: &AstNode,
-        arguments: &[AstNode],
-    ) -> Vec<BasicValueEnum<'ctx>> {
-        let mut compiled_args: Vec<BasicValueEnum<'ctx>> = vec![];
-
-        if let AstNodeKind::FieldAccess { left, right } = &function_node.kind
-            && let Some(member_symbol) = self.analyzer.symbol_table.get_value_symbol(right.value_id.unwrap())
-            && let ValueSymbolKind::Function(scope_id) = member_symbol.kind
-        {
-            let fn_scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-            if fn_scope.receiver_kind.is_some() {
-                let is_static_call = match &left.kind {
-                    AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some(),
-                    AstNodeKind::PathQualifier {..} => true,
-                    _ => false,
-                };
-                
-                if !is_static_call {
-                    let instance_value = self.compile_node(left).unwrap();
-                    compiled_args.push(instance_value);
-                }
-            }
-        }
-        
-        for arg_node in arguments {
-            let arg_value = self.compile_node(arg_node).unwrap();
-            compiled_args.push(arg_value);
-        }
-
-        compiled_args
-    }
-
-    fn compile_function_call(
-        &mut self,
-        function_node: &BoxedAstNode,
-        arguments: &[AstNode],
-        return_type: Option<&Type>,
-    ) -> Option<BasicValueEnum<'ctx>> {
-        let compiled_args = self.prepare_call_arguments(function_node, arguments);
-        let arg_refs: Vec<_> = compiled_args.iter().map(|v| (*v).into()).collect();
-
-        let callee_value = self.compile_node(function_node).unwrap();
-
-        let call: CallSiteValue = if let Ok(function) = FunctionValue::try_from(callee_value.into_pointer_value().as_any_value_enum()) {
-            self.builder.build_call(function, &arg_refs, "").unwrap()
-        } else {
-            let callee_ptr = callee_value.into_pointer_value();
-            let fn_type = self.map_semantic_fn_type(function_node.type_id.as_ref().unwrap());
-            
-            self.builder.build_indirect_call(fn_type, callee_ptr, &arg_refs, "").unwrap()
-        };
-
-        if let Some(ret_type) = return_type {
-            let type_symbol = self.analyzer.symbol_table.get_type_symbol(ret_type.get_base_symbol()).unwrap();
-            if !matches!(&type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never)) {
-                return call.try_as_basic_value().left();
-            }
-        }
-    
-        None
-    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1076,8 +952,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub fn compile_program(&mut self, program: &'a AstNode) {
-        let AstNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
+    pub fn compile_program(&mut self, program: &'a MIRNode) {
+        let MIRNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
 
         self.compile_declarations_pass(stmts);
         self.compile_executable_code_pass(stmts);
@@ -1085,22 +961,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_declarations_pass(&mut self, stmts: &'a [AstNode]) {
+    fn compile_declarations_pass(&mut self, stmts: &'a [MIRNode]) {
         for stmt in stmts.iter() {
             match &stmt.kind {
-                AstNodeKind::Function { .. } => self.compile_function_declaration(stmt),
-                AstNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
-                AstNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
-                AstNodeKind::ImplDeclaration { associated_constants, associated_functions, .. } => {
-                    for const_node in associated_constants {
-                        let init_val = self.compile_node(const_node).unwrap();
-                        self.constants.insert(const_node.value_id.unwrap(), init_val);
-                    }
-                    for func_node in associated_functions {
-                        self.compile_function_declaration(func_node);
-                    }
-                },
-                AstNodeKind::VariableDeclaration { mutable: false, .. } => {
+                MIRNodeKind::Function { .. } => self.compile_function_declaration(stmt),
+                MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
+                MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
+                MIRNodeKind::VariableDeclaration { mutable: false, .. } => {
                     let init_val = self.compile_node(stmt).unwrap();
                     self.constants.insert(stmt.value_id.unwrap(), init_val);
                 },
@@ -1111,18 +978,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_executable_code_pass(&mut self, stmts: &'a [AstNode]) {
+    fn compile_executable_code_pass(&mut self, stmts: &'a [MIRNode]) {
         for stmt in stmts.iter() {
-            if let AstNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
+            if let MIRNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
                 self.compile_function_body(stmt);
-            }
-
-            if let AstNodeKind::ImplDeclaration { associated_functions, .. } = &stmt.kind {
-                for func_node in associated_functions {
-                    if let AstNodeKind::Function { body, .. } = &func_node.kind && body.is_some() {
-                        self.compile_function_body(func_node);
-                    }
-                }
             }
         }
 
@@ -1134,9 +993,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         for stmt in stmts.iter() {
             match &stmt.kind {
-                AstNodeKind::Function {..} | AstNodeKind::StructDeclaration {..} |
-                AstNodeKind::EnumDeclaration {..} | AstNodeKind::ImplDeclaration {..} |
-                AstNodeKind::VariableDeclaration { mutable: false, .. } => {},
+                MIRNodeKind::Function {..} | MIRNodeKind::StructDeclaration {..} |
+                MIRNodeKind::EnumDeclaration {..} | MIRNodeKind::VariableDeclaration { mutable: false, .. } => {},
                 _ => {
                     self.compile_node(stmt);
                 }
@@ -1148,35 +1006,35 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_node(&mut self, stmt: &AstNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_node(&mut self, stmt: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
         match &stmt.kind {
-            AstNodeKind::IntegerLiteral(value) => Some(self.compile_integer_literal(*value)),
-            AstNodeKind::FloatLiteral(value) => Some(self.compile_float_literal(*value)),
-            AstNodeKind::BooleanLiteral(value) => Some(self.compile_bool_literal(*value)),
-            AstNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
-            AstNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
-            AstNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
-            AstNodeKind::SelfExpr => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
-            AstNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
+            MIRNodeKind::IntegerLiteral(value) => Some(self.compile_integer_literal(*value)),
+            MIRNodeKind::FloatLiteral(value) => Some(self.compile_float_literal(*value)),
+            MIRNodeKind::BooleanLiteral(value) => Some(self.compile_bool_literal(*value)),
+            MIRNodeKind::StringLiteral(value) => Some(self.compile_string_literal(value)),
+            MIRNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
+            MIRNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            MIRNodeKind::SelfExpr => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
+            MIRNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
                 let init_val = self.compile_node(initializer).unwrap();
                 self.constants.insert(stmt.value_id.unwrap(), init_val);
                 Some(init_val)
             },
-            AstNodeKind::VariableDeclaration { initializer, mutable: true, .. }
+            MIRNodeKind::VariableDeclaration { initializer, mutable: true, .. }
                 => self.compile_variable_declaration(initializer, stmt.value_id.unwrap()),
-            AstNodeKind::UnaryOperation { operator, operand }
+            MIRNodeKind::UnaryOperation { operator, operand }
                 => self.compile_unary_operation(*operator, operand),
-            AstNodeKind::BinaryOperation { operator, left, right }
+            MIRNodeKind::BinaryOperation { operator, left, right }
                 => self.compile_binary_operation(*operator, left, right),
-            AstNodeKind::ConditionalOperation { operator, left, right }
+            MIRNodeKind::ConditionalOperation { operator, left, right }
                 => self.compile_conditional_operation(*operator, left, right),
-            AstNodeKind::HeapExpression(expr) => self.compile_heap_expression(expr),
-            AstNodeKind::Block(stmts) => self.compile_block(stmts),
-            AstNodeKind::ExpressionStatement(expr) => {
+            MIRNodeKind::HeapExpression(expr) => self.compile_heap_expression(expr),
+            MIRNodeKind::Block(stmts) => self.compile_block(stmts),
+            MIRNodeKind::ExpressionStatement(expr) => {
                 self.compile_node(expr);
                 None
             },
-            AstNodeKind::Return(opt_expr) => {
+            MIRNodeKind::Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
                     let value = self.compile_node(expr).unwrap();
                     self.builder.build_return(Some(&value)).unwrap();
@@ -1186,39 +1044,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 None
             },
-            AstNodeKind::IfStatement {
+            MIRNodeKind::IfStatement {
                 condition,
                 then_branch,
                 else_if_branches,
                 else_branch,
             } => self.compile_if_statement(condition, then_branch, else_if_branches, else_branch, stmt.type_id.as_ref()),
-            AstNodeKind::WhileLoop { condition, body } => self.compile_while_loop(condition, body),
-            AstNodeKind::ForLoop { initializer, condition, increment, body }
+            MIRNodeKind::WhileLoop { condition, body } => self.compile_while_loop(condition, body),
+            MIRNodeKind::ForLoop { initializer, condition, increment, body }
                 => self.compile_for_loop(initializer, condition, increment, body),
-            AstNodeKind::Break => {
+            MIRNodeKind::Break => {
                 let break_block = self.break_blocks.last().unwrap();
                 self.builder.build_unconditional_branch(*break_block).unwrap();
                 None
             },
-            AstNodeKind::Continue => {
+            MIRNodeKind::Continue => {
                 let continue_block = self.continue_blocks.last().unwrap();
                 self.builder.build_unconditional_branch(*continue_block).unwrap();
                 None
             },
-            AstNodeKind::TypeCast { expr, .. }
+            MIRNodeKind::TypeCast { expr, .. }
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
-            AstNodeKind::StructLiteral { fields, .. }
+            MIRNodeKind::StructLiteral { fields, .. }
                 => self.compile_struct_literal(stmt.type_id.as_ref().unwrap(), fields),
-            AstNodeKind::AssociatedConstant { initializer, .. } => {
-                let init_val = self.compile_node(initializer).unwrap();
-                self.constants.insert(stmt.value_id.unwrap(), init_val);
-                Some(init_val)
-            },
-            AstNodeKind::FieldAccess { left, .. } => self.compile_field_access(stmt, left),
-            AstNodeKind::FunctionCall { function, arguments, .. } => {
-                self.compile_function_call(function, arguments, stmt.type_id.as_ref())
-            }
-            AstNodeKind::Function { .. } | AstNodeKind::TraitDeclaration { .. } => None,
+            // MIRNodeKind::FieldAccess { left, .. } => self.compile_field_access(stmt, left),
+            // MIRNodeKind::FunctionCall { function, arguments, .. } => {
+            //     self.compile_function_call(function, arguments, stmt.type_id.as_ref())
+            // }
+            MIRNodeKind::Function { .. } => None,
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
     }

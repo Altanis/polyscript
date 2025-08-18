@@ -99,7 +99,7 @@ fn optimize(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
     }
 }
 
-fn compile_ast(program: AstNode, analyzer: &SemanticAnalyzer) {
+fn compile_ast(program: MIRNode, analyzer: &SemanticAnalyzer) {
     let context = Context::create();
     let module = context.create_module("a");
     let builder = context.create_builder();
@@ -178,7 +178,7 @@ fn test_main_script() {
             let _ = mir_program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
             println!("{}", format_str);
 
-            compile_ast(program, &analyzer);
+            compile_ast(mir_program, &analyzer);
         }
     }
 }

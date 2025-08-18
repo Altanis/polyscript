@@ -7,6 +7,8 @@ use crate::{
 use colored::Colorize;
 use indexmap::IndexMap;
 
+pub type BoxedMIRNode = Box<MIRNode>;
+
 #[derive(Debug, Clone)]
 pub enum MIRNodeKind {
     IntegerLiteral(i64),
