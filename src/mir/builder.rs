@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind},
+        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{MIRNode, MIRNodeKind},
@@ -334,6 +334,12 @@ impl<'a> MIRBuilder<'a> {
         out
     }
 
+    fn mangle_const_name(&self, symbol: &ValueSymbol) -> String {
+        let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
+        format!("{}_{}", name, symbol.id)
+    }
+
+
     fn substitute_type(&mut self, generic_type: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
         match generic_type {
             Type::Base { symbol, args } => {
@@ -445,8 +451,16 @@ impl<'a> MIRBuilder<'a> {
             }
 
             AstNodeKind::AssociatedConstant { name, initializer, .. } => {
+                let (mangled_name, sym_id) = {
+                    let sym = self.analyzer.symbol_table.find_value_symbol_in_scope(name, node.scope_id.unwrap()).unwrap();
+                    (self.mangle_const_name(sym), sym.id)
+                };
+
+                let new_name_id = self.analyzer.symbol_table.value_names.intern(&mangled_name);
+                self.analyzer.symbol_table.get_value_symbol_mut(sym_id).unwrap().name_id = new_name_id;
+
                 MIRNodeKind::VariableDeclaration {
-                    name: name.clone(),
+                    name: mangled_name,
                     mutable: false,
                     initializer: Box::new(self.lower_node(initializer)?),
                 }
@@ -840,28 +854,28 @@ impl<'a> MIRBuilder<'a> {
 
             AstNodeKind::Program(stmts) => {
                 let mut ir_nodes = vec![];
-                for stmt in stmts {
-                    match &mut stmt.kind {
-                        AstNodeKind::ImplDeclaration { associated_functions, associated_constants, generic_parameters, .. } => {
-                            for konst in associated_constants {
-                                if let Some(ir_const) = self.lower_node(konst) {
-                                    ir_nodes.push(ir_const);
-                                }
-                            }
-                        
-                            if generic_parameters.is_empty() {
-                                for func in associated_functions {
-                                    if let Some(ir_func) = self.lower_node(func) {
-                                        ir_nodes.push(ir_func);
-                                    }
-                                }
-                            }
-                        },
-                        _ => {
-                            if let Some(ir_node) = self.lower_node(stmt) {
-                                ir_nodes.push(ir_node);
+
+                for stmt in stmts.iter_mut() {
+                    if let AstNodeKind::ImplDeclaration { associated_functions, associated_constants, generic_parameters, .. } = &mut stmt.kind {
+                        for konst in associated_constants {
+                            if let Some(ir_const) = self.lower_node(konst) {
+                                ir_nodes.push(ir_const);
                             }
                         }
+                    
+                        if generic_parameters.is_empty() {
+                            for func in associated_functions {
+                                if let Some(ir_func) = self.lower_node(func) {
+                                    ir_nodes.push(ir_func);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for stmt in stmts.iter_mut() {
+                    if !matches!(stmt.kind, AstNodeKind::ImplDeclaration { .. }) && let Some(ir_node) = self.lower_node(stmt) {
+                        ir_nodes.push(ir_node);
                     }
                 }
 
