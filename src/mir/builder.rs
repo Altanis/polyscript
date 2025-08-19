@@ -334,7 +334,7 @@ impl<'a> MIRBuilder<'a> {
         out
     }
 
-    fn mangle_const_name(&self, symbol: &ValueSymbol) -> String {
+    fn mangle_value_name(&self, symbol: &ValueSymbol) -> String {
         let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
         format!("{}_{}", name, symbol.id)
     }
@@ -453,7 +453,7 @@ impl<'a> MIRBuilder<'a> {
             AstNodeKind::AssociatedConstant { name, initializer, .. } => {
                 let (mangled_name, sym_id) = {
                     let sym = self.analyzer.symbol_table.find_value_symbol_in_scope(name, node.scope_id.unwrap()).unwrap();
-                    (self.mangle_const_name(sym), sym.id)
+                    (self.mangle_value_name(sym), sym.id)
                 };
 
                 let new_name_id = self.analyzer.symbol_table.value_names.intern(&mangled_name);
@@ -626,8 +626,16 @@ impl<'a> MIRBuilder<'a> {
                 }
 
                 if generic_parameters.is_empty() {
+                    let (mangled_name, sym_id) = {
+                        let sym = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                        (self.mangle_value_name(sym), sym.id)
+                    };
+
+                    let new_name_id = self.analyzer.symbol_table.value_names.intern(&mangled_name);
+                    self.analyzer.symbol_table.get_value_symbol_mut(sym_id).unwrap().name_id = new_name_id;
+
                     MIRNodeKind::Function {
-                        name: name.clone(),
+                        name: mangled_name.clone(),
                         parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
                         instance: *instance,
                         body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
