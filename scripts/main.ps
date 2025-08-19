@@ -12,6 +12,14 @@ struct Point<T> {
     x: T;
 }
 
+fn ret(): Point<int> {
+    Point {x:4}
+}
+
+fn take(x: Point<int>) {
+
+}
+
 impl Point<int> {
     const precise: bool = false;
     type Implementor = int;
@@ -35,3 +43,5 @@ let val2: [Point<float>].Implementor = 3.0;
 
 let p1: Point<int> = [Point<int>].default();
 let p2: Point<float> = [Point<float>].default();
+let p3 = ret();
+take(p3);

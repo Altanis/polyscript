@@ -1080,6 +1080,80 @@ impl<'a> MIRBuilder<'a> {
             self.concretize_node(stmt);
         }
     }
+
+    fn concretize_symbol_table(&mut self) {
+        let value_ids: Vec<ValueSymbolId> = self.analyzer.symbol_table.registry.value_symbols.keys().cloned().collect();
+
+        for id in value_ids {
+            let ty_to_resolve = self.analyzer.symbol_table.registry.value_symbols.get_mut(&id).unwrap().type_id.take();
+            if let Some(ty) = ty_to_resolve {
+                let resolved_ty = self.resolve_concrete_type_recursively(&ty);
+                if let Some(symbol) = self.analyzer.symbol_table.registry.value_symbols.get_mut(&id) {
+                    symbol.type_id = Some(resolved_ty);
+                }
+            }
+        }
+
+        let type_symbol_ids: Vec<TypeSymbolId> = self.analyzer.symbol_table.registry.type_symbols.keys().cloned().collect();
+
+        for id in type_symbol_ids {
+            let mut symbol_clone = self.analyzer.symbol_table.registry.type_symbols[&id].clone();
+            let mut was_changed = false;
+
+            let new_generics: Vec<TypeSymbolId> = symbol_clone.generic_parameters.iter()
+                .map(|&p_id| self.resolve_concrete_type_recursively(&Type::new_base(p_id)).get_base_symbol())
+                .collect();
+            
+            if symbol_clone.generic_parameters != new_generics {
+                symbol_clone.generic_parameters = new_generics;
+                was_changed = true;
+            }
+
+            match &mut symbol_clone.kind {
+                TypeSymbolKind::FunctionSignature { params, return_type, .. } => {
+                    let new_params: Vec<Type> = params.iter()
+                        .map(|p| self.resolve_concrete_type_recursively(p))
+                        .collect();
+                    let new_return = self.resolve_concrete_type_recursively(return_type);
+
+                    if *params != new_params || *return_type != new_return {
+                        *params = new_params;
+                        *return_type = new_return;
+                        was_changed = true;
+                    }
+                }
+
+                TypeSymbolKind::TypeAlias((_, Some(alias_ty))) => {
+                    let new_alias = self.resolve_concrete_type_recursively(alias_ty);
+
+                    if *alias_ty != new_alias {
+                        *alias_ty = new_alias;
+                        was_changed = true;
+                    }
+                }
+
+                TypeSymbolKind::OpaqueTypeProjection { ty, tr, .. } => {
+                    let new_ty = self.resolve_concrete_type_recursively(ty);
+                    if *ty != new_ty {
+                        *ty = new_ty;
+                        was_changed = true;
+                    }
+
+                    let new_tr = self.resolve_concrete_type_recursively(tr);
+                    if *tr != new_tr {
+                        *tr = new_tr;
+                        was_changed = true;
+                    }
+                }
+
+                _ => {}
+            }
+
+            if was_changed && let Some(symbol) = self.analyzer.symbol_table.registry.type_symbols.get_mut(&id) {
+                *symbol = symbol_clone;
+            }
+        }
+    }
 }
 
 impl<'a> MIRBuilder<'a> {
@@ -1092,6 +1166,7 @@ impl<'a> MIRBuilder<'a> {
         hoisted_stmts.extend(other_stmts);
 
         self.concretize_ids(&mut mir_program);
+        self.concretize_symbol_table();
 
         mir_program
     }
