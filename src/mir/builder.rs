@@ -444,6 +444,13 @@ impl<'a> MIRBuilder<'a> {
                 MIRNodeKind::ExpressionStatement(Box::new(self.lower_node(expr)?))
             }
 
+            AstNodeKind::AssociatedConstant { name, initializer, .. } => {
+                MIRNodeKind::VariableDeclaration {
+                    name: name.clone(),
+                    mutable: false,
+                    initializer: Box::new(self.lower_node(initializer)?),
+                }
+            },
             AstNodeKind::VariableDeclaration { name, mutable, initializer, .. } => {
                 MIRNodeKind::VariableDeclaration {
                     name: name.clone(),
@@ -676,9 +683,25 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
-            AstNodeKind::FieldAccess { left, right } => MIRNodeKind::FieldAccess {
-                left: Box::new(self.lower_node(left)?),
-                right: Box::new(self.lower_node(right)?),
+            AstNodeKind::FieldAccess { left, right } => {
+                let is_static_access = match &left.kind {
+                    AstNodeKind::PathQualifier { .. } => true,
+                    AstNodeKind::Identifier(name) => self.analyzer.symbol_table
+                        .find_type_symbol_from_scope(left.scope_id.unwrap(), name)
+                        .is_some(),
+                    _ => false,
+                };
+
+                if is_static_access {
+                    let resolved_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                    let resolved_name = self.analyzer.symbol_table.get_value_name(resolved_symbol.name_id);
+                    MIRNodeKind::Identifier(resolved_name.to_string())
+                } else {
+                    MIRNodeKind::FieldAccess {
+                        left: Box::new(self.lower_node(left)?),
+                        right: Box::new(self.lower_node(right)?),
+                    }
+                }
             },
 
             AstNodeKind::StructDeclaration { name, fields, generic_parameters } => {
@@ -819,7 +842,13 @@ impl<'a> MIRBuilder<'a> {
                 let mut ir_nodes = vec![];
                 for stmt in stmts {
                     match &mut stmt.kind {
-                        AstNodeKind::ImplDeclaration { associated_functions, generic_parameters, .. } => {
+                        AstNodeKind::ImplDeclaration { associated_functions, associated_constants, generic_parameters, .. } => {
+                            for konst in associated_constants {
+                                if let Some(ir_const) = self.lower_node(konst) {
+                                    ir_nodes.push(ir_const);
+                                }
+                            }
+                        
                             if generic_parameters.is_empty() {
                                 for func in associated_functions {
                                     if let Some(ir_func) = self.lower_node(func) {
@@ -842,7 +871,6 @@ impl<'a> MIRBuilder<'a> {
             AstNodeKind::ImplDeclaration { .. }
             | AstNodeKind::TraitDeclaration { .. }
             | AstNodeKind::TypeDeclaration { .. }
-            | AstNodeKind::AssociatedConstant { .. }
             | AstNodeKind::AssociatedType { .. }
             | AstNodeKind::TraitConstant { .. }
             | AstNodeKind::TraitType(_)
