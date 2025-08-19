@@ -8,40 +8,34 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Point<T> {
-    x: T;
+trait Animal {
+    type SpeechEmission;
+
+    fn speak(&self): Self.SpeechEmission;
 }
 
-fn ret(): Point<int> {
-    Point {x:4}
-}
+struct Dog {}
+struct Cat {}
 
-fn take(x: Point<int>) {
-
-}
-
-impl Point<int> {
-    const precise: bool = false;
-    type Implementor = int;
-
-    fn default(): Self {
-        Point { x: 1 }
+impl Animal for Dog {
+    type SpeechEmission = char;
+    fn speak(&self): Self.SpeechEmission {
+        return 'b';
     }
 }
 
-impl Point<float> {
-    const precise: bool = true;
-    type Implementor = float;
-
-    fn default(): Self {
-        Point { x: 1.0 }
+impl Animal for Cat {
+    type SpeechEmission = str;
+    fn speak(&self): Self.SpeechEmission {
+        return "meow";
     }
 }
 
-let val = [Point<int>].precise;
-let val2: [Point<float>].Implementor = 3.0;
+impl Dog {
+    type SpeechEmission = float;
+}
 
-let p1: Point<int> = [Point<int>].default();
-let p2: Point<float> = [Point<float>].default();
-let p3 = ret();
-take(p3);
+let dog = Dog {};
+let cat = Cat {};
+
+let emission1: [Cat as Animal].SpeechEmission = cat.speak();

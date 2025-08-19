@@ -1717,21 +1717,12 @@ impl SemanticAnalyzer {
             }
 
             let kind = &self.symbol_table.get_type_symbol(resolved_ty.get_base_symbol()).unwrap().kind;
-            if let Some(impls) = match kind {
-                TypeSymbolKind::Struct((_, impls)) | TypeSymbolKind::Enum((_, impls)) => Some(impls),
-                _ => None
-            } {
-                let concrete_parameters = if let Type::Base { args, .. } = &resolved_ty {
-                    args.clone()
-                } else {
-                    unreachable!()
-                };
-
-                let generic_parameters: Vec<TypeSymbolId> = impls.iter()
-                    .find(|imp| imp.scope_id == scope_id)
-                    .unwrap()
-                    .specialization
-                    .clone();
+            if let TypeSymbolKind::Struct((_, impls)) | TypeSymbolKind::Enum((_, impls)) = kind
+                && let Type::Base { args, .. } = &resolved_ty
+                && let Some(imp) = impls.iter().find(|imp| imp.scope_id == scope_id)
+            {
+                let concrete_parameters = args.clone();
+                let generic_parameters = imp.specialization.clone();
 
                 let substitution_map: HashMap<TypeSymbolId, Type> = generic_parameters.into_iter().zip(concrete_parameters).collect();
                 member_ty = self.apply_substitution(&member_ty, &substitution_map);
