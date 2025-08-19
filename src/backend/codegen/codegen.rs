@@ -3,7 +3,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
-use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
@@ -924,6 +924,50 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         Some(aggregate.into())
     }
+
+    fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
+        let compiled_args: Vec<BasicValueEnum> = arguments
+            .iter()
+            .map(|arg| self.compile_node(arg).unwrap())
+            .collect();
+        let arg_refs: Vec<_> = compiled_args.iter().map(|v| (*v).into()).collect();
+
+        let callee_value = self.compile_node(function).unwrap();
+
+        let call: CallSiteValue = if let Ok(function) = FunctionValue::try_from(callee_value.into_pointer_value().as_any_value_enum()) {
+            self.builder.build_call(function, &arg_refs, "").unwrap()
+        } else {
+            let callee_ptr = callee_value.into_pointer_value();
+            let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap());
+            
+            self.builder.build_indirect_call(fn_type, callee_ptr, &arg_refs, "").unwrap()
+        };
+
+        call.try_as_basic_value().left()
+    }
+
+    fn compile_field_access(&mut self, stmt: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
+        let symbol = self
+            .analyzer
+            .symbol_table
+            .get_value_symbol(stmt.value_id.unwrap())
+            .unwrap();
+
+        if let ValueSymbolKind::Function(_) = symbol.kind {
+            return Some(
+                self.functions
+                    .get(&symbol.id)
+                    .unwrap()
+                    .as_global_value()
+                    .as_basic_value_enum(),
+            );
+        }
+
+        let field_ptr = self.compile_place_expression(stmt).unwrap();
+        let field_type = stmt.type_id.as_ref().unwrap();
+        let llvm_field_type = self.map_semantic_type(field_type).unwrap();
+        Some(self.builder.build_load(llvm_field_type, field_ptr, "").unwrap())
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1060,11 +1104,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
             MIRNodeKind::StructLiteral { fields, .. }
                 => self.compile_struct_literal(stmt.type_id.as_ref().unwrap(), fields),
-            // MIRNodeKind::FieldAccess { left, .. } => self.compile_field_access(stmt, left),
-            // MIRNodeKind::FunctionCall { function, arguments, .. } => {
-            //     self.compile_function_call(function, arguments, stmt.type_id.as_ref())
-            // }
             MIRNodeKind::Function { .. } => None,
+            MIRNodeKind::FunctionCall { function, arguments } => self.compile_function_call(function, arguments),
+            MIRNodeKind::FieldAccess { .. } => self.compile_field_access(stmt),
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
     }
