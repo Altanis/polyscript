@@ -12,6 +12,7 @@ enum CanonicalType {
     Generic(usize),
 }
 
+#[derive(Debug)]
 enum MemberResolution {
     Value(Type, ValueSymbolId, ScopeId),
     Type(Type, ScopeId)

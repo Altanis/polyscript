@@ -122,7 +122,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
                     TypeSymbolKind::FunctionSignature { .. } => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
-                    _ => unimplemented!("cannot map semantic type to LLVM type: {}", self.analyzer.symbol_table.display_type_symbol(type_symbol)),
+                    _ => unimplemented!("cannot map semantic type to LLVM type: {} {:#?}", self.analyzer.symbol_table.display_type_symbol(type_symbol), type_symbol.span),
                 };
 
                 self.type_map.insert(*symbol, llvm_ty);

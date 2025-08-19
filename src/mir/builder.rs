@@ -528,7 +528,7 @@ impl<'a> MIRBuilder<'a> {
             AstNodeKind::Break => MIRNodeKind::Break,
             AstNodeKind::Continue => MIRNodeKind::Continue,
 
-            AstNodeKind::Function { name, parameters, instance, body, generic_parameters, .. } => {
+            AstNodeKind::Function { parameters, instance, body, generic_parameters, .. } => {
                 if let Some(substitutions) = self.monomorphization_ctx.substitution_ctx.clone() {
                     let template_value_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap().clone();
                     let template_type = template_value_symbol.type_id.as_ref().unwrap();
