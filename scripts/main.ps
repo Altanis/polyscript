@@ -11,11 +11,11 @@
 struct Scalar<T> {}
 
 impl Scalar<str> {
-    const YOUR_NAME: str = "int";
+    const YOUR_NAME: str = "5";
 }
 
 impl Scalar<int> {
     const YOUR_NAME: int = 4;
 }
 
-let y = [Scalar<int>].YOUR_NAME;
+let y = [Scalar<str>].YOUR_NAME;

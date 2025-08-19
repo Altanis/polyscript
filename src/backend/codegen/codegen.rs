@@ -239,14 +239,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let ptr_type = string_const.get_type();
         let zero = self.context.i32_type().const_int(0, false);
 
-        let ptr = unsafe {
-            self.builder.build_gep(
-                ptr_type, 
-                global.as_pointer_value(), 
-                &[zero, zero], 
-                ""
-            ).unwrap()
-        };
+        let ptr = unsafe { global.as_pointer_value().const_gep(ptr_type, &[zero, zero]) };
 
         self.string_literals.insert(key, ptr);
         ptr.as_basic_value_enum()
