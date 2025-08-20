@@ -1,41 +1,9 @@
-#// todo
-- [x] variable declaration
-- [x] function declaration
-- [x] blocks
-- [x] loops
-- [x] control flow
-- [x] structs
-- [x] impl/associated functions/variables
-- [x] associated field/function access
-- [x] enums
-- [x] traits
-- [x] generics
-- [x] custom types
-- [x] references
-- [x] function types
-- [x] refactor parser/ast for consistency
-- [x] refactor lexer/token for consistency
-- [x] fix all error formats
-- [x] add mutable parameters
+must explicitly specify type for T when using a static method on Type<T>, i.e. `[Type<T>].Member` or `[Type<int>].Member`
 
-constraints on generics
-default impl for ops
-must explicitly specify type for T when using a static method on Type<T>, i.e. `[Type<T>].Member`
-
-NOTE: stdlib should contain:
-- io functions (print, err, etc)
-- math functions
-- traits for common operations (operator overloading maybe)
+Notes on references:
+1. Aliasing is allowed (mutable references are NOT exclusive).
+2. Passing by value => clone of the data, passing by reference => either refcounted or stack ptr.
+3. Dereferencing `&T` makes a deep clone of the data (`T`). Dereferencing `&^n T` gives `&^{n - 1} T`, with its refcount increased by 1.
+4. `heap` expressions return `&mut T`.
 
 NOTE: Trailing commas are NOT allowed.
-NOTE: ```rs
-let x: int; // this declaration is sound
-// func(x); // this is an ERROR. x is not defined yet, only forward declared.
-if (true) {
-    x = 5;
-} else {
-    x = 4;
-}
-
-func(x); // x is now verifiably defined
-```

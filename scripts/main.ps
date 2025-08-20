@@ -8,80 +8,24 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
+struct Scalar<T> {
+    x: T;
+}
+
 trait TAddable {
     fn add(self, other: Self): Self;
 }
 
-trait TSubbable {
-    fn sub(self, other: Self): Self;
-}
-
 impl TAddable for int {
-    fn add(self, other: Self): Self {
-        return self + other;
+    fn add(self, other: int): Self {
+        self + other
     }
 }
 
-impl TSubbable for int {
-    fn sub(self, other: Self): Self {
-        return self - other;
-    }
-}
-
-impl TAddable for float {
-    fn add(self, other: Self): Self {
-        return self + other;
-    }
-}
-
-impl TSubbable for float {
-    fn sub(self, other: Self): Self {
-        return self - other;
-    }
-}
-
-fn identity<T>(x: T): T {
-    return x;
-}
-
-fn generic_pair<A: TAddable + TSubbable, B: TAddable + TSubbable>(a: A, b: B) {}
-
-let identity_value = identity(5);
-generic_pair(5, "3");
-
-struct Vector2D<T: TAddable> {
-    public x: T;
-    public y: T;
-}
-
-let vector: Vector2D<int> = Vector2D { x: 3, y: 4 };
-
-impl<T: TAddable> Vector2D<T> {
-    public fn add(self, vector: Vector2D<T>): Vector2D<T> {
-        return Vector2D {
-            x: self.x.add(vector.x),
-            y: self.y.add(vector.y)
+impl<T: TAddable> Scalar<T> {
+    public fn add(self, vector: Scalar<T>): Scalar<T> {
+        return Scalar {
+            x: self.x.add(vector.x)
         };
     }
-
-    public fn random_method<V>(&self, x: V) {}
 }
-
-impl Vector2D<int> {
-    public fn merge(self): int {
-        return self.x + self.y;
-    }
-}
-
-impl Vector2D<float> {
-    public fn merge(self): float {
-        return self.x + self.y;
-    }
-}
-
-let vector1: Vector2D<float> = Vector2D { x: 3.0, y: 3.0 };
-let resultant = vector1.add(Vector2D { x: 4.0, y: 4.0 });
-vector1.random_method("hi");
-let merged = vector1.merge();
-
-// let vector3 = Vector2D { x: 1, y: "3" } <-- compile error
