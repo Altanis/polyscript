@@ -479,8 +479,24 @@ impl SemanticAnalyzer {
             },
             Type::Reference(inner) | Type::MutableReference(inner) => self.type_contains_uvs(inner),
         }
-     }
+    }
  
+
+    /// Checks if a type contains any generic type parameters, indicating it's not a concrete type.
+    fn type_is_generic(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, args } => {
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_)) {
+                    return true;
+                }
+                args.iter().any(|arg| self.type_is_generic(arg))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.type_is_generic(inner)
+            }
+        }
+    }
 
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
     /// https://en.wikipedia.org/wiki/Occurs_check
@@ -2150,6 +2166,60 @@ impl SemanticAnalyzer {
             }
         }
         
+        Ok(())
+    }
+}
+
+impl SemanticAnalyzer {
+    /// A pass that ensures generic functions are not used as first-class values.
+    pub fn generic_value_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.generic_value_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+        errors
+    }
+
+    fn generic_value_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        match &mut node.kind {
+            _ => {
+                for child in node.children_mut() {
+                    self.generic_value_check_node(child)?;
+                }
+                
+                if let Some(ty) = &node.type_id {
+                    let base_symbol_id = ty.get_base_symbol();
+                    if let Some(symbol) = self.symbol_table.get_type_symbol(base_symbol_id) {
+                        if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &symbol.kind {
+                            let is_generic = !symbol.generic_parameters.is_empty()
+                                || params.iter().any(|p| self.type_is_generic(p))
+                                || self.type_is_generic(return_type);
+                            
+                            if is_generic {
+                                let name = node.get_name().unwrap_or_else(|| {
+                                    if let AstNodeKind::FieldAccess { right, .. } = &node.kind {
+                                        right.get_name().unwrap_or_else(|| "[unnamed function value]".to_string())
+                                    } else {
+                                        "[unnamed function value]".to_string()
+                                    }
+                                });
+                                return Err(self.create_error(
+                                    ErrorKind::GenericFunctionAsValue(name),
+                                    node.span,
+                                    &[node.span]
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

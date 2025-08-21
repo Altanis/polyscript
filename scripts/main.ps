@@ -1,3 +1,8 @@
+// functions as first class types
+    // allow fnptr types to unify
+    // assign regular functions to variables
+    // assign closures to variables
+    // assign generic functions to variables
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
 // default traits such as Clone, Default, ToString
@@ -8,50 +13,15 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar<T> {
-    x: T;
+/*let konst = 5;
+fn make_adder<T: Add<T>>(): fn(T): [T as Add<T>].Output {
+    fn(x: T): [T as Add<T>].Output { x + konst }
 }
 
-trait Numeric<T> {
-    fn get_number(&self): T;
+let added = (make_adder())(5);*/
+
+fn make_adder(): fn(int, int): int {
+    fn(x: int, y: int): int { x + y }
 }
 
-impl<T> Scalar<T> {
-    fn new(x: T): Self {
-        Scalar { x }
-    }
-
-    fn get_num(&self): T {
-        self.x
-    }
-}
-
-impl<T> Numeric<T> for Scalar<T> {
-    fn get_number(&self): T {
-        self.x
-    }
-}
-
-let scalar = Scalar { x: 4 };
-let num = scalar.get_num(); // should invoke get_num (parent: [int])
-
-let s2 = Scalar { x: "84" };
-let num2 = s2.get_number(); // should invoke get_number (parent: [str])
-
-fn identity1<T>(x: T): T { x }
-fn identity2<T>(x: Scalar<T>): Scalar<T> { x }
-
-let clone = identity1([Scalar<char>].new('5'));
-let clone2 = identity2(Scalar { x: true });
-
-fn not<T: Not>(x: T): [T as Not].Output {
-    !x
-}
-
-not(3);
-
-let add = fn(x: int, y: int): int {
-    x + y
-};
-
-add(3, 4);
+let f = make_adder();

@@ -60,6 +60,7 @@ pub enum ErrorKind {
     ExpectedValue,
     PrivateMemberAccess(String, String),
     VariableOfVoidType,
+    GenericFunctionAsValue(String),
     NeedsHeapAllocation(String)
 }
 
@@ -182,6 +183,7 @@ impl ErrorKind {
             ErrorKind::ExpectedValue => "expected a value".to_string(),
             ErrorKind::PrivateMemberAccess(member, ty) => format!("member `{}` is private to type `{}`", member, ty),
             ErrorKind::VariableOfVoidType => "variable cannot take on void type".to_string(),
+            ErrorKind::GenericFunctionAsValue(name) => format!("generic function `{}` cannot be used as a value without being called", name),
             ErrorKind::NeedsHeapAllocation(value_symbol) => format!("{value_symbol} needs to be heap allocated")
         }
     }

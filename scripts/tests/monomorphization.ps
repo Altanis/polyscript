@@ -40,4 +40,10 @@ fn not<T: Not>(x: T): [T as Not].Output {
 
 not(3);
 
+let add = fn(x: int, y: int): int {
+    x + y
+};
+
+add(3, 4);
+
 (fn() {})();
