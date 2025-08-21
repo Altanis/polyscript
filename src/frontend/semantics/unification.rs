@@ -992,7 +992,7 @@ impl SemanticAnalyzer {
                     }
                 }
             },
-            TypeSymbolKind::TraitSelf => {
+            TypeSymbolKind::TraitSelf(_) => {
                 if is_static_access {
                     let trait_scope_id = base_symbol.scope_id;
                     if let Some(resolution) = self.find_member_in_impl_scope(trait_scope_id, member_name, true, info)? {

@@ -118,7 +118,7 @@ pub enum TypeSymbolKind {
     Enum((ScopeId, Vec<InherentImpl>)),
     Struct((ScopeId, Vec<InherentImpl>)),
     Trait(ScopeId),
-    TraitSelf,
+    TraitSelf(ScopeId),
     TypeAlias((Option<ScopeId>, Option<Type>)),
     FunctionSignature {
         params: Vec<Type>,
@@ -224,7 +224,7 @@ impl TypeSymbol {
 
         match (&self.kind, &other.kind) {
             (_, TypeSymbolKind::Primitive(PrimitiveKind::Never)) | (TypeSymbolKind::Primitive(PrimitiveKind::Never), _) => Some(self.id),
-            (_, TypeSymbolKind::TraitSelf) | (TypeSymbolKind::TraitSelf, _) => Some(self.id),
+            (_, TypeSymbolKind::TraitSelf(_)) | (TypeSymbolKind::TraitSelf(_), _) => Some(self.id),
 
             _ => None
         }
@@ -1150,7 +1150,7 @@ impl SymbolTable {
                     TypeSymbolKind::Trait(id) => format!("Trait({})", id).cyan(),
                     TypeSymbolKind::Enum((id, scopes)) => format!("Enum({}, {:?})", id, scopes).blue(),
                     TypeSymbolKind::TypeAlias(id) => format!("TypeAlias({:?})", id).white(),
-                    TypeSymbolKind::TraitSelf => "TraitSelf".green(),
+                    TypeSymbolKind::TraitSelf(id) => format!("TraitSelf({})", id).green(),
                     TypeSymbolKind::Primitive(k) => format!("Builtin({})", k).green(),
                     TypeSymbolKind::FunctionSignature {
                         params, return_type, ..

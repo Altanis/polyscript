@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     frontend::{
-        semantics::analyzer::{ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind},
+        semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{MIRNode, MIRNodeKind},
@@ -44,27 +44,29 @@ impl<'a> MIRBuilder<'a> {
 }
 
 impl<'a> MIRBuilder<'a> {
-    fn signature_contains_trait_self(&self, fn_sig_symbol: &crate::frontend::semantics::analyzer::TypeSymbol) -> bool {
-        let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &fn_sig_symbol.kind else { return false; };
+    fn find_trait_scope_from_signature(&self, fn_sig_symbol: &crate::frontend::semantics::analyzer::TypeSymbol) -> Option<ScopeId> {
+        let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &fn_sig_symbol.kind else { return None; };
         
-        let has_trait_self = |ty: &Type| -> bool {
+        let has_trait_self = |ty: &Type| -> Option<ScopeId> {
             let base_symbol_id = ty.get_base_symbol();
             let mut current_id = base_symbol_id;
             loop {
                 let base_symbol = self.analyzer.symbol_table.get_type_symbol(current_id).unwrap();
                 match &base_symbol.kind {
-                    TypeSymbolKind::TraitSelf => return true,
+                    &TypeSymbolKind::TraitSelf(id) => return Some(id),
                     TypeSymbolKind::TypeAlias((_, Some(alias))) => current_id = alias.get_base_symbol(),
-                    _ => return false
+                    _ => return None
                 }
             }
         };
 
-        if has_trait_self(return_type) {
-            return true;
+        for ty in params.iter().chain(std::iter::once(return_type)) {
+            if let Some(scope_id) = has_trait_self(ty) {
+                return Some(scope_id);
+            }
         }
-        
-        params.iter().any(has_trait_self)
+
+        None
     }
 
     fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &crate::frontend::semantics::analyzer::TraitImpl) -> bool {
@@ -94,7 +96,7 @@ impl<'a> MIRBuilder<'a> {
         match ty {
             Type::Base { symbol, args } => {
                 let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf) {
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf(_)) {
                     return false;
                 }
 
@@ -695,7 +697,7 @@ impl<'a> MIRBuilder<'a> {
                 mutable: *mutable,
             },
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
-                if let Some(mut fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
+                if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
@@ -718,13 +720,12 @@ impl<'a> MIRBuilder<'a> {
                     if is_method_call
                         && let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone()
                     {
-                            let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
-                            if self.signature_contains_trait_self(fn_sig_symbol) {
+                        let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
+                        if let Some(trait_scope_id) = self.find_trait_scope_from_signature(fn_sig_symbol) {
                             let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
                             let generic_instance_type = left.type_id.as_ref().unwrap();
                             let concrete_instance_type = self.substitute_type(generic_instance_type, substitutions);
 
-                            let trait_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().parent.unwrap();
                             let trait_id = self.analyzer.symbol_table.registry.type_symbols.values()
                                 .find(|s| matches!(&s.kind, TypeSymbolKind::Trait(id) if *id == trait_scope_id))
                                 .map(|s| s.id)
@@ -743,7 +744,7 @@ impl<'a> MIRBuilder<'a> {
                                     mir_fn_name = self.analyzer.symbol_table.get_value_name(concrete_fn_symbol.name_id).to_string();
                                     mir_fn_value_id = concrete_fn_symbol.id;
                                     mir_fn_type = concrete_fn_symbol.type_id.as_ref().unwrap().clone();
-                                    fn_value_symbol = concrete_fn_symbol.clone(); // fix so that it actually mutates
+                                    function.value_id = Some(mir_fn_value_id);
                                 }
                             }
                         }

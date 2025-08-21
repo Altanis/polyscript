@@ -277,7 +277,7 @@ impl SemanticAnalyzer {
         let generic_param_ids = self.collect_generic_parameters(generic_parameters)?;
         self.symbol_table.add_type_symbol(
             "Self",
-            TypeSymbolKind::TraitSelf,
+            TypeSymbolKind::TraitSelf(trait_scope_id),
             vec![],
             QualifierKind::Public,
             None,
