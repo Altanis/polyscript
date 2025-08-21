@@ -657,7 +657,7 @@ impl SemanticAnalyzer {
         match ty {
             Type::Base { symbol, args } => {
                 let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
-                if let TypeSymbolKind::Generic(_) = type_symbol.kind {
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf(_)) {
                     generics.insert(*symbol);
                 }
 

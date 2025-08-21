@@ -786,6 +786,7 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
+            
             AstNodeKind::FieldAccess { left, right } => {
                 let is_static_access = match &left.kind {
                     AstNodeKind::PathQualifier { .. } => true,
