@@ -387,7 +387,6 @@ impl<'a> MIRBuilder<'a> {
         format!("{}_{}", name, symbol.id)
     }
 
-
     fn substitute_type(&mut self, generic_type: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
         match generic_type {
             Type::Base { symbol, args } => {
@@ -786,7 +785,6 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
-            
             AstNodeKind::FieldAccess { left, right } => {
                 let is_static_access = match &left.kind {
                     AstNodeKind::PathQualifier { .. } => true,

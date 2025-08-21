@@ -184,7 +184,16 @@ impl SemanticAnalyzer {
             )?;
             Ok((Some(value_id), None))
         } else {
-            Ok((None, None))
+            let mangled_name = format!("#closure_{}", node.id);
+            let value_id = self.symbol_table.add_value_symbol(
+                &mangled_name,
+                ValueSymbolKind::Function(scope_id),
+                false,
+                QualifierKind::Private,
+                None,
+                Some(node.span),
+            )?;
+            Ok((Some(value_id), None))
         }
     }
 

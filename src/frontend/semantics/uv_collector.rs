@@ -449,7 +449,7 @@ impl SemanticAnalyzer {
 
         let is_declaration = !name.is_empty();
 
-        let symbol_uv_opt = if is_declaration {
+        let symbol_uv = if node.value_id.is_some() {
             let uv = self
                 .unification_context
                 .generate_uv_type(&mut self.symbol_table, span);
@@ -544,15 +544,19 @@ impl SemanticAnalyzer {
             );
 
             self.unification_context
-                .register_constraint(Constraint::Equality(symbol_uv_opt.unwrap(), fn_sig_type), info);
+                .register_constraint(Constraint::Equality(symbol_uv.unwrap(), fn_sig_type), info);
         } else {
             self.unification_context
-                .register_constraint(Constraint::Equality(Type::new_base(uv_id), fn_sig_type), info);
+                .register_constraint(Constraint::Equality(Type::new_base(uv_id), fn_sig_type.clone()), info);
+            
+            if let Some(uv) = symbol_uv {
+                self.unification_context.register_constraint(Constraint::Equality(uv, fn_sig_type), info);
+            }
         }
 
         Ok(())
     }
-    
+
     fn collect_uv_function_parameter(
         &mut self,
         uv_id: TypeSymbolId,
