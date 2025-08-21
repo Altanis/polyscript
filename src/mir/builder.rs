@@ -48,7 +48,7 @@ impl<'a> MIRBuilder<'a> {
         match ty {
             Type::Base { symbol, args } => {
                 let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_)) {
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf) {
                     return false;
                 }
 

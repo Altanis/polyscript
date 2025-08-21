@@ -29,3 +29,7 @@ impl<T: TAddable> Scalar<T> {
         };
     }
 }
+
+let x = Scalar { x: 4 };
+let y = Scalar { x: 6 };
+let z = x.add(y);
