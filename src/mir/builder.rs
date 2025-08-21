@@ -44,6 +44,52 @@ impl<'a> MIRBuilder<'a> {
 }
 
 impl<'a> MIRBuilder<'a> {
+    fn signature_contains_trait_self(&self, fn_sig_symbol: &crate::frontend::semantics::analyzer::TypeSymbol) -> bool {
+        let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &fn_sig_symbol.kind else { return false; };
+        
+        let has_trait_self = |ty: &Type| -> bool {
+            let base_symbol_id = ty.get_base_symbol();
+            let mut current_id = base_symbol_id;
+            loop {
+                let base_symbol = self.analyzer.symbol_table.get_type_symbol(current_id).unwrap();
+                match &base_symbol.kind {
+                    TypeSymbolKind::TraitSelf => return true,
+                    TypeSymbolKind::TypeAlias((_, Some(alias))) => current_id = alias.get_base_symbol(),
+                    _ => return false
+                }
+            }
+        };
+
+        if has_trait_self(return_type) {
+            return true;
+        }
+        
+        params.iter().any(has_trait_self)
+    }
+
+    fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &crate::frontend::semantics::analyzer::TraitImpl) -> bool {
+        let instance_args = match instance_type {
+            Type::Base { args, .. } => args,
+            _ => return imp.type_specialization.is_empty(),
+        };
+        
+        if instance_args.len() != imp.type_specialization.len() {
+            return false;
+        }
+    
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(&imp.type_specialization) {
+            if imp.impl_generic_params.contains(&impl_target_arg_id) {
+                continue;
+            }
+    
+            if instance_arg.get_base_symbol() != impl_target_arg_id {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn type_is_fully_concrete(&self, ty: &Type) -> bool {
         match ty {
             Type::Base { symbol, args } => {
@@ -649,7 +695,7 @@ impl<'a> MIRBuilder<'a> {
                 mutable: *mutable,
             },
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
-                if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
+                if let Some(mut fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
@@ -659,7 +705,7 @@ impl<'a> MIRBuilder<'a> {
 
                     let is_method_call = instance.is_some() && matches!(&function.kind, AstNodeKind::FieldAccess { .. });
 
-                    let (mir_fn_name, mir_fn_value_id, mir_fn_type) = if !generic_arguments.is_empty() {
+                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if !generic_arguments.is_empty() {
                         let mangled_name = self.mangle_name(*fn_sig_id, generic_arguments);
                         let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().id;
                         let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
@@ -668,6 +714,40 @@ impl<'a> MIRBuilder<'a> {
                         let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
                         (name, fn_value_symbol.id, fn_type.clone())
                     };
+                    
+                    if is_method_call
+                        && let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone()
+                    {
+                            let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
+                            if self.signature_contains_trait_self(fn_sig_symbol) {
+                            let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
+                            let generic_instance_type = left.type_id.as_ref().unwrap();
+                            let concrete_instance_type = self.substitute_type(generic_instance_type, substitutions);
+
+                            let trait_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().parent.unwrap();
+                            let trait_id = self.analyzer.symbol_table.registry.type_symbols.values()
+                                .find(|s| matches!(&s.kind, TypeSymbolKind::Trait(id) if *id == trait_scope_id))
+                                .map(|s| s.id)
+                                .unwrap();
+
+                            let concrete_instance_type_id = concrete_instance_type.get_base_symbol();
+                            if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
+                                && let Some(impls_for_type) = impls_for_trait.get(&concrete_instance_type_id)
+                                && let Some(applicable_impl) 
+                                    = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_instance_type, imp))
+                            {
+                                let method_name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id);
+                                if let Some(concrete_fn_symbol) = self.analyzer.symbol_table
+                                    .find_value_symbol_in_scope(method_name, applicable_impl.impl_scope_id) {
+        
+                                    mir_fn_name = self.analyzer.symbol_table.get_value_name(concrete_fn_symbol.name_id).to_string();
+                                    mir_fn_value_id = concrete_fn_symbol.id;
+                                    mir_fn_type = concrete_fn_symbol.type_id.as_ref().unwrap().clone();
+                                    fn_value_symbol = concrete_fn_symbol.clone(); // fix so that it actually mutates
+                                }
+                            }
+                        }
+                    }
 
                     let mir_function_expr = if is_method_call {
                         let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
