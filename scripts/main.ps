@@ -13,15 +13,9 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-/*let konst = 5;
+let konst = 5;
 fn make_adder<T: Add<T>>(): fn(T): [T as Add<T>].Output {
     fn(x: T): [T as Add<T>].Output { x + konst }
 }
 
-let added = (make_adder())(5);*/
-
-fn make_adder(): fn(int, int): int {
-    fn(x: int, y: int): int { x + y }
-}
-
-let f = make_adder();
+let added = (make_adder());

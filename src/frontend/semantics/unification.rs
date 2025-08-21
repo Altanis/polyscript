@@ -481,23 +481,6 @@ impl SemanticAnalyzer {
         }
     }
  
-
-    /// Checks if a type contains any generic type parameters, indicating it's not a concrete type.
-    fn type_is_generic(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Base { symbol, args } => {
-                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
-                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_)) {
-                    return true;
-                }
-                args.iter().any(|arg| self.type_is_generic(arg))
-            },
-            Type::Reference(inner) | Type::MutableReference(inner) => {
-                self.type_is_generic(inner)
-            }
-        }
-    }
-
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
     /// https://en.wikipedia.org/wiki/Occurs_check
     fn occurs_check(&mut self, uv_id: TypeSymbolId, ty: &Type) -> bool {
@@ -1340,6 +1323,36 @@ impl SemanticAnalyzer {
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
                 let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap().clone();
+
+                if let (
+                    TypeSymbolKind::FunctionSignature { params: p1, return_type: r1, instance: i1 },
+                    TypeSymbolKind::FunctionSignature { params: p2, return_type: r2, instance: i2 }
+                ) = (&type_sym_s1.kind, &type_sym_s2.kind) {
+                    if type_sym_s1.generic_parameters.len() != type_sym_s2.generic_parameters.len() {
+                        return Err(self.type_mismatch_error(t1, t2, info, Some("function signatures have different number of generic parameters".to_string())));
+                    }
+                    if i1 != i2 {
+                        return Err(self.type_mismatch_error(t1, t2, info, Some("function signatures have different instance kinds".to_string())));
+                    }
+                    if p1.len() != p2.len() {
+                        return Err(self.type_mismatch_error(t1, t2, info, Some(format!("function signatures have different number of parameters: {} vs {}", p1.len(), p2.len()))));
+                    }
+
+                    let mut substitutions = HashMap::new();
+                    for (g1, g2) in type_sym_s1.generic_parameters.iter().zip(type_sym_s2.generic_parameters.iter()) {
+                        substitutions.insert(*g2, Type::new_base(*g1));
+                    }
+
+                    let r2_substituted = self.apply_substitution(r2, &substitutions);
+                    self.unify(r1.clone(), r2_substituted, info)?;
+
+                    for (param1, param2) in p1.iter().zip(p2.iter()) {
+                        let p2_substituted = self.apply_substitution(param2, &substitutions);
+                        self.unify(param1.clone(), p2_substituted, info)?;
+                    }
+                    
+                    return Ok(t1.clone());
+                }
                 
                 if let Some(resultant_symbol) = type_sym_s1.unify(&type_sym_s2) {
                     if a1.len() != a2.len() {
@@ -2171,7 +2184,47 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
-    /// A pass that ensures generic functions are not used as first-class values.
+    fn type_is_generic(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, args } => {
+                let type_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap();
+                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_)) {
+                    return true;
+                }
+
+                args.iter().any(|arg| self.type_is_generic(arg))
+            },
+            Type::Reference(inner) | Type::MutableReference(inner) => {
+                self.type_is_generic(inner)
+            }
+        }
+    }
+
+    /// Checks if a node's type is a generic function signature.
+    fn check_node_is_not_generic_fn(&self, node: &AstNode) -> Result<(), BoxedError> {
+        if let Some(ty) = &node.type_id {
+            let base_symbol_id = ty.get_base_symbol();
+            if let Some(symbol) = self.symbol_table.get_type_symbol(base_symbol_id)
+                && let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &symbol.kind
+            {
+                let is_generic = !symbol.generic_parameters.is_empty()
+                    || params.iter().any(|p| self.type_is_generic(p))
+                    || self.type_is_generic(return_type);
+                
+                if is_generic {
+                    let name = node.get_name().unwrap_or_else(|| "[unnamed function value]".to_string());
+                    return Err(self.create_error(
+                        ErrorKind::GenericFunctionAsValue(name),
+                        node.span,
+                        &[node.span]
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn generic_value_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
         let mut errors = vec![];
         if let AstNodeKind::Program(statements) = &mut program.kind {
@@ -2187,38 +2240,121 @@ impl SemanticAnalyzer {
     }
 
     fn generic_value_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        use AstNodeKind::*;
+        
         match &mut node.kind {
-            _ => {
-                for child in node.children_mut() {
-                    self.generic_value_check_node(child)?;
-                }
-                
-                if let Some(ty) = &node.type_id {
-                    let base_symbol_id = ty.get_base_symbol();
-                    if let Some(symbol) = self.symbol_table.get_type_symbol(base_symbol_id) {
-                        if let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &symbol.kind {
-                            let is_generic = !symbol.generic_parameters.is_empty()
-                                || params.iter().any(|p| self.type_is_generic(p))
-                                || self.type_is_generic(return_type);
-                            
-                            if is_generic {
-                                let name = node.get_name().unwrap_or_else(|| {
-                                    if let AstNodeKind::FieldAccess { right, .. } = &node.kind {
-                                        right.get_name().unwrap_or_else(|| "[unnamed function value]".to_string())
-                                    } else {
-                                        "[unnamed function value]".to_string()
-                                    }
-                                });
-                                return Err(self.create_error(
-                                    ErrorKind::GenericFunctionAsValue(name),
-                                    node.span,
-                                    &[node.span]
-                                ));
-                            }
-                        }
+            Program(stmts) | Block(stmts) => {
+                for stmt in stmts { self.generic_value_check_node(stmt)?; }
+            },
+            ExpressionStatement(expr) => {
+                self.check_node_is_not_generic_fn(expr)?;
+                self.generic_value_check_node(expr)?;
+            },
+
+            VariableDeclaration { initializer, .. } => {
+                self.check_node_is_not_generic_fn(initializer)?;
+                self.generic_value_check_node(initializer)?;
+            },
+            Function { body, .. } => {
+                if let Some(b) = body { self.generic_value_check_node(b)?; }
+            },
+            StructDeclaration { fields, .. } => {
+                for f in fields { self.generic_value_check_node(f)?; }
+            },
+            EnumDeclaration { variants, .. } => {
+                for (_, expr_opt) in variants.values_mut() {
+                    if let Some(expr) = expr_opt {
+                        self.check_node_is_not_generic_fn(expr)?;
+                        self.generic_value_check_node(expr)?;
                     }
                 }
-            }
+            },
+            ImplDeclaration { associated_constants, associated_functions, .. } => {
+                for c in associated_constants { self.generic_value_check_node(c)?; }
+                for f in associated_functions { self.generic_value_check_node(f)?; }
+            },
+            AssociatedConstant { initializer, .. } => {
+                self.check_node_is_not_generic_fn(initializer)?;
+                self.generic_value_check_node(initializer)?;
+            },
+            
+            IfStatement { condition, then_branch, else_if_branches, else_branch } => {
+                self.check_node_is_not_generic_fn(condition)?;
+                self.generic_value_check_node(condition)?;
+                self.generic_value_check_node(then_branch)?;
+                for (c, b) in else_if_branches {
+                    self.check_node_is_not_generic_fn(c)?;
+                    self.generic_value_check_node(c)?;
+                    self.generic_value_check_node(b)?;
+                }
+                if let Some(b) = else_branch { self.generic_value_check_node(b)?; }
+            },
+            ForLoop { initializer, condition, increment, body } => {
+                if let Some(i) = initializer { self.generic_value_check_node(i)?; }
+                if let Some(c) = condition { 
+                    self.check_node_is_not_generic_fn(c)?;
+                    self.generic_value_check_node(c)?;
+                }
+                if let Some(i) = increment { 
+                    self.check_node_is_not_generic_fn(i)?;
+                    self.generic_value_check_node(i)?;
+                }
+                self.generic_value_check_node(body)?;
+            },
+            WhileLoop { condition, body } => {
+                self.check_node_is_not_generic_fn(condition)?;
+                self.generic_value_check_node(condition)?;
+                self.generic_value_check_node(body)?;
+            },
+            Return(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    self.check_node_is_not_generic_fn(expr)?;
+                    self.generic_value_check_node(expr)?;
+                }
+            },
+
+            UnaryOperation { operand, .. } => {
+                self.check_node_is_not_generic_fn(operand)?;
+                self.generic_value_check_node(operand)?;
+            },
+            BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
+                self.check_node_is_not_generic_fn(left)?;
+                self.generic_value_check_node(left)?;
+                self.check_node_is_not_generic_fn(right)?;
+                self.generic_value_check_node(right)?;
+            },
+            HeapExpression(expr) => {
+                self.check_node_is_not_generic_fn(expr)?;
+                self.generic_value_check_node(expr)?;
+            },
+            TypeCast { expr, .. } => {
+                self.check_node_is_not_generic_fn(expr)?;
+                self.generic_value_check_node(expr)?;
+            },
+            FieldAccess { left, right } => {
+                self.generic_value_check_node(left)?;
+                self.generic_value_check_node(right)?;
+            },
+            FunctionCall { function, arguments, .. } => {
+                self.generic_value_check_node(function)?;
+                
+                for arg in arguments {
+                    self.check_node_is_not_generic_fn(arg)?;
+                    self.generic_value_check_node(arg)?;
+                }
+            },
+            StructLiteral { fields, .. } => {
+                for field_expr in fields.values_mut() {
+                    self.check_node_is_not_generic_fn(field_expr)?;
+                    self.generic_value_check_node(field_expr)?;
+                }
+            },
+
+            IntegerLiteral(_) | FloatLiteral(_) | BooleanLiteral(_) | StringLiteral(_) | CharLiteral(_) |
+            Identifier(_) | EnumVariant(_) | Break | Continue | SelfExpr | FunctionParameter {..} |
+            StructField {..} | TraitDeclaration {..} | TraitConstant {..} |
+            TraitType(_) | GenericParameter {..} | ReferenceType {..} | TypeReference {..} |
+            TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} => {}
         }
         Ok(())
     }
