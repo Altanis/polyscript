@@ -240,13 +240,19 @@ impl SemanticAnalyzer {
     fn collect_uv_block(
         &mut self,
         uv_id: TypeSymbolId,
-        statements: &mut [AstNode],
+        expr: &mut AstNode,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        let AstNodeKind::Block(statements) = &mut expr.kind else { unreachable!(); };
+
         let mut last_type = None;
 
         for stmt in statements.iter_mut() {
             last_type = Some(self.collect_uvs(stmt)?);
+        }
+
+        if let Some(last_stmt) = statements.last() && !matches!(last_stmt.kind, AstNodeKind::ExpressionStatement(_)) {
+            expr.value_id = last_stmt.value_id;
         }
 
         if let Some(last_type) = last_type {
@@ -263,7 +269,7 @@ impl SemanticAnalyzer {
                 info,
             );
         }
-
+        
         Ok(())
     }
 
@@ -496,6 +502,11 @@ impl SemanticAnalyzer {
 
         if let Some(body_node) = body {
             let body_type = self.collect_uvs(body_node)?;
+
+            if let Some(returned_val_id) = body_node.value_id && let Some(fn_val_id) = node.value_id {
+                let fn_symbol = self.symbol_table.get_value_symbol_mut(fn_val_id).unwrap();
+                fn_symbol.statically_known_return_value_id = Some(returned_val_id);
+            }
 
             let span = if let AstNodeKind::Block(stmts) = &body_node.kind {
                 stmts.last().map_or(body_node.span, |s| s.span)
@@ -1117,11 +1128,12 @@ impl SemanticAnalyzer {
     fn collect_uv_function_call(
         &mut self,
         uv_id: TypeSymbolId,
-        function_node: &mut BoxedAstNode,
-        arguments: &mut [AstNode],
+        node: &mut AstNode,
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        let AstNodeKind::FunctionCall { function: function_node, arguments, .. } = &mut node.kind else { unreachable!(); };
+
         let function_type = self.collect_uvs(function_node)?;
 
         let argument_types: Vec<Type> = arguments
@@ -1174,6 +1186,13 @@ impl SemanticAnalyzer {
             Constraint::Equality(Type::new_base(uv_id), return_uv_type),
             info,
         );
+
+        if let Some(callee_id) = function_node.value_id {
+            let callee_sym = self.symbol_table.get_value_symbol(callee_id).unwrap();
+            if let Some(returned_id) = callee_sym.statically_known_return_value_id {
+                node.value_id = Some(returned_id);
+            }
+        }
 
         Ok(())
     }
@@ -1324,7 +1343,7 @@ impl SemanticAnalyzer {
             VariableDeclaration { .. } => {
                 self.collect_uv_variable_declaration(uv_id, expr, expr.span, info)?
             }
-            Block(statements) => self.collect_uv_block(uv_id, statements, info)?,
+            Block(_) => self.collect_uv_block(uv_id, expr, info)?,
             IfStatement {
                 condition,
                 then_branch,
@@ -1367,9 +1386,7 @@ impl SemanticAnalyzer {
                 self.collect_uv_self_type(uv_id, expr.scope_id.unwrap(), *reference_kind, expr.span, info)?
             }
             FieldAccess { left, right } => self.collect_uv_field_access(uv_id, left, right, info)?,
-            FunctionCall { function, arguments, .. } => {
-                self.collect_uv_function_call(uv_id, function, arguments, expr.span, info)?
-            },
+            FunctionCall { .. } => self.collect_uv_function_call(uv_id, expr, expr.span, info)?,
             PathQualifier { .. } => {
                 return Err(self.create_error(ErrorKind::InvalidPathQualifier, expr.span, &[expr.span]))
             },

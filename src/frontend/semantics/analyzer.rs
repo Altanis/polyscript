@@ -202,7 +202,8 @@ pub struct ValueSymbol {
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<Type>,
-    pub allocation_kind: AllocationKind
+    pub allocation_kind: AllocationKind,
+    pub statically_known_return_value_id: Option<ValueSymbolId>
 }
 
 #[derive(Debug, Clone)]
@@ -579,7 +580,8 @@ impl SymbolTable {
             type_id,
             span,
             scope_id,
-            allocation_kind: AllocationKind::Unresolved
+            allocation_kind: AllocationKind::Unresolved,
+            statically_known_return_value_id: None
         };
         self.registry.value_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
