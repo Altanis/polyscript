@@ -1292,6 +1292,27 @@ impl SemanticAnalyzer {
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. }) 
                 if self.is_uv(s) => self.unify_variable(s, other, info),
             
+            (t1 @ Type::Base { symbol: s1, .. }, t2 @ Type::Base { symbol: s2, .. })
+                if self.is_opaque_type_projection(s1) && self.is_opaque_type_projection(s2) =>
+            {
+                let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
+                let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap().clone();
+
+                let (
+                    TypeSymbolKind::OpaqueTypeProjection { ty: ty1, tr: tr1, member: m1 },
+                    TypeSymbolKind::OpaqueTypeProjection { ty: ty2, tr: tr2, member: m2 }
+                ) = (&type_sym_s1.kind, &type_sym_s2.kind) else { unreachable!(); };
+
+                    if m1 != m2 {
+                        return Err(self.type_mismatch_error(&t1, &t2, info, Some(format!("mismatched associated types: `{}` and `{}`", m1, m2))));
+                    }
+
+                    self.unify(ty1.clone(), ty2.clone(), info)?;
+                    self.unify(tr1.clone(), tr2.clone(), info)?;
+
+                    return Ok(t1.clone());
+            },
+            
             (opaque_type @ Type::Base { symbol: s, .. }, other_type) | (other_type, opaque_type @ Type::Base { symbol: s, .. }) 
                 if self.is_opaque_type_projection(s) =>
             {
