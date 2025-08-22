@@ -1307,8 +1307,10 @@ impl SemanticAnalyzer {
                         return Err(self.type_mismatch_error(&t1, &t2, info, Some(format!("mismatched associated types: `{}` and `{}`", m1, m2))));
                     }
 
-                    self.unify(ty1.clone(), ty2.clone(), info)?;
-                    self.unify(tr1.clone(), tr2.clone(), info)?;
+                    self.unify(ty1.clone(), ty2.clone(), info)
+                        .map_err(|_| self.type_mismatch_error(&t1, &t2, info, None))?;
+                    self.unify(tr1.clone(), tr2.clone(), info)
+                        .map_err(|_| self.type_mismatch_error(&t1, &t2, info, None))?;
 
                     return Ok(t1.clone());
             },
