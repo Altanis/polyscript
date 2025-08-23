@@ -265,7 +265,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return *konst;
         }
 
-        panic!("unresolved identiifer during codegen");
+        panic!("unresolved identifier during codegen {}", 
+            self.analyzer.symbol_table.display_value_symbol(self.analyzer.symbol_table.get_value_symbol(value_id).as_ref().unwrap())
+        );
     }
 
     fn compile_variable_declaration(&mut self, initializer: &BoxedMIRNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
@@ -1000,16 +1002,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_declarations_pass(&mut self, stmts: &'a [MIRNode]) {
         for stmt in stmts.iter() {
-            match &stmt.kind {
-                MIRNodeKind::Function { .. } => self.compile_function_declaration(stmt),
-                MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
-                MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
-                MIRNodeKind::VariableDeclaration { mutable: false, .. } => {
-                    let init_val = self.compile_node(stmt).unwrap();
-                    self.constants.insert(stmt.value_id.unwrap(), init_val);
-                },
-                _ => {}
-            }
+            self.compile_declaration_node(stmt);
+        }
+    }
+
+    fn compile_declaration_node(&mut self, stmt: &'a MIRNode) {
+        for child in stmt.children() {
+            self.compile_declaration_node(child);
+        }
+
+        match &stmt.kind {
+            MIRNodeKind::Function { .. } => self.compile_function_declaration(stmt),
+            MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
+            MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
+            MIRNodeKind::VariableDeclaration { mutable: false, .. } => {
+                let init_val = self.compile_node(stmt).unwrap();
+                self.constants.insert(stmt.value_id.unwrap(), init_val);
+            },
+            _ => {}
         }
     }
 }

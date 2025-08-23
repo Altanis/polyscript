@@ -19,8 +19,22 @@ fn add(x: int): int {
 //let x = add;
 //let y = x(3);
 
-fn make_identity<T>(): fn(T): T {
+/*fn make_identity(): fn(T): T {
     fn(x: T): T { x }
 }
 
-let value = (make_identity())(4);
+let value = (make_identity())(4);*/
+
+/*fn make_adder(): fn(int, int): int {
+    fn(x: int, y: int): int { x + y }
+}
+
+let adder = make_adder();
+let y = adder(3, 4);*/
+
+fn test(): int {
+    fn wow(): int { return 3; }
+    return wow();
+}
+
+let x = test();
