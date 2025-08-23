@@ -993,26 +993,55 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub fn compile_program(&mut self, program: &'a MIRNode) {
         let MIRNodeKind::Program(stmts) = &program.kind else { unreachable!(); };
-
-        self.compile_declarations_pass(stmts);
-        self.compile_executable_code_pass(stmts);
+    
+        let functions = self.compile_declarations_pass(stmts);
+        for func in functions {
+            self.compile_function_body(func);
+        }
+    
+        let main_fn_type = self.context.i32_type().fn_type(&[], false);
+        let main_fn = self.module.add_function("main", main_fn_type, None);
+        self.current_function = Some(main_fn);
+        let entry = self.context.append_basic_block(main_fn, "entry");
+        self.builder.position_at_end(entry);
+    
+        for stmt in stmts.iter() {
+            match &stmt.kind {
+                MIRNodeKind::Function {..} | MIRNodeKind::StructDeclaration {..} |
+                MIRNodeKind::EnumDeclaration {..} | MIRNodeKind::VariableDeclaration { mutable: false, .. } => {},
+                _ => {
+                    self.compile_node(stmt);
+                }
+            }
+        }
+    
+        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+            self.builder.build_return(Some(&self.context.i32_type().const_int(0, false))).unwrap();
+        }
     }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_declarations_pass(&mut self, stmts: &'a [MIRNode]) {
+    fn compile_declarations_pass(&mut self, stmts: &'a [MIRNode]) -> Vec<&'a MIRNode> {
+        let mut functions = vec![];
+
         for stmt in stmts.iter() {
-            self.compile_declaration_node(stmt);
+            self.compile_declaration_node(stmt, &mut functions);
         }
+
+        functions
     }
 
-    fn compile_declaration_node(&mut self, stmt: &'a MIRNode) {
+    fn compile_declaration_node(&mut self, stmt: &'a MIRNode, functions: &mut Vec<&'a MIRNode>) {
         for child in stmt.children() {
-            self.compile_declaration_node(child);
+            self.compile_declaration_node(child, functions);
         }
 
         match &stmt.kind {
-            MIRNodeKind::Function { .. } => self.compile_function_declaration(stmt),
+            MIRNodeKind::Function { .. } => {
+                self.compile_function_declaration(stmt);
+                functions.push(stmt);
+            },
             MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
             MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
             MIRNodeKind::VariableDeclaration { mutable: false, .. } => {
@@ -1025,34 +1054,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn compile_executable_code_pass(&mut self, stmts: &'a [MIRNode]) {
-        for stmt in stmts.iter() {
-            if let MIRNodeKind::Function { body, .. } = &stmt.kind && body.is_some() {
-                self.compile_function_body(stmt);
-            }
-        }
-
-        let main_fn_type = self.context.i32_type().fn_type(&[], false);
-        let main_fn = self.module.add_function("main", main_fn_type, None);
-        self.current_function = Some(main_fn);
-        let entry = self.context.append_basic_block(main_fn, "entry");
-        self.builder.position_at_end(entry);
-
-        for stmt in stmts.iter() {
-            match &stmt.kind {
-                MIRNodeKind::Function {..} | MIRNodeKind::StructDeclaration {..} |
-                MIRNodeKind::EnumDeclaration {..} | MIRNodeKind::VariableDeclaration { mutable: false, .. } => {},
-                _ => {
-                    self.compile_node(stmt);
-                }
-            }
-        }
-
-        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
-            self.builder.build_return(Some(&self.context.i32_type().const_int(0, false))).unwrap();
-        }
-    }
-
     fn compile_node(&mut self, stmt: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
         match &stmt.kind {
             MIRNodeKind::IntegerLiteral(value) => Some(self.compile_integer_literal(*value)),
