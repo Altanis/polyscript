@@ -258,7 +258,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         if let Some(func) = self.functions.get(&value_id) {
-            return func.as_global_value().as_basic_value_enum();
+            return func.as_global_value().as_pointer_value().into();
         }
 
         if let Some(konst) = self.constants.get(&value_id) {
@@ -1115,7 +1115,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 => self.compile_type_cast(expr, stmt.type_id.as_ref().unwrap()),
             MIRNodeKind::StructLiteral { fields, .. }
                 => self.compile_struct_literal(stmt.type_id.as_ref().unwrap(), fields),
-            MIRNodeKind::Function { .. } => None,
+            MIRNodeKind::Function { .. } => {
+                let value_id = stmt.value_id.unwrap();
+                let function = self.functions.get(&value_id).unwrap();
+                Some(function.as_global_value().as_pointer_value().into())
+            },
             MIRNodeKind::FunctionCall { function, arguments } => self.compile_function_call(function, arguments),
             MIRNodeKind::FieldAccess { .. } => self.compile_field_access(stmt),
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
