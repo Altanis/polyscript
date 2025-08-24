@@ -14,13 +14,14 @@
 /*let konst = 4;
 fn add(x: int): int {
     x + konst
-}*/
-
-//let x = add;
-//let y = x(3);
-
-fn make_identity<T>(): fn(T): T {
-    fn(x: T): T { x }
 }
 
-let value = (make_identity())(4);
+let x = add;
+let y = x(3);*/
+
+fn make_identity() {
+    fn wow<T>(x: T): T { x }
+    let y = wow(3);
+}
+
+(make_identity());

@@ -182,6 +182,10 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn collect_monomorphization_sites(&mut self, node: &mut AstNode) {
+        for child in node.children_mut() {
+            self.collect_monomorphization_sites(child);
+        }
+
         match &mut node.kind {
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
                 let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) else { return; };
@@ -323,10 +327,6 @@ impl<'a> MIRBuilder<'a> {
             },
             _ => {}
         }
-
-        for child in node.children_mut() {
-            self.collect_monomorphization_sites(child);
-        }
     }
 }
 
@@ -443,6 +443,12 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn build_concrete_stmt(&mut self, node: &mut AstNode) -> Vec<MIRNode> {
+        let mut concrete_ir_nodes = vec![];
+
+        for child in node.children_mut() {
+            concrete_ir_nodes.extend(self.build_concrete_stmt(child));
+        }
+
         let template_symbol_id = match &node.kind {
             AstNodeKind::StructDeclaration { name, .. } => self
                 .analyzer
@@ -458,11 +464,9 @@ impl<'a> MIRBuilder<'a> {
                     .unwrap();
                 value_symbol.type_id.as_ref().unwrap().get_base_symbol()
             }
-            _ => return vec![],
+            _ => return concrete_ir_nodes,
         };
-        let Some(concrete_types_set) = self.monomorphization_ctx.instantiations.get(&template_symbol_id).cloned() else { return vec![]; };
-
-        let mut concrete_ir_nodes = vec![];
+        let Some(concrete_types_set) = self.monomorphization_ctx.instantiations.get(&template_symbol_id).cloned() else { return concrete_ir_nodes; };
 
         match &node.kind {
             AstNodeKind::StructDeclaration { .. } | AstNodeKind::Function { .. } => {
