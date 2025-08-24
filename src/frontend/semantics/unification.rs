@@ -797,7 +797,7 @@ impl SemanticAnalyzer {
             let symbol_type = value_symbol.type_id.as_ref().unwrap().clone();
             
             let is_match = match value_symbol.kind {
-                ValueSymbolKind::Function(_) => {
+                ValueSymbolKind::Function(_, _) => {
                     let resolved_type = self.resolve_type(&symbol_type);
                     if self.is_uv(resolved_type.get_base_symbol()) { 
                         return Ok(None); 
@@ -1090,7 +1090,7 @@ impl SemanticAnalyzer {
                         }
                     }
     
-                    if matches!(value_symbol.kind, ValueSymbolKind::Function(_) | ValueSymbolKind::Variable) {
+                    if matches!(value_symbol.kind, ValueSymbolKind::Function(_, _) | ValueSymbolKind::Variable) {
                         let member_type = value_symbol.type_id.as_ref().unwrap();
                         let resolution = MemberResolution::Value(self.apply_substitution(member_type, &substitutions), value_symbol.id, scope_id);
                         return Ok(Some(resolution));
@@ -2772,7 +2772,7 @@ impl SemanticAnalyzer {
             if let Some(trait_value_symbol) = self.symbol_table.find_value_symbol_in_scope(member_name, trait_scope_id) {
                 match trait_value_symbol.kind {
                     ValueSymbolKind::Variable => self.check_constant_conformance(member_name, trait_scope_id, impl_scope_id, &substitution_map)?,
-                    ValueSymbolKind::Function(_) => self.check_function_conformance(member_name, trait_scope_id, impl_scope_id, &substitution_map)?,
+                    ValueSymbolKind::Function(_, _) => self.check_function_conformance(member_name, trait_scope_id, impl_scope_id, &substitution_map)?,
                     _ => {}
                 }
             }

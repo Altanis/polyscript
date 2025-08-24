@@ -176,7 +176,7 @@ impl SemanticAnalyzer {
         if is_declaration {
             let value_id = self.symbol_table.add_value_symbol(
                 &name,
-                ValueSymbolKind::Function(scope_id),
+                ValueSymbolKind::Function(scope_id, false),
                 false,
                 qualifier.unwrap_or(QualifierKind::Public),
                 None,
@@ -187,7 +187,7 @@ impl SemanticAnalyzer {
             let mangled_name = format!("#closure_{}", node.id);
             let value_id = self.symbol_table.add_value_symbol(
                 &mangled_name,
-                ValueSymbolKind::Function(scope_id),
+                ValueSymbolKind::Function(scope_id, false),
                 false,
                 QualifierKind::Private,
                 None,
@@ -912,7 +912,7 @@ impl SemanticAnalyzer {
 
                 func_node.value_id = Some(self.symbol_table.add_value_symbol(
                     name,
-                    ValueSymbolKind::Function(func_scope_id),
+                    ValueSymbolKind::Function(func_scope_id, false),
                     false,
                     qualifier.unwrap(),
                     None,

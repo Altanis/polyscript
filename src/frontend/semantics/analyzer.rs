@@ -65,7 +65,7 @@ impl NameInterner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function(ScopeId),
+    Function(ScopeId, bool),
     StructField,
     EnumVariant,
 }
@@ -420,7 +420,7 @@ impl SymbolTable {
 
             self.add_value_symbol(
                 &fn_name,
-                ValueSymbolKind::Function(func_scope_id),
+                ValueSymbolKind::Function(func_scope_id, false),
                 false,
                 QualifierKind::Public,
                 Some(Type::new_base(fn_sig_type_id)),
@@ -535,7 +535,7 @@ impl SymbolTable {
 
                 self.add_value_symbol(
                     &fn_name,
-                    ValueSymbolKind::Function(func_scope_id),
+                    ValueSymbolKind::Function(func_scope_id, false),
                     false,
                     QualifierKind::Public,
                     Some(Type::new_base(concrete_sig_id)),
@@ -981,6 +981,7 @@ impl UnificationContext {
 
 pub struct UVCollectionContext {
     pub current_return_type: Option<Type>,
+    pub current_function_stack: Vec<ValueSymbolId>,
     pub in_loop: bool
 }
 
@@ -1010,10 +1011,25 @@ impl SemanticAnalyzer {
             symbol_table,
             builtin_types,
             unification_context: UnificationContext::default(),
-            uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false },
+            uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false, current_function_stack: vec![] },
             errors: vec![],
             lines,
         }
+    }
+
+    pub fn is_ancestor_of(&self, ancestor_id: ScopeId, child_id: ScopeId) -> bool {
+        let mut current_id = Some(child_id);
+        while let Some(id) = current_id {
+            if id == ancestor_id { return true; }
+
+            if let Some(scope) = self.symbol_table.get_scope(id) {
+                current_id = scope.parent;
+            } else {
+                break;
+            }
+        }
+
+        false
     }
 
     pub fn delete_uvs(&mut self) {
@@ -1104,7 +1120,7 @@ impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
             ValueSymbolKind::Variable => "Variable".green(),
-            ValueSymbolKind::Function(scope_id) => format!("Function({})", scope_id).blue(),
+            &ValueSymbolKind::Function(scope_id, closure) => format!("{}({})", if closure { "Closure" } else { "Function" }, scope_id).blue(),
             ValueSymbolKind::StructField => "StructField".yellow(),
             ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };

@@ -655,7 +655,7 @@ impl<'a> MIRBuilder<'a> {
 
                     let concrete_fn_value_id = self.analyzer.symbol_table.add_value_symbol(
                         &mangled_name,
-                        ValueSymbolKind::Function(new_fn_body_scope_id),
+                        ValueSymbolKind::Function(new_fn_body_scope_id, false),
                         false,
                         template_value_symbol.qualifier,
                         Some(Type::new_base(concrete_fn_sig_id)),

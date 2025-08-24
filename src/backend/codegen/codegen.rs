@@ -955,7 +955,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .get_value_symbol(stmt.value_id.unwrap())
             .unwrap();
 
-        if let ValueSymbolKind::Function(_) = symbol.kind {
+        if let ValueSymbolKind::Function(_, _) = symbol.kind {
             return Some(
                 self.functions
                     .get(&symbol.id)
