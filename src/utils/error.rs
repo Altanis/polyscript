@@ -21,6 +21,7 @@ pub enum ErrorKind {
     InvalidImpl(Option<String>),
     ExpectedType,
     InvalidConstraint(String),
+    ConstraintNotAllowed,
     UnimplementedTrait(String, String),
     ConflictingTraitImpl(String),
     DuplicateDefinitionInImpl(String, String),
@@ -96,6 +97,7 @@ impl ErrorKind {
             ErrorKind::InvalidConstraint(constraint) => format!(
                 "expected constraint to be a trait, instead found \"{constraint}\""
             ),
+            ErrorKind::ConstraintNotAllowed => "type variable cannot be constrained to a trait in this position".to_string(),
             ErrorKind::UnimplementedTrait(tr, ty) => {
                 format!("trait {tr} not implemented for type {ty}")
             }

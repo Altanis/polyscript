@@ -858,7 +858,7 @@ impl Parser {
         };
 
         let generic_parameters = if allow_generics {
-            self.parse_generic_parameter_list()?
+            self.parse_generic_parameter_list(true)?
         } else {
             vec![]
         };
@@ -1038,7 +1038,7 @@ impl Parser {
         Ok((parameters, instance_kind))
     }
 
-    fn parse_generic_parameter_list(&mut self) -> Result<Vec<AstNode>, BoxedError> {
+    fn parse_generic_parameter_list(&mut self, allow_constraints: bool) -> Result<Vec<AstNode>, BoxedError> {
         let mut parameters = vec![];
 
         if self.peek().get_token_kind() != TokenKind::Operator(Operation::LessThan) {
@@ -1052,15 +1052,19 @@ impl Parser {
                 let mut constraints = vec![];
 
                 if parser.peek().get_token_kind() == TokenKind::Colon {
-                    parser.advance();
-
-                    loop {
-                        constraints.push(parser.parse_type()?);
-                        if parser.peek().get_token_kind() != TokenKind::Operator(Operation::Plus) {
-                            break;
-                        }
-
+                    if allow_constraints {
                         parser.advance();
+
+                        loop {
+                            constraints.push(parser.parse_type()?);
+                            if parser.peek().get_token_kind() != TokenKind::Operator(Operation::Plus) {
+                                break;
+                            }
+
+                            parser.advance();
+                        }
+                    } else {
+                        return Err(parser.generate_error(ErrorKind::ConstraintNotAllowed, parser.create_span_from_current_token()));
                     }
                 }
 
@@ -1228,7 +1232,7 @@ impl Parser {
             parser.advance();
 
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
-            let generic_parameters = parser.parse_generic_parameter_list()?;
+            let generic_parameters = parser.parse_generic_parameter_list(true)?;
             let mut fields = vec![];
 
             parser.consume(TokenKind::OpenBrace)?;
@@ -1273,7 +1277,7 @@ impl Parser {
     fn parse_impl_statement(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.advance();
-            let generic_parameters = parser.parse_generic_parameter_list()?;
+            let generic_parameters = parser.parse_generic_parameter_list(true)?;
 
             let (type_node, trait_node) = {
                 let first = parser.parse_type()?;
@@ -1451,7 +1455,7 @@ impl Parser {
             parser.advance();
 
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
-            let generic_parameters = parser.parse_generic_parameter_list()?;
+            let generic_parameters = parser.parse_generic_parameter_list(true)?;
 
             let mut signatures = vec![];
             let mut constants = vec![];
@@ -1538,7 +1542,7 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
             let name = parser.consume(TokenKind::Identifier)?.get_value().to_string();
-            let generic_parameters = parser.parse_generic_parameter_list()?;
+            let generic_parameters = parser.parse_generic_parameter_list(false)?;
             parser.consume(TokenKind::Operator(Operation::Assign))?;
             let value = boxed!(parser.parse_type()?);
             parser.consume(TokenKind::Semicolon)?;
