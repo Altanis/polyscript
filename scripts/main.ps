@@ -1,6 +1,3 @@
-// functions as first class types
-    // assign regular functions to variables
-    // assign closures to variables
 // memory safety (reference counting)
 // real compiler that takes file input + import/export system
 // default traits such as Clone, Default, ToString
@@ -11,26 +8,5 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-fn add(adder: fn(int, int): int, x: int, y: int): int {
-    adder(x, y)
-}
-
-let add_result = add(fn(x: int, y: int): int { x + y }, 3, 4);
-
-let konst = 4;
-fn add_to_konst(x: int): int {
-    konst += x;
-    konst
-}
-
-let x = add_to_konst;
-let y = x(3);
-
-fn make_adder(): fn(int): int {
-    let x = 3;
-    let adder = fn(y: int): int { x + y };
-    return adder;
-}
-
-let adder = make_adder();
-let adder_result = adder(4);
+type Identity<T> = fn(T): T;
+let identity_str: Identity<int> = fn(x: int): int { x };

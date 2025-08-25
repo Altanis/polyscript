@@ -304,7 +304,11 @@ impl SemanticAnalyzer {
         match ty {
             Type::Base { symbol: base_symbol_id, args } => {
                 if let Some(substituted_type) = substitutions.get(base_symbol_id) {
-                    return substituted_type.clone();
+                    if substituted_type != ty {
+                        return self.apply_substitution(substituted_type, substitutions);
+                    }
+                    
+                    return ty.clone();
                 }
 
                 let base_symbol = self.symbol_table.get_type_symbol(*base_symbol_id).unwrap().clone();
