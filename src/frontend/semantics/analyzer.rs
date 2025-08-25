@@ -981,7 +981,7 @@ impl UnificationContext {
 
 pub struct UVCollectionContext {
     pub current_return_type: Option<Type>,
-    pub current_function_stack: Vec<ValueSymbolId>,
+    pub current_function_stack: Vec<(ValueSymbolId, Vec<Span>)>,
     pub in_loop: bool
 }
 

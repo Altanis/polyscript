@@ -441,7 +441,7 @@ impl SemanticAnalyzer {
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         if let Some(value_id) = node.value_id {
-            self.uv_collection_ctx.current_function_stack.push(value_id);
+            self.uv_collection_ctx.current_function_stack.push((value_id, vec![]));
         }
 
         let AstNodeKind::Function {
@@ -528,8 +528,24 @@ impl SemanticAnalyzer {
         }
 
         self.uv_collection_ctx.current_return_type = old_return_type;
-        if node.value_id.is_some() {
-            self.uv_collection_ctx.current_function_stack.pop();
+        if let Some(value_id) = node.value_id {
+            let (_, spans) = self.uv_collection_ctx.current_function_stack.pop().unwrap();
+            let ValueSymbolKind::Function(_, is_closure) = self.symbol_table.get_value_symbol(value_id).as_ref().unwrap().kind else {
+                unreachable!();
+            };
+
+            if is_closure && !generic_parameters.is_empty() {
+                return Err(self.create_error(
+                    ErrorKind::ClosureWithGenerics(name.clone()),
+                    span,
+                    &{
+                        let mut all_spans = generic_parameters.iter().map(|param| param.span).collect::<Vec<_>>();
+                        all_spans.extend(spans);
+                        all_spans
+                    },
+                ));
+            }
+
         }
 
         let fn_sig_type_name = if is_declaration {
@@ -1322,7 +1338,8 @@ impl SemanticAnalyzer {
             Identifier(name) => {
                 let (value_id, ty) = self.get_type_and_value_tuple(expr.scope_id.unwrap(), name, expr.span)?;
                 
-                if let Some(&current_fn_id) = self.uv_collection_ctx.current_function_stack.last() {
+                let mut captured = false;
+                if let Some(&(current_fn_id, _)) = self.uv_collection_ctx.current_function_stack.last() {
                     let accessed_symbol = self.symbol_table.get_value_symbol(value_id).unwrap();
                     let function_symbol = self.symbol_table.get_value_symbol(current_fn_id).unwrap();
                 
@@ -1334,8 +1351,14 @@ impl SemanticAnalyzer {
                         let function_symbol_mut = self.symbol_table.get_value_symbol_mut(current_fn_id).unwrap();
                         if let ValueSymbolKind::Function(_, is_closure) = &mut function_symbol_mut.kind {
                             *is_closure = true;
+                            captured = true;
                         }
                     }
+                }
+
+                if captured {
+                    let Some((_, spans)) = self.uv_collection_ctx.current_function_stack.last_mut() else { unreachable!(); };
+                    spans.push(expr.span);
                 }
 
                 expr.value_id = Some(value_id);

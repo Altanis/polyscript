@@ -19,9 +19,8 @@ fn add(x: int): int {
 let x = add;
 let y = x(3);*/
 
-fn make_identity() {
-    fn wow<T>(x: T): T { x }
-    let y = wow(3);
+let konst = 4;
+fn return_konst<T>(x: T): T {
+    let y = konst;
+    x
 }
-
-(make_identity());
