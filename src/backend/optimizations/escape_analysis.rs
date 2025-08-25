@@ -65,9 +65,12 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
     match &mut node.kind {
         MIRNodeKind::Return(Some(expr)) => {
             if let Some(function_scope) = get_function_scope(analyzer, node.scope_id) {
-                match check_for_escape(analyzer, expr, function_scope, true) {
-                    Ok(c) => changed |= c,
-                    Err(e) => return Err(e),
+                let expr_type = expr.type_id.as_ref().unwrap();
+                if matches!(expr_type, Type::Reference(_) | Type::MutableReference(_)) {
+                    match check_for_escape(analyzer, expr, function_scope, true) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
+                    }
                 }
             }
         }
@@ -78,9 +81,12 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
                 && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
                 && let Some(function_scope) = get_function_scope(analyzer, node.scope_id)
             {
-                match check_for_escape(analyzer, last_expr, function_scope, true) {
-                    Ok(c) => changed |= c,
-                    Err(e) => return Err(e),
+                let expr_type = last_expr.type_id.as_ref().unwrap();
+                if matches!(expr_type, Type::Reference(_) | Type::MutableReference(_)) {
+                    match check_for_escape(analyzer, last_expr, function_scope, true) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
+                    }
                 }
             }
         }
@@ -109,14 +115,14 @@ fn check_for_escape(
     analyzer: &mut SemanticAnalyzer,
     expr: &mut MIRNode,
     destination_scope: usize,
-    is_return_or_heap_assign: bool,
+    is_escaping_context: bool,
 ) -> Result<bool, BoxedError> {
     let mut changed = false;
     match &mut expr.kind {
         MIRNodeKind::Identifier(_) => {
             if let Some(var_id) = expr.value_id {
                 let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
-                let should_heapify = if is_return_or_heap_assign {
+                let should_heapify = if is_escaping_context {
                     is_scope_or_descendant(analyzer, symbol.scope_id, destination_scope)
                 } else {
                     is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
@@ -139,7 +145,7 @@ fn check_for_escape(
         {
             if let Some(var_id) = get_base_variable(operand) {
                 let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
-                let should_heapify = if is_return_or_heap_assign {
+                let should_heapify = if is_escaping_context {
                     is_scope_or_descendant(analyzer, symbol.scope_id, destination_scope)
                 } else {
                     is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
@@ -164,7 +170,7 @@ fn check_for_escape(
                     analyzer,
                     last_expr,
                     destination_scope,
-                    is_return_or_heap_assign,
+                    is_escaping_context,
                 )?;
             }
         },
@@ -178,14 +184,14 @@ fn check_for_escape(
                 analyzer,
                 then_branch,
                 destination_scope,
-                is_return_or_heap_assign,
+                is_escaping_context,
             )?;
             for (_, branch) in else_if_branches {
                 changed |= check_for_escape(
                     analyzer,
                     branch,
                     destination_scope,
-                    is_return_or_heap_assign,
+                    is_escaping_context,
                 )?;
             }
             if let Some(branch) = else_branch {
@@ -193,17 +199,7 @@ fn check_for_escape(
                     analyzer,
                     branch,
                     destination_scope,
-                    is_return_or_heap_assign,
-                )?;
-            }
-        },
-        MIRNodeKind::FunctionCall { function: _, arguments } => {
-            for arg in arguments {
-                changed |= check_for_escape(
-                    analyzer,
-                    arg,
-                    destination_scope,
-                    is_return_or_heap_assign,
+                    is_escaping_context,
                 )?;
             }
         },
