@@ -22,7 +22,7 @@ use inkwell::OptimizationLevel;
 use utils::kind::Token;
 
 use crate::backend::codegen::codegen::CodeGen;
-use crate::backend::optimizations::escape_analysis;
+use crate::backend::optimizations::{capture_analysis, escape_analysis};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::mir::builder::MIRBuilder;
 use crate::mir::ir_node::MIRNode;
@@ -88,7 +88,10 @@ fn lower_ast_to_mir<'a>(program: &mut AstNode, analyzer: &'a mut SemanticAnalyze
 }
 
 fn optimize(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
-    let errs = escape_analysis::init(program, analyzer);
+    let mut errs = vec![];
+    errs.extend(escape_analysis::init(program, analyzer));
+    capture_analysis::init(program, analyzer);
+
     if !errs.is_empty() {
         println!("{} errors emitted... printing:", errs.len());
         for err in errs {

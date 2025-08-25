@@ -1350,7 +1350,7 @@ impl SemanticAnalyzer {
                     {
                         let function_symbol_mut = self.symbol_table.get_value_symbol_mut(current_fn_id).unwrap();
                         if let ValueSymbolKind::Function(_, captured_items) = &mut function_symbol_mut.kind {
-                            captured_items.push(value_id);
+                            captured_items.insert(value_id);
                             captured = true;
                         }
                     }

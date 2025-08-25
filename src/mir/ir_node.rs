@@ -9,6 +9,13 @@ use indexmap::IndexMap;
 
 pub type BoxedMIRNode = Box<MIRNode>;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CaptureStrategy {
+    Copy,
+    Reference,
+    MutableReference
+}
+
 #[derive(Debug, Clone)]
 pub enum MIRNodeKind {
     IntegerLiteral(i64),
@@ -78,7 +85,8 @@ pub enum MIRNodeKind {
         mutable: bool,
     },
     EnvironmentCapture {
-        name: String
+        name: String,
+        strategy: CaptureStrategy
     },
 
     StructDeclaration {
@@ -481,9 +489,7 @@ impl MIRNode {
                 }
             },
 
-            MIRNodeKind::EnvironmentCapture { name } => {
-                write!(f, "{}", name)?;
-            },
+            MIRNodeKind::EnvironmentCapture { name, strategy } => write!(f, "{} {}", strategy.to_string().dimmed(), name.yellow())?,
 
             MIRNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
 
@@ -665,5 +671,15 @@ impl MIRNode {
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Display for CaptureStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CaptureStrategy::Copy => write!(f, "copy"),
+            CaptureStrategy::Reference => write!(f, "ref"),
+            CaptureStrategy::MutableReference => write!(f, "mut ref")
+        }
     }
 }

@@ -65,7 +65,7 @@ impl NameInterner {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function(ScopeId, Vec<ValueSymbolId>),
+    Function(ScopeId, HashSet<ValueSymbolId>),
     StructField,
     EnumVariant,
 }
@@ -420,7 +420,7 @@ impl SymbolTable {
 
             self.add_value_symbol(
                 &fn_name,
-                ValueSymbolKind::Function(func_scope_id, vec![]),
+                ValueSymbolKind::Function(func_scope_id, HashSet::new()),
                 false,
                 QualifierKind::Public,
                 Some(Type::new_base(fn_sig_type_id)),
@@ -535,7 +535,7 @@ impl SymbolTable {
 
                 self.add_value_symbol(
                     &fn_name,
-                    ValueSymbolKind::Function(func_scope_id, vec![]),
+                    ValueSymbolKind::Function(func_scope_id, HashSet::new()),
                     false,
                     QualifierKind::Public,
                     Some(Type::new_base(concrete_sig_id)),

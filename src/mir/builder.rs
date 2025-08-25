@@ -7,7 +7,7 @@ use crate::{
         semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
-    mir::ir_node::{MIRNode, MIRNodeKind},
+    mir::ir_node::{CaptureStrategy, MIRNode, MIRNodeKind},
     utils::kind::QualifierKind,
 };
 
@@ -655,7 +655,7 @@ impl<'a> MIRBuilder<'a> {
 
                     let concrete_fn_value_id = self.analyzer.symbol_table.add_value_symbol(
                         &mangled_name,
-                        ValueSymbolKind::Function(new_fn_body_scope_id, vec![]),
+                        ValueSymbolKind::Function(new_fn_body_scope_id, HashSet::new()),
                         false,
                         template_value_symbol.qualifier,
                         Some(Type::new_base(concrete_fn_sig_id)),
@@ -697,6 +697,7 @@ impl<'a> MIRBuilder<'a> {
                             MIRNode {
                                 kind: MIRNodeKind::EnvironmentCapture {
                                     name: self.analyzer.symbol_table.get_value_name(sym.name_id).to_string(),
+                                    strategy: CaptureStrategy::Copy
                                 },
                                 value_id: Some(capture),
                                 type_id: sym.type_id.clone(),
