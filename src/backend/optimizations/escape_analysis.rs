@@ -217,7 +217,7 @@ fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Resul
     let symbol_info = {
         let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
         (
-            symbol.kind,
+            symbol.kind.clone(),
             symbol.allocation_kind,
             symbol.name_id,
             symbol.span,

@@ -62,10 +62,10 @@ impl NameInterner {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ValueSymbolKind {
     Variable,
-    Function(ScopeId, bool),
+    Function(ScopeId, Vec<ValueSymbolId>),
     StructField,
     EnumVariant,
 }
@@ -420,7 +420,7 @@ impl SymbolTable {
 
             self.add_value_symbol(
                 &fn_name,
-                ValueSymbolKind::Function(func_scope_id, false),
+                ValueSymbolKind::Function(func_scope_id, vec![]),
                 false,
                 QualifierKind::Public,
                 Some(Type::new_base(fn_sig_type_id)),
@@ -535,7 +535,7 @@ impl SymbolTable {
 
                 self.add_value_symbol(
                     &fn_name,
-                    ValueSymbolKind::Function(func_scope_id, false),
+                    ValueSymbolKind::Function(func_scope_id, vec![]),
                     false,
                     QualifierKind::Public,
                     Some(Type::new_base(concrete_sig_id)),
@@ -1120,7 +1120,8 @@ impl std::fmt::Display for ValueSymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let colored = match self {
             ValueSymbolKind::Variable => "Variable".green(),
-            &ValueSymbolKind::Function(scope_id, closure) => format!("{}({})", if closure { "Closure" } else { "Function" }, scope_id).blue(),
+            ValueSymbolKind::Function(scope_id, captured_items) 
+                => format!("{}({})", if !captured_items.is_empty() { "Closure" } else { "Function" }, scope_id).blue(),
             ValueSymbolKind::StructField => "StructField".yellow(),
             ValueSymbolKind::EnumVariant => "EnumVariant".yellow(),
         };

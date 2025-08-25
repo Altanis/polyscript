@@ -530,11 +530,11 @@ impl SemanticAnalyzer {
         self.uv_collection_ctx.current_return_type = old_return_type;
         if let Some(value_id) = node.value_id {
             let (_, spans) = self.uv_collection_ctx.current_function_stack.pop().unwrap();
-            let ValueSymbolKind::Function(_, is_closure) = self.symbol_table.get_value_symbol(value_id).as_ref().unwrap().kind else {
+            let ValueSymbolKind::Function(_, captured_items) = &self.symbol_table.get_value_symbol(value_id).as_ref().unwrap().kind else {
                 unreachable!();
             };
 
-            if is_closure && !generic_parameters.is_empty() {
+            if !captured_items.is_empty() && !generic_parameters.is_empty() {
                 return Err(self.create_error(
                     ErrorKind::ClosureWithGenerics(name.clone()),
                     span,
@@ -1349,8 +1349,8 @@ impl SemanticAnalyzer {
                         && accessed_symbol.mutable
                     {
                         let function_symbol_mut = self.symbol_table.get_value_symbol_mut(current_fn_id).unwrap();
-                        if let ValueSymbolKind::Function(_, is_closure) = &mut function_symbol_mut.kind {
-                            *is_closure = true;
+                        if let ValueSymbolKind::Function(_, captured_items) = &mut function_symbol_mut.kind {
+                            captured_items.push(value_id);
                             captured = true;
                         }
                     }
