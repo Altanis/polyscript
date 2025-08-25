@@ -3,12 +3,12 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
-use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
 use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
-use crate::mir::ir_node::{BoxedMIRNode, MIRNode, MIRNodeKind};
+use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
@@ -120,7 +120,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         llvm_struct.as_basic_type_enum()
                     },
                     TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
-                    TypeSymbolKind::FunctionSignature { .. } => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                    TypeSymbolKind::FunctionSignature { .. } => {
+                        // Represent functions as fat pointer `{fn_ptr, env_λ_ptr}`.
+                        let fn_ptr_type = self.context.ptr_type(AddressSpace::default());
+                        let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+                        self.context
+                            .struct_type(&[fn_ptr_type.into(), env_ptr_type.into()], false)
+                            .as_basic_type_enum()
+                    },
                     TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
                     _ => unimplemented!("cannot map semantic type to LLVM type: {} {:#?}", self.analyzer.symbol_table.display_type_symbol(type_symbol), type_symbol.span),
                 };
@@ -133,15 +140,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn map_semantic_fn_type(&mut self, ty: &Type) -> FunctionType<'ctx> {
+    fn map_semantic_fn_type(&mut self, ty: &Type, is_closure: bool) -> FunctionType<'ctx> {
         let Type::Base { symbol, .. } = ty else { unreachable!(); };
         let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
         let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &type_symbol.kind else { unreachable!(); };
 
-        let llvm_params: Vec<_> = params
+        let mut llvm_params: Vec<_> = params
             .iter()
             .map(|p| self.map_semantic_type(p).unwrap().into())
             .collect();
+
+        if is_closure {
+            let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+            llvm_params.insert(0, env_ptr_type.into());
+        }
 
         let llvm_return = self.map_semantic_type(return_type);
 
@@ -257,8 +269,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return self.builder.build_load(ty, ptr, "").unwrap();
         }
 
-        if let Some(func) = self.functions.get(&value_id) {
-            return func.as_global_value().as_pointer_value().into();
+        if let Some(func) = self.functions.get(&value_id).cloned() {
+            let closure_struct_type = self.map_semantic_type(ty).unwrap().into_struct_type();
+            let closure_ptr = self.builder.build_alloca(closure_struct_type, "fn_ptr_wrapper").unwrap();
+
+            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, "").unwrap();
+            self.builder.build_store(fn_ptr_field, func.as_global_value().as_pointer_value()).unwrap();
+
+            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, "").unwrap();
+            let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+            self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
+
+            return self.builder.build_load(closure_struct_type, closure_ptr, "").unwrap();
         }
 
         if let Some(konst) = self.constants.get(&value_id) {
@@ -845,7 +867,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let fn_type = fn_symbol.type_id.as_ref().unwrap();
 
-        let llvm_fn_type = self.map_semantic_fn_type(fn_type);
+        let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
+        let llvm_fn_type = self.map_semantic_fn_type(fn_type, is_closure);
+
         let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
         let function = self.module.add_function(fn_name, llvm_fn_type, None);
 
@@ -853,7 +877,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_function_body(&mut self, node: &'a MIRNode) {
-        let MIRNodeKind::Function { parameters, body, .. } = &node.kind else { unreachable!(); };
+        let MIRNodeKind::Function { parameters, body, captures, .. } = &node.kind else { unreachable!(); };
         let fn_symbol_id = node.value_id.unwrap();
 
         let function = self.functions[&fn_symbol_id];
@@ -866,8 +890,49 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
+        let mut param_offset = 0;
+        if !captures.is_empty() {
+            param_offset = 1;
+            let env_raw_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
+
+            let capture_types: Vec<_> = captures.iter()
+                .map(|c| {
+                    let MIRNodeKind::EnvironmentCapture { strategy, .. } = &c.kind else { unreachable!(); };
+                    let symbol = self.analyzer.symbol_table.get_value_symbol(c.value_id.unwrap()).unwrap();
+                    let ty = symbol.type_id.as_ref().unwrap();
+
+                    match strategy {
+                        CaptureStrategy::Copy => self.map_semantic_type(ty).unwrap(),
+                        CaptureStrategy::Reference | CaptureStrategy::MutableReference => self.context.ptr_type(AddressSpace::default()).into()
+                    }
+                })
+                .collect();
+            let env_struct_type = self.context.struct_type(&capture_types, false);
+            let env_ptr = self.builder.build_pointer_cast(env_raw_ptr, self.context.ptr_type(AddressSpace::default()), "").unwrap();
+
+            for (i, capture) in captures.iter().enumerate() {
+                let capture_id = capture.value_id.unwrap();
+                let MIRNodeKind::EnvironmentCapture { strategy, .. } = &capture.kind else { unreachable!(); };
+                let field_ptr = self.builder.build_struct_gep(env_struct_type, env_ptr, i as u32, "").unwrap();
+
+                let ptr_to_store_in_vars = match strategy {
+                    CaptureStrategy::Copy => {
+                        let loaded_val = self.builder.build_load(capture_types[i], field_ptr, "").unwrap();
+                        let alloca = self.builder.build_alloca(capture_types[i], "").unwrap();
+                        self.builder.build_store(alloca, loaded_val).unwrap();
+                        alloca
+                    },
+                    CaptureStrategy::Reference | CaptureStrategy::MutableReference => {
+                        self.builder.build_load(capture_types[i], field_ptr, "").unwrap().into_pointer_value()
+                    }
+                };
+
+                self.variables.insert(capture_id, ptr_to_store_in_vars);
+            }
+        }
+
         for (i, param_node) in parameters.iter().enumerate() {
-            let param_value = function.get_nth_param(i as u32).unwrap();
+            let param_value = function.get_nth_param((i + param_offset) as u32).unwrap();
             let param_symbol = self.analyzer.symbol_table.get_value_symbol(param_node.value_id.unwrap()).unwrap();
             let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
             param_value.set_name(param_name);
@@ -928,22 +993,31 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
-        let compiled_args: Vec<BasicValueEnum> = arguments
-            .iter()
-            .map(|arg| self.compile_node(arg).unwrap())
-            .collect();
+        let compiled_args: Vec<BasicValueEnum> = arguments.iter().map(|arg| self.compile_node(arg).unwrap()).collect();
         let arg_refs: Vec<_> = compiled_args.iter().map(|v| (*v).into()).collect();
 
         let callee_value = self.compile_node(function).unwrap();
+        let closure_struct = callee_value.into_struct_value();
 
-        let call: CallSiteValue = if let Ok(function) = FunctionValue::try_from(callee_value.into_pointer_value().as_any_value_enum()) {
-            self.builder.build_call(function, &arg_refs, "").unwrap()
+        let fn_ptr_val = self.builder.build_extract_value(closure_struct, 0, "fn_ptr").unwrap();
+        let env_ptr_val = self.builder.build_extract_value(closure_struct, 1, "env_ptr").unwrap();
+
+        let fn_ptr = fn_ptr_val.into_pointer_value();
+        let env_ptr = env_ptr_val.into_pointer_value();
+
+        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
+        let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
+
+        let final_args = if is_closure {
+            let mut final_args = vec![env_ptr.into()];
+            final_args.extend(arg_refs);
+            final_args
         } else {
-            let callee_ptr = callee_value.into_pointer_value();
-            let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap());
-            
-            self.builder.build_indirect_call(fn_type, callee_ptr, &arg_refs, "").unwrap()
+            arg_refs
         };
+
+        let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap(), is_closure);
+        let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "").unwrap();
 
         call.try_as_basic_value().left()
     }

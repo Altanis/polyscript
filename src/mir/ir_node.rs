@@ -465,7 +465,11 @@ impl MIRNode {
 
                 if !captures.is_empty() {
                     write!(f, "λ: {{")?;
-                    for capture in captures.iter() {
+                    for (i, capture) in captures.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        
                         write!(f, "{}", capture)?;
                     }
                     write!(f, "}}")?;
