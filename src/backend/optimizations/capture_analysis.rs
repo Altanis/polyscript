@@ -98,7 +98,7 @@ fn is_copy_type(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
     match ty {
         Type::Base { symbol, .. } => {
             if let Some(type_symbol) = analyzer.symbol_table.get_type_symbol(*symbol) {
-                matches!(type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::Enum(_))
+                matches!(type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
             } else { false }
         },
         Type::Reference(_) | Type::MutableReference(_) => true

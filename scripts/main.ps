@@ -11,11 +11,26 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
+fn add(adder: fn(int, int): int, x: int, y: int): int {
+    adder(x, y)
+}
+
+let add_result = add(fn(x: int, y: int): int { x + y }, 3, 4);
+
 let konst = 4;
-fn add(x: int): int {
+fn add_to_konst(x: int): int {
     konst += x;
     konst
 }
 
-let x = add;
+let x = add_to_konst;
 let y = x(3);
+
+fn make_adder(): fn(int): int {
+    let x = 3;
+    let adder = fn(y: int): int { x + y };
+    return adder;
+}
+
+let adder = make_adder();
+let adder_result = adder(4);
