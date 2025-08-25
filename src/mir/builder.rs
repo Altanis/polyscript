@@ -26,7 +26,9 @@ pub struct MIRBuilder<'a> {
     struct_template_map: HashMap<TypeSymbolId, (TypeSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>,
 
     concretize_substitutions: Option<Rc<BTreeMap<TypeSymbolId, Type>>>,
-    concretize_value_remap: HashMap<ValueSymbolId, ValueSymbolId>
+    concretize_value_remap: HashMap<ValueSymbolId, ValueSymbolId>,
+    
+    hoisted_iifes: Vec<MIRNode>
 }
 
 impl<'a> MIRBuilder<'a> {
@@ -39,6 +41,7 @@ impl<'a> MIRBuilder<'a> {
             struct_template_map: HashMap::new(),
             concretize_substitutions: None,
             concretize_value_remap: HashMap::new(),
+            hoisted_iifes: vec![]
         }
     }
 }
@@ -715,7 +718,27 @@ impl<'a> MIRBuilder<'a> {
                 mutable: *mutable,
             },
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
-                if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
+                if let AstNodeKind::Function { .. } = &mut function.kind {
+                    let function_mir = self.lower_node(function).unwrap();
+                    let hoisted_name = if let MIRNodeKind::Function { name, .. } = &function_mir.kind { name.clone() } else { unreachable!(); };
+                    
+                    self.hoisted_iifes.push(function_mir);
+
+                    let mir_function_expr = MIRNode {
+                        kind: MIRNodeKind::Identifier(hoisted_name),
+                        span: function.span,
+                        value_id: function.value_id,
+                        type_id: function.type_id.clone(),
+                        scope_id: function.scope_id.unwrap()
+                    };
+
+                    let mir_arguments = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
+                    
+                    MIRNodeKind::FunctionCall {
+                        function: Box::new(mir_function_expr),
+                        arguments: mir_arguments,
+                    }
+                } else if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
@@ -735,9 +758,7 @@ impl<'a> MIRBuilder<'a> {
                         (name, fn_value_symbol.id, fn_type.clone())
                     };
                     
-                    if is_method_call
-                        && let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone()
-                    {
+                    if is_method_call && let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
                         let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
                         if let Some(trait_scope_id) = self.find_trait_scope_from_signature(fn_sig_symbol) {
                             let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
@@ -1270,7 +1291,9 @@ impl<'a> MIRBuilder<'a> {
 
         let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
         let MIRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
+        
         hoisted_stmts.extend(other_stmts);
+        hoisted_stmts.extend(std::mem::take(&mut self.hoisted_iifes));
 
         self.concretize_ids(&mut mir_program);
         self.concretize_symbol_table();
