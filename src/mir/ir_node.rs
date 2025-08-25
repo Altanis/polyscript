@@ -71,10 +71,14 @@ pub enum MIRNodeKind {
         parameters: Vec<MIRNode>,
         instance: Option<ReferenceKind>,
         body: Option<Box<MIRNode>>,
+        captures: Vec<MIRNode>
     },
     FunctionParameter {
         name: String,
         mutable: bool,
+    },
+    EnvironmentCapture {
+        name: String
     },
 
     StructDeclaration {
@@ -135,7 +139,8 @@ impl MIRNode {
             | Break
             | Continue
             | StructField { .. }
-            | FunctionParameter { .. } => vec![],
+            | FunctionParameter { .. }
+            | EnvironmentCapture { .. } => vec![],
 
             Program(nodes) => nodes.iter_mut().collect(),
 
@@ -185,12 +190,13 @@ impl MIRNode {
             WhileLoop { condition, body } => vec![condition.as_mut(), body.as_mut()],
             Return(expr) => expr.as_mut().map_or(vec![], |e| vec![e.as_mut()]),
             Function {
-                parameters, body, ..
+                parameters, body, captures, ..
             } => {
                 let mut children = parameters.iter_mut().collect::<Vec<_>>();
                 if let Some(b) = body.as_mut() {
                     children.push(b.as_mut());
                 }
+                children.extend(captures);
                 children
             }
             StructDeclaration { fields, .. } => fields.iter_mut().collect(),
@@ -232,7 +238,8 @@ impl MIRNode {
             | Break
             | Continue
             | StructField { .. }
-            | FunctionParameter { .. } => vec![],
+            | FunctionParameter { .. }
+            | EnvironmentCapture { .. } => vec![],
 
             Program(nodes) => nodes.iter().collect(),
 
@@ -431,6 +438,7 @@ impl MIRNode {
                 name,
                 parameters,
                 body,
+                captures,
                 ..
             } => {
                 write!(f, "{}", indent_str)?;
@@ -446,6 +454,17 @@ impl MIRNode {
                 )?;
 
                 write!(f, "(")?;
+
+                if !captures.is_empty() {
+                    write!(f, "λ: {{")?;
+                    for capture in captures.iter() {
+                        write!(f, "{}", capture)?;
+                    }
+                    write!(f, "}}")?;
+
+                    if !parameters.is_empty() { write!(f, ", ")?; }
+                }
+
                 for (i, param) in parameters.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -460,7 +479,11 @@ impl MIRNode {
                 } else {
                     write!(f, ";")?;
                 }
-            }
+            },
+
+            MIRNodeKind::EnvironmentCapture { name } => {
+                write!(f, "{}", name)?;
+            },
 
             MIRNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
 

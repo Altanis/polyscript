@@ -668,7 +668,7 @@ impl<'a> MIRBuilder<'a> {
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
                     return Some(MIRNode {
-                        kind: MIRNodeKind::Function { name: mangled_name, parameters: mir_params, instance: *instance, body: mir_body },
+                        kind: MIRNodeKind::Function { name: mangled_name, parameters: mir_params, instance: *instance, body: mir_body, captures: vec![] },
                         span: node.span,
                         value_id: Some(concrete_fn_value_id),
                         type_id: Some(Type::new_base(concrete_fn_sig_id)),
@@ -677,9 +677,11 @@ impl<'a> MIRBuilder<'a> {
                 }
 
                 if generic_parameters.is_empty() {
-                    let (mangled_name, sym_id) = {
+                    let (mangled_name, sym_id, scope_id, captures) = {
                         let sym = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
-                        (self.mangle_value_name(sym), sym.id)
+                        let ValueSymbolKind::Function(scope_id, captures) = &sym.kind else { unreachable!(); };
+
+                        (self.mangle_value_name(sym), sym.id, *scope_id, captures.clone())
                     };
 
                     let new_name_id = self.analyzer.symbol_table.value_names.intern(&mangled_name);
@@ -690,6 +692,18 @@ impl<'a> MIRBuilder<'a> {
                         parameters: parameters.iter_mut().filter_map(|p| self.lower_node(p)).collect(),
                         instance: *instance,
                         body: body.as_mut().map(|b| Box::new(self.lower_node(b).unwrap())),
+                        captures: captures.into_iter().map(|capture| {
+                            let sym = self.analyzer.symbol_table.get_value_symbol(capture).unwrap();
+                            MIRNode {
+                                kind: MIRNodeKind::EnvironmentCapture {
+                                    name: self.analyzer.symbol_table.get_value_name(sym.name_id).to_string(),
+                                },
+                                value_id: Some(capture),
+                                type_id: sym.type_id.clone(),
+                                span: sym.span.unwrap(),
+                                scope_id
+                            }
+                        }).collect()
                     }
                 } else {
                     return None;

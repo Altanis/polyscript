@@ -11,3 +11,10 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
+let konst = 4;
+fn add(x: int): int {
+    x + konst
+}
+
+let x = add;
+let y = x(3);
