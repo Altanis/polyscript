@@ -107,12 +107,6 @@ fn compile_ast(program: MIRNode, analyzer: &SemanticAnalyzer) {
     let module = context.create_module("a");
     let builder = context.create_builder();
 
-    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
-    codegen.compile_program(&program);
-
-    let path = Path::new("bin/output.ll");
-    module.print_to_file(path).expect("couldn't write to output.ll");
-
     Target::initialize_all(&InitializationConfig::default());
 
     let target_triple = TargetTriple::create("arm64-apple-darwin");
@@ -129,6 +123,12 @@ fn compile_ast(program: MIRNode, analyzer: &SemanticAnalyzer) {
             CodeModel::Default,
         )
         .expect("Failed to create target machine");
+
+    let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
+    codegen.compile_program(&program);
+
+    let path = Path::new("bin/output.ll");
+    module.print_to_file(path).expect("couldn't write to output.ll");
 
     let asm_path = Path::new("bin/output_macos.s");
     target_machine.write_to_file(&module, FileType::Assembly, asm_path).expect("Failed to write assembly");
