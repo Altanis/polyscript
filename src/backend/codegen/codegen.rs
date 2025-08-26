@@ -2,7 +2,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
@@ -12,6 +12,15 @@ use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
+
+pub struct RcRepr<'ctx> {
+    struct_wrapper: StructType<'ctx>,
+    free: FunctionValue<'ctx>,
+    drop: FunctionValue<'ctx>,
+    inc_ref: FunctionValue<'ctx>,
+    dec_ref: FunctionValue<'ctx>,
+    clone: FunctionValue<'ctx>
+}
 
 pub struct CodeGen<'a, 'ctx> {
     context: &'ctx Context,
@@ -34,6 +43,8 @@ pub struct CodeGen<'a, 'ctx> {
     rvo_return_ptr: Option<PointerValue<'ctx>>,
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
+
+    rc: HashMap<TypeSymbolId, RcRepr<'ctx>>
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1122,6 +1133,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             current_function: None,
             rvo_return_ptr: None,
             type_map: HashMap::new(),
+            rc: HashMap::new()
         }
     }
 
