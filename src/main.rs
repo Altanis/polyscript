@@ -124,6 +124,8 @@ fn compile_ast(program: MIRNode, analyzer: &SemanticAnalyzer) {
         )
         .expect("Failed to create target machine");
 
+    module.set_data_layout(&target_machine.get_target_data().get_data_layout());
+
     let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
     codegen.compile_program(&program);
 
