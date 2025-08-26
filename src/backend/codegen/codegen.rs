@@ -3,7 +3,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
-use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
@@ -31,6 +31,7 @@ pub struct CodeGen<'a, 'ctx> {
     break_blocks: Vec<BasicBlock<'ctx>>,
 
     current_function: Option<FunctionValue<'ctx>>,
+    rvo_return_ptr: Option<PointerValue<'ctx>>,
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
 }
@@ -79,6 +80,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    /// Determines if a type should be returned through return-value optimizations.
+    fn is_rvo_candidate(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, .. } => {
+                if let Some(type_symbol) = self.analyzer.symbol_table.get_type_symbol(*symbol) {
+                    matches!(type_symbol.kind, TypeSymbolKind::Struct(_))
+                } else { false }
+            },
+            _ => false
+        }
+    }
+
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
         match ty {
@@ -150,17 +163,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .map(|p| self.map_semantic_type(p).unwrap().into())
             .collect();
 
+        let mut param_offset = 0;
         if is_closure {
             let env_ptr_type = self.context.ptr_type(AddressSpace::default());
             llvm_params.insert(0, env_ptr_type.into());
+            param_offset = 1;
+        }
+
+        let use_rvo = self.is_rvo_candidate(return_type);
+        if use_rvo {
+            let return_type_ptr = self.context.ptr_type(AddressSpace::default());
+            llvm_params.insert(param_offset, return_type_ptr.into());
         }
 
         let llvm_return = self.map_semantic_type(return_type);
 
-        if let Some(ret_type) = llvm_return {
-            ret_type.fn_type(&llvm_params, false)
-        } else {
+        if use_rvo || llvm_return.is_none() {
             self.context.void_type().fn_type(&llvm_params, false)
+        } else {
+            llvm_return.unwrap().fn_type(&llvm_params, false)
         }
     }
 
@@ -884,14 +905,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let old_fn = self.current_function.take();
         let old_vars = self.variables.clone();
+        let old_rvo_ptr = self.rvo_return_ptr.take();
         self.variables.clear();
         self.current_function = Some(function);
 
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
+        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(fn_symbol_id).unwrap();
+        let fn_type = fn_symbol.type_id.as_ref().unwrap();
+        let is_closure = !captures.is_empty();
+
+        let Type::Base { symbol, .. } = fn_type else { unreachable!() };
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let TypeSymbolKind::FunctionSignature { return_type, .. } = &type_symbol.kind else { unreachable!() };
+        let use_rvo = self.is_rvo_candidate(return_type);
+
         let mut param_offset = 0;
-        if !captures.is_empty() {
+        if is_closure {
             param_offset = 1;
             let env_raw_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
 
@@ -930,6 +961,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.variables.insert(capture_id, ptr_to_store_in_vars);
             }
         }
+        
+        if use_rvo {
+            let return_val_ptr = function.get_nth_param(param_offset as u32).unwrap().into_pointer_value();
+            self.rvo_return_ptr = Some(return_val_ptr);
+            param_offset += 1;
+        }
 
         for (i, param_node) in parameters.iter().enumerate() {
             let param_value = function.get_nth_param((i + param_offset) as u32).unwrap();
@@ -945,7 +982,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let body_val = self.compile_node(body.as_ref().unwrap());
 
         if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
-            if function.get_type().get_return_type().is_some() {
+            if use_rvo {
+                if let Some(val) = body_val {
+                    let ret_ptr = self.rvo_return_ptr.unwrap();
+                    self.builder.build_store(ret_ptr, val).unwrap();
+                }
+                self.builder.build_return(None).unwrap();
+            } else if function.get_type().get_return_type().is_some() {
                 self.builder.build_return(Some(&body_val.unwrap())).unwrap();
             } else {
                 self.builder.build_return(None).unwrap();
@@ -954,6 +997,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         self.current_function = old_fn;
         self.variables = old_vars;
+        self.rvo_return_ptr = old_rvo_ptr;
     }
 
     fn compile_struct_literal(&mut self, struct_type: &Type, fields: &indexmap::IndexMap<String, MIRNode>) -> Option<BasicValueEnum<'ctx>> {
@@ -994,7 +1038,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         let compiled_args: Vec<BasicValueEnum> = arguments.iter().map(|arg| self.compile_node(arg).unwrap()).collect();
-        let arg_refs: Vec<_> = compiled_args.iter().map(|v| (*v).into()).collect();
 
         let callee_value = self.compile_node(function).unwrap();
         let closure_struct = callee_value.into_struct_value();
@@ -1007,19 +1050,35 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
         let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
+        let fn_type_ast = function.type_id.as_ref().unwrap();
 
-        let final_args = if is_closure {
-            let mut final_args = vec![env_ptr.into()];
-            final_args.extend(arg_refs);
-            final_args
-        } else {
-            arg_refs
-        };
+        let Type::Base { symbol, .. } = fn_type_ast else { unreachable!() };
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let TypeSymbolKind::FunctionSignature { return_type, .. } = &type_symbol.kind else { unreachable!() };
+        let use_rvo = self.is_rvo_candidate(return_type);
+
+        let mut return_ptr = None;
+        if use_rvo {
+            let return_llvm_type = self.map_semantic_type(return_type).unwrap();
+            let ptr = self.builder.build_alloca(return_llvm_type, "rvo_ret_val").unwrap();
+            return_ptr = Some(ptr);
+        }
+
+        let mut final_args: Vec<_> = Vec::new();
+        
+        if is_closure { final_args.push(env_ptr.into()); }
+        if let Some(ptr) = return_ptr { final_args.push(ptr.into()); }
+        final_args.extend(compiled_args.iter().map(|v| BasicMetadataValueEnum::from(*v)));
 
         let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap(), is_closure);
         let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "").unwrap();
 
-        call.try_as_basic_value().left()
+        if use_rvo {
+            let loaded_val = self.builder.build_load(self.map_semantic_type(return_type).unwrap(), return_ptr.unwrap(), "").unwrap();
+            Some(loaded_val)
+        } else {
+            call.try_as_basic_value().left()
+        }
     }
 
     fn compile_field_access(&mut self, stmt: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
@@ -1061,6 +1120,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             continue_blocks: vec![],
             break_blocks: vec![],
             current_function: None,
+            rvo_return_ptr: None,
             type_map: HashMap::new(),
         }
     }
@@ -1157,7 +1217,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 None
             },
             MIRNodeKind::Return(opt_expr) => {
-                if let Some(expr) = opt_expr {
+                if let Some(ret_ptr) = self.rvo_return_ptr {
+                    if let Some(expr) = opt_expr {
+                        let value = self.compile_node(expr).unwrap();
+                        self.builder.build_store(ret_ptr, value).unwrap();
+                    }
+                    
+                    self.builder.build_return(None).unwrap();
+                } else if let Some(expr) = opt_expr {
                     let value = self.compile_node(expr).unwrap();
                     self.builder.build_return(Some(&value)).unwrap();
                 } else {

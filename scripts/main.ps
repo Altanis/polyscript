@@ -8,11 +8,23 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Point {}
-
-fn does_escape(): Point {
-    let x = Point {};
-    x
+fn pick(x: int, y: int, flag: bool): int {
+    if (flag) { x } else { y }
 }
 
-let point = does_escape();
+let p = pick(3, 4, true);
+
+/*
+
+struct X { x: int; }
+struct Point { x: X; }
+
+fn wow(): &mut Point {
+    let x = X { x: 4 };
+    let p = heap (Point { x });
+    p
+}
+
+let point = wow();
+(point.x).x // this is UB unless x is forced heap alloc
+*/
