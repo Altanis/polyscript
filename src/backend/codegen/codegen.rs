@@ -178,10 +178,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let llvm_return = self.map_semantic_type(return_type);
 
-        if use_rvo || llvm_return.is_none() {
-            self.context.void_type().fn_type(&llvm_params, false)
+        if let Some(llvm_return) = llvm_return && !use_rvo {
+            llvm_return.fn_type(&llvm_params, false)
         } else {
-            llvm_return.unwrap().fn_type(&llvm_params, false)
+            self.context.void_type().fn_type(&llvm_params, false)
         }
     }
 
