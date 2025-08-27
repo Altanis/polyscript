@@ -822,8 +822,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
-        let inner_type = inner_expr.type_id.as_ref().unwrap();
-        let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
+        let llvm_inner_type = self.map_semantic_type(&Type::new_base(inner_expr.type_id.as_ref().unwrap().get_base_symbol())).unwrap();
 
         let size = llvm_inner_type.size_of().unwrap();
         let raw_ptr = self.build_malloc(size);

@@ -9,14 +9,9 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct X { x: int; }
-struct Point { x: X; }
-
-fn wow(): &mut Point {
-    let x = X { x: 4 };
-    let p: &mut Point = heap (Point { x });
-    p
+{
+    let x: int = 4;
+    let y: &mut int = &mut x;
+    let z: &mut int = heap 4;
+    let a: &mut int = z;
 }
-
-let point = wow();
-(point.x).x; // this is UB unless x is forced heap alloc
