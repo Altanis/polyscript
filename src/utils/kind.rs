@@ -48,6 +48,7 @@ pub const TRAIT_KEYWORD: &str = "trait";
 pub const TYPE_KEYWORD: &str = "type";
 pub const MUT_KEYWORD: &str = "mut";
 pub const AS_KEYWORD: &str = "as";
+pub const HEAP_KEYWORD: &str = "heap";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -474,7 +475,8 @@ pub enum KeywordKind {
     SelfKw,
     Trait,
     Type,
-    Mut
+    Mut,
+    Heap
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -691,7 +693,8 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::SelfKw => "Keyword::This".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
-                KeywordKind::Type => "Keyword::Type".purple()
+                KeywordKind::Type => "Keyword::Type".purple(),
+                KeywordKind::Heap => "Keyword::Heap".purple()
             },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

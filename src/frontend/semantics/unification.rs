@@ -2350,6 +2350,10 @@ impl SemanticAnalyzer {
                 self.check_node_is_not_generic_fn(right)?;
                 self.generic_value_check_node(right)?;
             },
+            HeapExpression(expr) => {
+                self.check_node_is_not_generic_fn(expr)?;
+                self.generic_value_check_node(expr)?;
+            },
             TypeCast { expr, .. } => {
                 self.check_node_is_not_generic_fn(expr)?;
                 self.generic_value_check_node(expr)?;
