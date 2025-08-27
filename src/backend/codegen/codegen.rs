@@ -2,7 +2,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType, StructType};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
@@ -107,6 +107,99 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         header_type.set_body(&[ref_count_type.into(), drop_fn_ptr_type.into()], false);
         header_type
     }
+    
+    fn get_incref(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("incref") {
+            return func;
+        }
+    
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        let function = self.module.add_function("incref", fn_type, Some(Linkage::Internal));
+    
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+    
+        let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+    
+        let is_null = self.builder.build_is_null(rc_ptr_generic, "is_null").unwrap();
+        let not_null_block = self.context.append_basic_block(function, "not_null");
+        let end_block = self.context.append_basic_block(function, "end");
+        self.builder.build_conditional_branch(is_null, end_block, not_null_block).unwrap();
+    
+        self.builder.position_at_end(not_null_block);
+        
+        let rc_header_type = self.get_rc_header_type();
+        let rc_header_ptr = self.builder.build_pointer_cast(rc_ptr_generic, self.context.ptr_type(AddressSpace::default()), "rc_header_ptr").unwrap();
+        
+        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 0, "ref_count_ptr").unwrap();
+        
+        let old_count = self.builder.build_load(self.context.i64_type(), ref_count_ptr, "old_count").unwrap().into_int_value();
+        let new_count = self.builder.build_int_add(old_count, self.context.i64_type().const_int(1, false), "new_count").unwrap();
+        self.builder.build_store(ref_count_ptr, new_count).unwrap();
+    
+        self.builder.build_unconditional_branch(end_block).unwrap();
+        self.builder.position_at_end(end_block);
+        self.builder.build_return(None).unwrap();
+    
+        function
+    }
+
+    fn get_decref(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("decref") {
+            return func;
+        }
+    
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        let function = self.module.add_function("decref", fn_type, Some(Linkage::Internal));
+    
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+    
+        let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+    
+        let is_null = self.builder.build_is_null(rc_ptr_generic, "is_null").unwrap();
+        let not_null_block = self.context.append_basic_block(function, "not_null");
+        let end_block = self.context.append_basic_block(function, "end");
+        self.builder.build_conditional_branch(is_null, end_block, not_null_block).unwrap();
+        
+        self.builder.position_at_end(not_null_block);
+    
+        let rc_header_type = self.get_rc_header_type();
+        let rc_header_ptr = self.builder.build_pointer_cast(rc_ptr_generic, self.context.ptr_type(AddressSpace::default()), "rc_header_ptr").unwrap();
+        
+        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 0, "ref_count_ptr").unwrap();
+        let old_count = self.builder.build_load(self.context.i64_type(), ref_count_ptr, "old_count").unwrap().into_int_value();
+        let new_count = self.builder.build_int_sub(old_count, self.context.i64_type().const_int(1, false), "new_count").unwrap();
+        self.builder.build_store(ref_count_ptr, new_count).unwrap();
+        
+        let is_zero = self.builder.build_int_compare(IntPredicate::EQ, new_count, self.context.i64_type().const_int(0, false), "is_zero").unwrap();
+        
+        let drop_block = self.context.append_basic_block(function, "drop");
+        self.builder.build_conditional_branch(is_zero, drop_block, end_block).unwrap();
+        
+        self.builder.position_at_end(drop_block);
+    
+        let drop_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 1, "drop_fn_ptr_ptr").unwrap();
+        let drop_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), drop_fn_ptr_ptr, "drop_fn_ptr").unwrap().into_pointer_value();
+        
+        let header_size = self.get_rc_header_type().size_of().unwrap();
+        let data_ptr = unsafe {
+            self.builder.build_gep(self.context.i8_type(), rc_ptr_generic, &[header_size], "data_ptr").unwrap()
+        };
+        
+        let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[data_ptr.into()], "").unwrap();
+        
+        self.build_free(rc_ptr_generic);
+    
+        self.builder.build_unconditional_branch(end_block).unwrap();
+        self.builder.position_at_end(end_block);
+        self.builder.build_return(None).unwrap();
+        
+        function
+    }
 
     fn wrap_in_rc(&mut self, ty: &Type) -> RcRepr<'ctx> {
         let type_id = ty.get_base_symbol();
@@ -119,7 +212,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let rc_header_type = self.get_rc_header_type();
         let rc_struct_type = self.context.opaque_struct_type(&format!("Rc_{}", type_name_mangled));
-        rc_struct_type.set_body(&[rc_header_type.into(), llvm_data_type.into()], false);
+        rc_struct_type.set_body(&[rc_header_type.into(), llvm_data_type], false);
 
         let drop_data_fn = self.build_drop_data_fn(ty, &type_name_mangled, llvm_data_type);
         let clone_data_fn = self.build_clone_data_fn(ty, &type_name_mangled, llvm_data_type);
@@ -165,10 +258,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             ).unwrap();
                             
                             let field_llvm_type = llvm_struct_type.get_field_type_at_index(i as u32).unwrap();
-                            let field_val = self.builder.build_load(field_llvm_type, field_ptr, "field_val").unwrap();
+                            let field_val = self.builder.build_load(field_llvm_type, field_ptr, "field_val").unwrap().into_pointer_value();
 
-                            /* TODO: decref */
-                            // The field_val is the RC pointer for the nested struct.
+                            let decref_fn = self.get_decref();
+                            self.builder.build_call(decref_fn, &[field_val.into()], "").unwrap();
                         }
                     }
                 }
@@ -212,8 +305,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 "field_val"
                             ).unwrap();
                             
-                            /* TODO: incref */
-                            // field_val is the RC guard around the data.
+                            let incref_fn = self.get_incref();
+                            self.builder.build_call(incref_fn, &[field_val.into()], "").unwrap();
                         }
                     }
                 }
