@@ -31,9 +31,11 @@ a variable that holds data that can reside in either place. The following rules 
     4. Returning `x` from a function is not a traditional "use by value." Move semantics are invoked, and no shallow copy occurs.
     If `x` is heap allocated, the reference counter is not decremented, as `x` is moved.
 
-Consider a container `y`, which stores (heap) references to `a_1, a_2, a_3, ... a_n`. A "shallow copy" of `y` entails an increment in
-the reference counters for each reference, while a "deep copy" entails the underlying reference is cloned and replaced with a unique
-value. The language does not provide semantics for a deep copy, and this procedure must be implemented manually.
+Consider a container `y`, which stores (heap) references to `a_1, a_2, a_3, ... a_n` (for example, `y` could be a struct storing
+a heap reference to another struct). Both a "shallow" and "deep" copy of `y` entails  a duplication of the value of `y` in memory. 
+However, the shallow copy does not duplicate the values of underlying references in memory, it simply increments their reference
+counter. A deep copy entails the underlying references having their values duplicated and stored in the copied container `y`. 
+The language does not provide semantics for a deep copy, and this procedure must be implemented manually.
 
 3. Reference Counting
 

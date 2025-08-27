@@ -246,24 +246,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
-
-                    if let Type::Base { symbol: field_type_symbol_id, .. } = field_semantic_type {
-                        let field_type_symbol = self.analyzer.symbol_table.get_type_symbol(*field_type_symbol_id).unwrap();
-                        if matches!(field_type_symbol.kind, TypeSymbolKind::Struct(_)) {
-                            let field_ptr = self.builder.build_struct_gep(
-                                llvm_struct_type,
-                                data_ptr_generic,
-                                i as u32,
-                                "field_ptr"
-                            ).unwrap();
-                            
-                            let field_llvm_type = llvm_struct_type.get_field_type_at_index(i as u32).unwrap();
-                            let field_val = self.builder.build_load(field_llvm_type, field_ptr, "field_val").unwrap().into_pointer_value();
-
-                            let decref_fn = self.get_decref();
-                            self.builder.build_call(decref_fn, &[field_val.into()], "").unwrap();
-                        }
-                    }
+                    // todo decref
                 }
             }
         }
@@ -296,19 +279,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
 
-                    if let Type::Base { symbol: field_type_symbol_id, .. } = field_semantic_type {
-                        let field_type_symbol = self.analyzer.symbol_table.get_type_symbol(*field_type_symbol_id).unwrap();
-                        if matches!(field_type_symbol.kind, TypeSymbolKind::Struct(_)) {
-                            let field_val = self.builder.build_extract_value(
-                                original_data.into_struct_value(),
-                                i as u32,
-                                "field_val"
-                            ).unwrap();
-                            
-                            let incref_fn = self.get_incref();
-                            self.builder.build_call(incref_fn, &[field_val.into()], "").unwrap();
-                        }
-                    }
+                    // todo incref
                 }
             }
         }
