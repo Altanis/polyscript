@@ -12,6 +12,6 @@
 {
     let x: int = 4;
     let y: &mut int = &mut x;
-    let z: &mut int = heap 4;
-    let a: &mut int = z;
+    let z: &'heap mut int = heap 4;
+    let a: &'heap mut int = z;
 }

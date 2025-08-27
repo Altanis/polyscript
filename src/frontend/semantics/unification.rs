@@ -212,7 +212,7 @@ impl SemanticAnalyzer {
 
     fn check_and_disallow_mut_str(&mut self, ty: &Type, info: ConstraintInfo) -> Result<(), BoxedError> {
         let resolved_ty = self.resolve_type(ty);
-        if let Type::MutableReference(inner) = resolved_ty {
+        if let Type::MutableReference { inner, .. } = resolved_ty {
             let resolved_inner = self.resolve_type(&inner);
             if let Type::Base { symbol, .. } = resolved_inner
                 && let Some(type_symbol) = self.symbol_table.get_type_symbol(symbol)
@@ -432,11 +432,11 @@ impl SemanticAnalyzer {
                     }
                 }
             },
-            Type::Reference(inner) => {
-                Type::Reference(Box::new(self.apply_substitution(inner, substitutions)))
+            Type::Reference { inner, is_heap } => {
+                Type::Reference { inner: Box::new(self.apply_substitution(inner, substitutions)), is_heap: *is_heap }
             },
-            Type::MutableReference(inner) => {
-                Type::MutableReference(Box::new(self.apply_substitution(inner, substitutions)))
+            Type::MutableReference { inner, is_heap } => {
+                Type::MutableReference { inner: Box::new(self.apply_substitution(inner, substitutions)), is_heap: *is_heap }
             }
         }
     }
@@ -481,7 +481,7 @@ impl SemanticAnalyzer {
 
                 args.iter().any(|arg| self.type_contains_uvs(arg))
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => self.type_contains_uvs(inner),
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => self.type_contains_uvs(inner),
         }
     }
  
@@ -498,7 +498,7 @@ impl SemanticAnalyzer {
                 // No need to check substitutions here because resolve_type already did it.
                 args.iter().any(|arg| self.occurs_check(uv_id, arg))
             }
-            Type::Reference(inner) | Type::MutableReference(inner) => self.occurs_check(uv_id, inner),
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => self.occurs_check(uv_id, inner),
         }
     }
 
@@ -668,7 +668,7 @@ impl SemanticAnalyzer {
                     self.collect_signature_generics(arg, generics);
                 }
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => {
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 self.collect_signature_generics(inner, generics);
             }
         }
@@ -735,19 +735,19 @@ impl SemanticAnalyzer {
 
                 Ok(())
             },
-            (Type::Reference(ci), Type::Reference(ti)) => {
+            (Type::Reference { inner: ci, .. }, Type::Reference { inner: ti, .. }) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
             },
-            (Type::MutableReference(ci), Type::MutableReference(ti)) => {
+            (Type::MutableReference { inner: ci, .. }, Type::MutableReference { inner: ti, .. }) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
             },
-            (Type::MutableReference(ci), Type::Reference(ti)) => {
+            (Type::MutableReference { inner: ci, .. }, Type::Reference { inner: ti, .. }) => {
                 self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
             },
-            (c @ Type::Base { .. }, Type::Reference(ti) | Type::MutableReference(ti)) => {
+            (c @ Type::Base { .. }, Type::Reference { inner: ti, .. } | Type::MutableReference { inner: ti, .. }) => {
                 self.collect_substitutions(&c, &ti, substitutions, fn_generics, info)
             },
-            (Type::Reference(ci) | Type::MutableReference(ci), t @ Type::Base { .. }) => {
+            (Type::Reference { inner: ci, .. } | Type::MutableReference { inner: ci, .. }, t @ Type::Base { .. }) => {
                 self.collect_substitutions(&ci, &t, substitutions, fn_generics, info)
             },
             _ => Ok(())
@@ -1175,8 +1175,8 @@ impl SemanticAnalyzer {
                 
                 Type::Base { symbol: *symbol, args: resolved_args }
             },
-            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_all_uvs_in_type(inner, visited))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_all_uvs_in_type(inner, visited))),
+            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)), is_heap: *is_heap },
+            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)), is_heap: *is_heap },
         }
     }
 
@@ -1400,17 +1400,17 @@ impl SemanticAnalyzer {
                 Err(self.type_mismatch_error(t1, t2, info, None))
             },
 
-            (Type::Reference(inner1), Type::Reference(inner2)) => {
+            (Type::Reference { inner: inner1, is_heap: heap1 }, Type::Reference { inner: inner2, is_heap: heap2 }) if heap1 == heap2 => {
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::Reference(Box::new(unified)))
+                Ok(Type::Reference { inner: Box::new(unified), is_heap: heap1 })
             },
-            (Type::MutableReference(inner1), Type::MutableReference(inner2)) => {
+            (Type::MutableReference { inner: inner1, is_heap: heap1 }, Type::MutableReference { inner: inner2, is_heap: heap2 }) if heap1 == heap2 => {
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::MutableReference(Box::new(unified)))
+                Ok(Type::MutableReference { inner: Box::new(unified), is_heap: heap1 })
             },
-            (Type::MutableReference(p_inner), Type::Reference(e_inner)) => {
+            (Type::MutableReference { inner: p_inner, is_heap: p_heap }, Type::Reference { inner: e_inner, is_heap: e_heap }) if p_heap == e_heap => {
                 let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-                Ok(Type::Reference(Box::new(unified_inner)))
+                Ok(Type::Reference { inner: Box::new(unified_inner), is_heap: p_heap })
             },
 
             (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),
@@ -1607,14 +1607,14 @@ impl SemanticAnalyzer {
         }
 
         // `&mut T` -> `&T`
-        if let (Type::MutableReference(p_inner), Type::Reference(e_inner)) = (current_passed.clone(), resolved_expected.clone()) {
+        if let (Type::MutableReference { inner: p_inner, .. }, Type::Reference { inner: e_inner, .. }) = (current_passed.clone(), resolved_expected.clone()) {
             let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-            return Ok(Some(Type::Reference(Box::new(unified_inner))));
+            return Ok(Some(Type::Reference { inner: Box::new(unified_inner), is_heap: false }));
         }
 
         // `&^n T` | `&^n mut T` -> `T`
         let mut deref_passed = current_passed.clone();
-        while let Type::Reference(inner) | Type::MutableReference(inner) = deref_passed {
+        while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = deref_passed {
             deref_passed = *inner;
             if let Ok(unified) = self.unify(deref_passed.clone(), resolved_expected.clone(), info) {
                 return Ok(Some(unified));
@@ -1624,8 +1624,8 @@ impl SemanticAnalyzer {
         // `T` -> `&^n T` | `&^n mut T`
         if let p @ Type::Base { .. } = current_passed.clone() {
              match resolved_expected.clone() {
-                e @ Type::Reference(_) => return self.unify(Type::Reference(Box::new(p)), e, info).map(Some),
-                e @ Type::MutableReference(_) => return self.unify(Type::MutableReference(Box::new(p)), e, info).map(Some),
+                e @ Type::Reference { .. } => return self.unify(Type::Reference{ inner: Box::new(p), is_heap: false }, e, info).map(Some),
+                e @ Type::MutableReference { .. } => return self.unify(Type::MutableReference { inner: Box::new(p), is_heap: false }, e, info).map(Some),
                 _ => {}
             }
         }
@@ -1651,7 +1651,7 @@ impl SemanticAnalyzer {
 
         let base_lhs_type = if !is_static {
             match &resolved_lhs {
-                Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+                Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => (**inner).clone(),
                 _ => resolved_lhs.clone(),
             }
         } else {
@@ -2008,7 +2008,7 @@ impl SemanticAnalyzer {
 
                 let base_lhs_type = if !is_static_access {
                     match &resolved_lhs {
-                        Type::Reference(inner) | Type::MutableReference(inner) => (**inner).clone(),
+                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => (**inner).clone(),
                         _ => resolved_lhs.clone(),
                     }
                 } else {
@@ -2145,8 +2145,8 @@ impl SemanticAnalyzer {
                     args: resolved_args,
                 }
             },
-            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_final_type(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_final_type(inner)))
+            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_final_type(inner)), is_heap: *is_heap },
+            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_final_type(inner)), is_heap: *is_heap }
         }
     }
 
@@ -2221,7 +2221,7 @@ impl SemanticAnalyzer {
 
                 args.iter().any(|arg| self.type_is_generic(arg))
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => {
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 self.type_is_generic(inner)
             }
         }
@@ -2458,20 +2458,20 @@ impl SemanticAnalyzer {
 
                 let base_type = self.resolve_type(base.type_id.as_ref().unwrap());
                 match &base_type {
-                    Type::MutableReference(_) => Ok(true),
-                    Type::Reference(_) => Ok(false),
+                    Type::MutableReference { .. } => Ok(true),
+                    Type::Reference { .. } => Ok(false),
                     Type::Base { .. } => self.is_place_expr_and_mutable(base),
                 }
             },
             AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let operand_type = self.resolve_type(operand.type_id.as_ref().unwrap());
-                Ok(matches!(operand_type, Type::MutableReference(_)))
+                Ok(matches!(operand_type, Type::MutableReference { .. }))
             },
             AstNodeKind::SelfExpr => {
                 let ty = self.resolve_type(place.type_id.as_ref().unwrap());
                 match ty {
-                    Type::MutableReference(_) => Ok(true),
-                    Type::Reference(_) => Ok(false),
+                    Type::MutableReference { .. } => Ok(true),
+                    Type::Reference { .. } => Ok(false),
                     Type::Base { .. } => Ok(true)
                 }
             },
@@ -2566,11 +2566,11 @@ impl SemanticAnalyzer {
                     args: substituted_args,
                 }
             },
-            Type::Reference(inner) => {
-                Type::Reference(Box::new(self.apply_trait_substitutions(inner, substitutions)))
+            Type::Reference { inner, is_heap } => {
+                Type::Reference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)), is_heap: *is_heap }
             },
-            Type::MutableReference(inner) => {
-                Type::MutableReference(Box::new(self.apply_trait_substitutions(inner, substitutions)))
+            Type::MutableReference { inner, is_heap } => {
+                Type::MutableReference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)), is_heap: *is_heap }
             }
         }
     }

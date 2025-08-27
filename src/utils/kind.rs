@@ -497,6 +497,7 @@ impl std::fmt::Display for QualifierKind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Identifier,
+    HeapRegion,
     Operator(Operation),
     NumberLiteral(NumberKind),
     BooleanLiteral,
@@ -663,6 +664,7 @@ impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let token_type_str = match self {
             TokenKind::Identifier => "Identifier".cyan(),
+            TokenKind::HeapRegion => "'heap".cyan(),
             TokenKind::Operator(op) => format!("Operator::{:?}", op).bright_magenta(),
             TokenKind::NumberLiteral(n) => format!("Number::{:?}", n).blue(),
             TokenKind::BooleanLiteral => "Boolean".magenta(),

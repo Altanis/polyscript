@@ -76,8 +76,8 @@ fn find_variable_usage(node: &MIRNode, target_id: usize, analyzer: &SemanticAnal
                     for (i, arg_node) in arguments.iter().enumerate() {
                         if get_base_variable(arg_node) == Some(target_id) && let Some(param_type) = params.get(i) {
                             let usage_from_param = match param_type {
-                                Type::MutableReference(_) => UsageKind::ByMutableReference,
-                                Type::Reference(_) => UsageKind::ByReference,
+                                Type::MutableReference { .. } => UsageKind::ByMutableReference,
+                                Type::Reference { .. } => UsageKind::ByReference,
                                 _ => UsageKind::ByValue
                             };
 
@@ -101,7 +101,7 @@ fn is_copy_type(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
                 matches!(type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
             } else { false }
         },
-        Type::Reference(_) | Type::MutableReference(_) => true
+        Type::Reference { .. } | Type::MutableReference { .. } => true
     }
 }
 

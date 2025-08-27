@@ -66,7 +66,7 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
         MIRNodeKind::Return(Some(expr)) => {
             if let Some(function_scope) = get_function_scope(analyzer, node.scope_id) {
                 let expr_type = expr.type_id.as_ref().unwrap();
-                if matches!(expr_type, Type::Reference(_) | Type::MutableReference(_)) {
+                if matches!(expr_type, Type::Reference { .. } | Type::MutableReference { .. }) {
                     match check_for_escape(analyzer, expr, function_scope, true) {
                         Ok(c) => changed |= c,
                         Err(e) => return Err(e),
@@ -82,7 +82,7 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
                 && let Some(function_scope) = get_function_scope(analyzer, node.scope_id)
             {
                 let expr_type = last_expr.type_id.as_ref().unwrap();
-                if matches!(expr_type, Type::Reference(_) | Type::MutableReference(_)) {
+                if matches!(expr_type, Type::Reference { .. } | Type::MutableReference { .. }) {
                     match check_for_escape(analyzer, last_expr, function_scope, true) {
                         Ok(c) => changed |= c,
                         Err(e) => return Err(e),

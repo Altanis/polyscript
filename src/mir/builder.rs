@@ -105,7 +105,7 @@ impl<'a> MIRBuilder<'a> {
 
                 args.iter().all(|arg| self.type_is_fully_concrete(arg))
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => {
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 self.type_is_fully_concrete(inner)
             }
         }
@@ -154,9 +154,9 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
-            (Type::Reference(c_inner), Type::Reference(t_inner))
-                | (Type::MutableReference(c_inner), Type::MutableReference(t_inner))
-                | (Type::MutableReference(c_inner), Type::Reference(t_inner))
+            (Type::Reference { inner: c_inner, .. }, Type::Reference { inner: t_inner, .. })
+                | (Type::MutableReference { inner: c_inner, .. }, Type::MutableReference { inner: t_inner, .. })
+                | (Type::MutableReference { inner: c_inner, .. }, Type::Reference { inner: t_inner, .. })
             => {
                 self.collect_generic_mappings(c_inner, t_inner, substitutions);
             },
@@ -180,7 +180,7 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => self.collect_generic_ids(inner, out)
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => self.collect_generic_ids(inner, out)
         }
     }
 
@@ -212,13 +212,13 @@ impl<'a> MIRBuilder<'a> {
                     && let Some(instance_type) = &left.type_id
                 {
                     let mut concrete_receiver_ty = instance_type;
-                    while let Type::Reference(inner) | Type::MutableReference(inner) = concrete_receiver_ty {
+                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = concrete_receiver_ty {
                         concrete_receiver_ty = inner;
                     }
                 
                     let template_receiver_ty = &template_params[0];
                     let mut base_template_receiver_ty = template_receiver_ty;
-                    while let Type::Reference(inner) | Type::MutableReference(inner) = base_template_receiver_ty {
+                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_template_receiver_ty {
                         base_template_receiver_ty = inner;
                     }
                 
@@ -254,7 +254,7 @@ impl<'a> MIRBuilder<'a> {
                 if has_receiver {
                     let template_receiver_ty = &template_params[0];
                     let mut base_template_receiver_ty = template_receiver_ty;
-                    while let Type::Reference(inner) | Type::MutableReference(inner) = base_template_receiver_ty {
+                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_template_receiver_ty {
                         base_template_receiver_ty = inner;
                     }
                     self.collect_generic_ids(base_template_receiver_ty, &mut ordered_generic_ids);
@@ -440,8 +440,8 @@ impl<'a> MIRBuilder<'a> {
                     args: new_args,
                 }
             },
-            Type::Reference(inner) => Type::Reference(Box::new(self.substitute_type(inner, substitutions))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.substitute_type(inner, substitutions)))
+            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.substitute_type(inner, substitutions)), is_heap: *is_heap },
+            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.substitute_type(inner, substitutions)), is_heap: *is_heap }
         }
     }
 
@@ -1111,8 +1111,8 @@ impl<'a> MIRBuilder<'a> {
                 
                 Type::Base { symbol: *symbol, args: new_args }
             },
-            Type::Reference(inner) => Type::Reference(Box::new(self.resolve_concrete_type_recursively(inner))),
-            Type::MutableReference(inner) => Type::MutableReference(Box::new(self.resolve_concrete_type_recursively(inner))),
+            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_concrete_type_recursively(inner)), is_heap: *is_heap },
+            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_concrete_type_recursively(inner)), is_heap: *is_heap },
         }
     }
 
@@ -1158,7 +1158,7 @@ impl<'a> MIRBuilder<'a> {
         
         if let MIRNodeKind::FieldAccess { left, .. } = &mut node.kind {
             let mut base_ty = left.type_id.as_ref().unwrap();
-            while let Type::Reference(inner) | Type::MutableReference(inner) = base_ty {
+            while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_ty {
                 base_ty = inner;
             }
 

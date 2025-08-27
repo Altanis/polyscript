@@ -359,7 +359,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.type_map.insert(*symbol, llvm_ty);
                 Some(llvm_ty)
             },
-            Type::Reference(_) | Type::MutableReference(_) 
+            Type::Reference { .. } | Type::MutableReference { .. } 
                 => Some(self.context.ptr_type(AddressSpace::default()).as_basic_type_enum())
         }
     }
@@ -588,7 +588,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .unwrap() as u32;
     
                 let left_type = left.type_id.as_ref().unwrap();
-                let base_type = if let Type::Reference(inner) | Type::MutableReference(inner) = left_type {
+                let base_type = if let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = left_type {
                     &**inner
                 } else {
                     left_type
@@ -614,7 +614,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let operand_type = operand_node.type_id.as_ref().unwrap();
 
             let pointee_type_id = match operand_type {
-                Type::Reference(inner) | Type::MutableReference(inner) => inner,
+                Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
                 _ => panic!("CodeGen: cannot dereference non-pointer type"),
             };
 

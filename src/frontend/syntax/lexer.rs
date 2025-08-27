@@ -86,12 +86,17 @@ impl Lexer {
         Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
     }
 
-    /// Peeks at the next character.
-    fn peek(&self) -> Result<char, BoxedError> {
+    /// Peeks forward `n` characters.
+    fn peek_forward(&self, n: usize) -> Result<char, BoxedError> {
         self.source
-            .get(self.index + 1)
+            .get(self.index + n)
             .ok_or(self.generate_error(ErrorKind::UnexpectedEOF, None))
             .copied()
+    }
+
+    /// Peeks at the next character.
+    fn peek(&self) -> Result<char, BoxedError> {
+        self.peek_forward(1)
     }
 
     /// Consumes the next character.
@@ -812,6 +817,27 @@ impl Lexer {
             }
             CHAR_DELIMITER => {
                 let c = self.consume()?;
+
+                if c == 'h' {
+                    let is_heap_region =
+                        self.peek_forward(1) == Ok('e') &&
+                        self.peek_forward(2) == Ok('a') &&
+                        self.peek_forward(3) == Ok('p') &&
+                        self.peek_forward(4) == Ok(' ');
+
+                    if is_heap_region {
+                        self.consume()?;
+                        self.consume()?;
+                        self.consume()?;
+                        self.consume()?;
+
+                        return Ok(Token::new(
+                            "heap".into(),
+                            TokenKind::HeapRegion,
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
+                    }
+                }
 
                 if c == '\\' {
                     let ch = self.parse_escape_char()?;

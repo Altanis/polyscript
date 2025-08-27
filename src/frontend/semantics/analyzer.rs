@@ -150,8 +150,8 @@ pub enum ScopeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Base { symbol: TypeSymbolId, args: Vec<Type> },
-    Reference(Box<Type>),
-    MutableReference(Box<Type>),
+    Reference { inner: Box<Type>, is_heap: bool },
+    MutableReference { inner: Box<Type>, is_heap: bool },
 }
 
 impl Type {
@@ -166,7 +166,7 @@ impl Type {
     pub fn get_base_symbol(&self) -> TypeSymbolId {
         match self {
             Type::Base { symbol, .. } => *symbol,
-            Type::Reference(inner) | Type::MutableReference(inner) => inner.get_base_symbol(),
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner.get_base_symbol(),
         }
     }
 
@@ -180,7 +180,7 @@ impl Type {
 
                 args.iter().any(|arg| arg.contains_generics(generics))
             },
-            Type::Reference(inner) | Type::MutableReference(inner) => inner.contains_generics(generics)
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner.contains_generics(generics)
         }
     }
 }
@@ -1278,8 +1278,8 @@ impl SymbolTable {
                     }
                 }
             }
-            Type::Reference(inner) => format!("&{}", self.display_type(inner)),
-            Type::MutableReference(inner) => format!("&mut {}", self.display_type(inner)),
+            Type::Reference { inner, is_heap } => format!("&{}{}", if *is_heap { "'heap " } else { "" }, self.display_type(inner)),
+            Type::MutableReference { inner, is_heap } => format!("&{}mut {}", if *is_heap { "'heap " } else { "" }, self.display_type(inner)),
         }
     }
 
@@ -1585,8 +1585,8 @@ impl std::fmt::Display for Type {
                     write!(f, "{}<{}>", base_name, arg_str)
                 }
             }
-            Type::Reference(inner) => write!(f, "&{}", inner),
-            Type::MutableReference(inner) => write!(f, "&mut {}", inner),
+            Type::Reference { inner, is_heap } => write!(f, "&{}{}", if *is_heap { "'heap " } else { "" }, inner),
+            Type::MutableReference { inner, is_heap } => write!(f, "&{}mut {}", if *is_heap { "'heap " } else { "" }, inner),
         }
     }
 }

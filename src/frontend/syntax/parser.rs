@@ -686,12 +686,20 @@ impl Parser {
         }
 
         if self.match_token(TokenKind::Operator(Operation::BitwiseAnd)) {
+            let is_heap = if self.peek().get_token_kind() == TokenKind::HeapRegion {
+                self.consume(TokenKind::HeapRegion)?;
+                true
+            } else {
+                false
+            };
+
             let mutable = self.match_token(TokenKind::Keyword(KeywordKind::Mut));
             let inner_type = self.parse_type()?;
             let span = start_span.set_end_from_span(inner_type.span);
             return Ok(AstNode {
                 kind: AstNodeKind::ReferenceType {
                     mutable,
+                    is_heap,
                     inner: boxed!(inner_type),
                 },
                 span,

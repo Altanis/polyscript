@@ -609,12 +609,12 @@ impl SemanticAnalyzer {
 
     fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
         match &mut node.kind {
-            AstNodeKind::ReferenceType { mutable, inner } => {
+            AstNodeKind::ReferenceType { mutable, inner, is_heap } => {
                 let inner_type = self.get_type_from_ast(inner)?;
                 Ok(if *mutable {
-                    Type::MutableReference(Box::new(inner_type))
+                    Type::MutableReference { inner: Box::new(inner_type), is_heap: *is_heap }
                 } else {
-                    Type::Reference(Box::new(inner_type))
+                    Type::Reference { inner: Box::new(inner_type), is_heap: *is_heap }
                 })
             },
             AstNodeKind::TypeReference {

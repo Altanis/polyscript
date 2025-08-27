@@ -60,15 +60,15 @@ impl SemanticAnalyzer {
             }
             None => match operator {
                 Operation::Dereference => self.unification_context.register_constraint(
-                    Constraint::Equality(uv_type, Type::Reference(Box::new(result_uv))),
+                    Constraint::Equality(uv_type, Type::Reference { inner: Box::new(result_uv), is_heap: false }),
                     info,
                 ),
                 Operation::ImmutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(result_uv, Type::Reference(boxed!(uv_type))),
+                    Constraint::Equality(result_uv, Type::Reference { inner: boxed!(uv_type), is_heap: false }),
                     info,
                 ),
                 Operation::MutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(result_uv, Type::MutableReference(boxed!(uv_type))),
+                    Constraint::Equality(result_uv, Type::MutableReference { inner: boxed!(uv_type), is_heap: false }),
                     info,
                 ),
                 _ => unreachable!(),
@@ -1009,8 +1009,8 @@ impl SemanticAnalyzer {
                 Type::new_base(uv_id),
                 match receiver_kind {
                     ReferenceKind::Value => self_type.clone(),
-                    ReferenceKind::Reference => Type::Reference(Box::new(self_type.clone())),
-                    ReferenceKind::MutableReference => Type::MutableReference(Box::new(self_type.clone())),
+                    ReferenceKind::Reference => Type::Reference { inner: Box::new(self_type.clone()), is_heap: false },
+                    ReferenceKind::MutableReference => Type::MutableReference { inner: Box::new(self_type.clone()), is_heap: false },
                 },
             ),
             info,
@@ -1036,8 +1036,8 @@ impl SemanticAnalyzer {
 
         let final_type = match reference_kind {
             ReferenceKind::Value => base_type,
-            ReferenceKind::Reference => Type::Reference(Box::new(base_type)),
-            ReferenceKind::MutableReference => Type::MutableReference(Box::new(base_type)),
+            ReferenceKind::Reference => Type::Reference { inner: Box::new(base_type.clone()), is_heap: false },
+            ReferenceKind::MutableReference => Type::MutableReference { inner: Box::new(base_type.clone()), is_heap: false },
         };
 
         self.unification_context.register_constraint(
@@ -1374,7 +1374,7 @@ impl SemanticAnalyzer {
                 operator,
             } => self.collect_uv_binary_operation(uv_id, left, right, operator, info)?,
             HeapExpression(inner_expr) => {
-                let inner_type = Type::MutableReference(Box::new(self.collect_uvs(inner_expr)?));
+                let inner_type = Type::MutableReference { inner: Box::new(self.collect_uvs(inner_expr)?), is_heap: true };
                 self.unification_context.register_constraint(Constraint::Equality(uv.clone(), inner_type), info);
             },
             TypeCast {
@@ -1434,12 +1434,12 @@ impl SemanticAnalyzer {
             PathQualifier { .. } => {
                 return Err(self.create_error(ErrorKind::InvalidPathQualifier, expr.span, &[expr.span]))
             },
-            ReferenceType { mutable, inner } => {
+            ReferenceType { mutable, inner, is_heap } => {
                 let inner_type = self.collect_uvs(inner)?;
                 let ref_type = if *mutable {
-                    Type::MutableReference(Box::new(inner_type))
+                    Type::MutableReference { inner: Box::new(inner_type), is_heap: *is_heap }
                 } else {
-                    Type::Reference(Box::new(inner_type))
+                    Type::Reference { inner: Box::new(inner_type), is_heap: *is_heap }
                 };
                 self.unification_context.register_constraint(
                     Constraint::Equality(uv.clone(), ref_type),
