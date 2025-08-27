@@ -730,8 +730,3 @@ pub enum ReferenceKind {
     Reference,
     MutableReference,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
-pub enum BuiltinTypeKind {
-    HeapStruct
-}

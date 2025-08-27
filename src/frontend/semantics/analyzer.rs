@@ -548,78 +548,6 @@ impl SymbolTable {
             }
         }
 
-        // BUILTIN STRUCTS //
-
-        // Heap<T>
-        let heap_struct_scope_id = self.enter_scope(ScopeKind::Struct);
-        let t_generic_id = self.add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
-        self.add_value_symbol("data", ValueSymbolKind::StructField, false, QualifierKind::Public, Some(Type::new_base(t_generic_id)), None).unwrap();
-        self.exit_scope();
-        let heap_type_id = self.add_type_symbol("Heap", TypeSymbolKind::Struct((heap_struct_scope_id, vec![])), vec![t_generic_id], QualifierKind::Public, None).unwrap();
-
-        // impl Heap<T>
-        let heap_impl_scope_id = self.enter_scope(ScopeKind::Impl);
-        let impl_t_generic_id = self.add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
-
-        self.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, Some(Type::Base {
-                symbol: heap_type_id,
-                args: vec![Type::new_base(impl_t_generic_id)],
-            }))),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-
-        // fn new(data: T): Heap<T>
-        let new_fn_scope_id = self.enter_scope(ScopeKind::Function);
-        self.add_value_symbol(
-            "data",
-            ValueSymbolKind::Variable,
-            false,
-            QualifierKind::Public,
-            Some(Type::new_base(impl_t_generic_id)),
-            None,
-        ).unwrap();
-        self.exit_scope();
-
-        let new_fn_sig_id = self.add_type_symbol(
-            "new",
-            TypeSymbolKind::FunctionSignature {
-                params: vec![Type::new_base(impl_t_generic_id)],
-                return_type: Type::Base {
-                    symbol: heap_type_id,
-                    args: vec![Type::new_base(impl_t_generic_id)],
-                },
-                instance: None,
-            },
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-
-        self.add_value_symbol(
-            "new",
-            ValueSymbolKind::Function(new_fn_scope_id, HashSet::new()),
-            false,
-            QualifierKind::Public,
-            Some(Type::new_base(new_fn_sig_id)),
-            None,
-        ).unwrap();
-
-        self.exit_scope();
-        
-        let heap_symbol_mut = self.find_type_symbol_mut("Heap").unwrap();
-        if let TypeSymbolKind::Struct((_, impls)) = &mut heap_symbol_mut.kind {
-            impls.push(InherentImpl {
-                scope_id: heap_impl_scope_id,
-                specialization: vec![impl_t_generic_id],
-                generic_params: vec![impl_t_generic_id],
-                span: Span::default(),
-            });
-        }
-
         self.current_scope_id = old_scope;
     }
 
@@ -1059,8 +987,7 @@ pub struct UVCollectionContext {
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    pub primitive_types: Vec<TypeSymbolId>,
-    pub builtin_types: HashMap<BuiltinTypeKind, TypeSymbolId>,
+    pub builtin_types: Vec<TypeSymbolId>,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     pub uv_collection_ctx: UVCollectionContext,
@@ -1075,18 +1002,13 @@ impl SemanticAnalyzer {
 
         symbol_table.populate_with_defaults(&mut trait_registry);
 
-        let primitive_types: Vec<TypeSymbolId> = PrimitiveKind::iter()
+        let builtin_types: Vec<TypeSymbolId> = PrimitiveKind::iter()
             .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
             .collect();
-
-        let builtin_types = HashMap::from([
-            (BuiltinTypeKind::HeapStruct, symbol_table.find_type_symbol("Heap").unwrap().id)
-        ]);
 
         SemanticAnalyzer {
             trait_registry,
             symbol_table,
-            primitive_types,
             builtin_types,
             unification_context: UnificationContext::default(),
             uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false, current_function_stack: vec![] },
@@ -1142,7 +1064,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
-        self.primitive_types[primitive as usize]
+        self.builtin_types[primitive as usize]
     }
 
     pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
