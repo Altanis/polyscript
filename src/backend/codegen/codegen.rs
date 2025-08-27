@@ -2,7 +2,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
@@ -13,13 +13,13 @@ use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
 
+#[derive(Debug, Clone, Copy)]
 pub struct RcRepr<'ctx> {
-    struct_wrapper: StructType<'ctx>,
-    free: FunctionValue<'ctx>,
-    drop: FunctionValue<'ctx>,
-    inc_ref: FunctionValue<'ctx>,
-    dec_ref: FunctionValue<'ctx>,
-    clone: FunctionValue<'ctx>
+    /// { ref_count: i64, drop_fn: void (*)(i8*), data: T }
+    pub rc_struct_type: StructType<'ctx>,
+    pub llvm_data_type: BasicTypeEnum<'ctx>,
+    pub clone_data_fn: FunctionValue<'ctx>,
+    pub drop_data_fn: FunctionValue<'ctx>,
 }
 
 pub struct CodeGen<'a, 'ctx> {
@@ -44,7 +44,7 @@ pub struct CodeGen<'a, 'ctx> {
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
 
-    rc: HashMap<TypeSymbolId, RcRepr<'ctx>>
+    rc_map: HashMap<TypeSymbolId, RcRepr<'ctx>>
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -87,6 +87,142 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder
             .build_call(free_fn, &[ptr.into()], "")
             .unwrap();
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn mangle_name(&self, ty: &Type) -> String {
+        format!("{}_{}", ty, ty.get_base_symbol())
+    }
+
+    fn get_rc_header_type(&self) -> StructType<'ctx> {
+        if let Some(ty) = self.module.get_struct_type("RcHeader") {
+            return ty;
+        }
+
+        let ref_count_type = self.context.i64_type();
+        let drop_fn_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        let header_type = self.context.opaque_struct_type("RcHeader");
+        header_type.set_body(&[ref_count_type.into(), drop_fn_ptr_type.into()], false);
+        header_type
+    }
+
+    fn wrap_in_rc(&mut self, ty: &Type) -> RcRepr<'ctx> {
+        let type_id = ty.get_base_symbol();
+        if let Some(repr) = self.rc_map.get(&type_id) {
+            return *repr;
+        }
+
+        let type_name_mangled = self.mangle_name(ty);
+        let llvm_data_type = self.map_semantic_type(ty).unwrap();
+
+        let rc_header_type = self.get_rc_header_type();
+        let rc_struct_type = self.context.opaque_struct_type(&format!("Rc_{}", type_name_mangled));
+        rc_struct_type.set_body(&[rc_header_type.into(), llvm_data_type.into()], false);
+
+        let drop_data_fn = self.build_drop_data_fn(ty, &type_name_mangled, llvm_data_type);
+        let clone_data_fn = self.build_clone_data_fn(ty, &type_name_mangled, llvm_data_type);
+
+        let repr = RcRepr { rc_struct_type, llvm_data_type, clone_data_fn, drop_data_fn };
+        self.rc_map.insert(type_id, repr);
+        repr
+    }
+
+    fn build_drop_data_fn(&mut self, ty: &Type, name: &String, llvm_data_type: BasicTypeEnum<'ctx>) -> FunctionValue<'ctx> {
+        let fn_type = self.context.void_type().fn_type(&[self.context.ptr_type(AddressSpace::default()).into()], false);
+        let function = self.module.add_function(&format!("drop_data_{}", name), fn_type, Some(Linkage::Internal));
+
+        let old_block = self.builder.get_insert_block();
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        let data_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+        data_ptr_generic.set_name("data_ptr_generic");
+
+        if let Type::Base { symbol, .. } = ty {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+                let llvm_struct_type = llvm_data_type.into_struct_type();
+                
+                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                let mut field_symbols: Vec<_> = scope.values.values()
+                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                    .collect();
+                field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+                for (i, field_symbol) in field_symbols.iter().enumerate() {
+                    let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+
+                    if let Type::Base { symbol: field_type_symbol_id, .. } = field_semantic_type {
+                        let field_type_symbol = self.analyzer.symbol_table.get_type_symbol(*field_type_symbol_id).unwrap();
+                        if matches!(field_type_symbol.kind, TypeSymbolKind::Struct(_)) {
+                            let field_ptr = self.builder.build_struct_gep(
+                                llvm_struct_type,
+                                data_ptr_generic,
+                                i as u32,
+                                "field_ptr"
+                            ).unwrap();
+                            
+                            let field_llvm_type = llvm_struct_type.get_field_type_at_index(i as u32).unwrap();
+                            let field_val = self.builder.build_load(field_llvm_type, field_ptr, "field_val").unwrap();
+
+                            /* TODO: decref */
+                            // The field_val is the RC pointer for the nested struct.
+                        }
+                    }
+                }
+            }
+        }
+
+        self.builder.build_return(None).unwrap();
+        if let Some(block) = old_block { self.builder.position_at_end(block); }
+        function
+    }
+
+    fn build_clone_data_fn(&mut self, ty: &Type, name: &String, llvm_data_type: BasicTypeEnum<'ctx>) -> FunctionValue<'ctx> {
+        let fn_type = llvm_data_type.fn_type(&[llvm_data_type.into()], false);
+        let function = self.module.add_function(&format!("clone_data_{}", name), fn_type, Some(Linkage::Internal));
+
+        let old_block = self.builder.get_insert_block();
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        let original_data = function.get_first_param().unwrap();
+        original_data.set_name("original_data");
+
+        if let Type::Base { symbol, .. } = ty {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                let mut field_symbols: Vec<_> = scope.values.values()
+                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                    .collect();
+                field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+                for (i, field_symbol) in field_symbols.iter().enumerate() {
+                    let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+
+                    if let Type::Base { symbol: field_type_symbol_id, .. } = field_semantic_type {
+                        let field_type_symbol = self.analyzer.symbol_table.get_type_symbol(*field_type_symbol_id).unwrap();
+                        if matches!(field_type_symbol.kind, TypeSymbolKind::Struct(_)) {
+                            let field_val = self.builder.build_extract_value(
+                                original_data.into_struct_value(),
+                                i as u32,
+                                "field_val"
+                            ).unwrap();
+                            
+                            /* TODO: incref */
+                            // field_val is the RC guard around the data.
+                        }
+                    }
+                }
+            }
+        }
+
+        self.builder.build_return(Some(&original_data)).unwrap();
+        if let Some(block) = old_block { self.builder.position_at_end(block); }
+        function
     }
 }
 
@@ -1133,7 +1269,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             current_function: None,
             rvo_return_ptr: None,
             type_map: HashMap::new(),
-            rc: HashMap::new()
+            rc_map: HashMap::new()
         }
     }
 

@@ -17,7 +17,7 @@ start of the lifetime of the created data.
 Data that resides in the stack and the heap follow the same semantics when being moved around. Consider the value `x`,
 a variable that holds data that can reside in either place. The following rules on `x` apply:
 
-    1. Using `x` by value, such as `let y = x;` or `func(x)`, results in a deep copy of `x`. The data is copied into memory,
+    1. Using `x` by value, such as `let y = x;` or `func(x)`, results in a shallow copy of `x`. The data is copied into memory,
     and escape analysis determines if the copied data will reside in stack or heap memory. The only exception is if the value
     is on the left hand side of an Assignment operation, in which case a simple mutation occurs on `x`.
 
@@ -25,11 +25,15 @@ a variable that holds data that can reside in either place. The following rules 
     resides on the stack, the stack pointer is free to move around, and no reference counting occurs (escape analysis verifies
     that dangling references to `x` do not escape). If `x` resides on the heap, the reference counter is incremented.
 
-    3. Dereferencing a reference to `x`, such as `let y = *&x;` or `func(*&x)`, results in a deep copy. The only exception is
+    3. Dereferencing a reference to `x`, such as `let y = *&x;` or `func(*&x)`, results in a shallow copy. The only exception is
     if the dereference is on the left hand of an Assignment operation, in which case a simple mutation occurs on `x`.
 
-    4. Returning `x` from a function is not a traditional "use by value." Move semantics are invoked, and no deep copy occurs.
+    4. Returning `x` from a function is not a traditional "use by value." Move semantics are invoked, and no shallow copy occurs.
     If `x` is heap allocated, the reference counter is not decremented, as `x` is moved.
+
+Consider a container `y`, which stores (heap) references to `a_1, a_2, a_3, ... a_n`. A "shallow copy" of `y` entails an increment in
+the reference counters for each reference, while a "deep copy" entails the underlying reference is cloned and replaced with a unique
+value. The language does not provide semantics for a deep copy, and this procedure must be implemented manually.
 
 3. Reference Counting
 
