@@ -336,7 +336,7 @@ impl SemanticAnalyzer {
                     name,
                     TypeSymbolKind::FunctionSignature {
                         params: vec![],
-                        return_type: Type::new_base(self.builtin_types[PrimitiveKind::Void as usize]),
+                        return_type: Type::new_base(self.primitive_types[PrimitiveKind::Void as usize]),
                         instance: *instance,
                     },
                     sig_generic_param_ids,
@@ -654,7 +654,7 @@ impl SemanticAnalyzer {
                 let return_type_val = if let Some(rt_node) = return_type {
                     self.get_type_from_ast(rt_node)?
                 } else {
-                    Type::new_base(self.builtin_types[PrimitiveKind::Void as usize])
+                    Type::new_base(self.primitive_types[PrimitiveKind::Void as usize])
                 };
 
                 let fn_ptr_id = self.symbol_table.add_type_symbol(
