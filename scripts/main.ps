@@ -12,9 +12,9 @@
 struct X { x: int; }
 struct Point { x: X; }
 
-fn wow(): Point {
+fn wow(): &mut Point {
     let x = X { x: 4 };
-    let p = heap (Point { x });
+    let p: &mut Point = heap (Point { x });
     p
 }
 
