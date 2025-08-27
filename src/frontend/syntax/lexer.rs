@@ -595,11 +595,6 @@ impl Lexer {
                 TokenKind::Operator(Operation::As),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
-            HEAP_KEYWORD => Ok(Token::new(
-                word,
-                TokenKind::Keyword(KeywordKind::Heap),
-                span.set_end_from_values(self.index, self.line, self.column),
-            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,

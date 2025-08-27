@@ -98,12 +98,12 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
                 Err(e) => return Err(e),
             }
 
-            if let MIRNodeKind::HeapExpression(_) = &initializer.kind {
-                 match move_to_heap(analyzer, node.value_id.unwrap()) {
-                    Ok(c) => changed |= c,
-                    Err(e) => return Err(e),
-                 }
-            }
+            // if let MIRNodeKind::HeapExpression(_) = &initializer.kind {
+            //      match move_to_heap(analyzer, node.value_id.unwrap()) {
+            //         Ok(c) => changed |= c,
+            //         Err(e) => return Err(e),
+            //      }
+            // }
         }
         _ => {}
     }

@@ -507,19 +507,6 @@ impl Parser {
             }
             TokenKind::Keyword(KeywordKind::Fn) => self.parse_function_expression(),
             TokenKind::Keyword(KeywordKind::If) => self.parse_if_expression(),
-            TokenKind::Keyword(KeywordKind::Heap) => {
-                self.advance();
-                let expr = self.parse_binding_power(Operation::Not.binding_power().0)?;
-
-                Ok(AstNode {
-                    kind: AstNodeKind::HeapExpression(boxed!(expr)),
-                    span: span.set_end_from_span(self.previous().get_span()),
-                    type_id: None,
-                    value_id: None,
-                    scope_id: None,
-                    id: self.get_next_node_id()
-                })
-            },
             _ => {
                 return Err(self.generate_error(
                     ErrorKind::UnexpectedToken(

@@ -533,10 +533,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let ty = self.map_semantic_type(ty).unwrap();
                 self.builder.build_alloca(ty, "").unwrap()
             },
-            AllocationKind::Heap if matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) => {
-                let ty = self.map_semantic_type(ty).unwrap();
-                self.builder.build_alloca(ty, "").unwrap()
-            },
             AllocationKind::Heap => {
                 let llvm_ty = self.map_semantic_type(ty).unwrap();
                 let size = llvm_ty.size_of().unwrap();
@@ -819,19 +815,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Some(self.compile_core_binary_op(operator, left_val, right_val, is_float))
             }
         }
-    }
-
-    fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
-        let inner_type = inner_expr.type_id.as_ref().unwrap();
-        let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
-
-        let size = llvm_inner_type.size_of().unwrap();
-        let raw_ptr = self.build_malloc(size);
-
-        let inner_value = self.compile_node(inner_expr).unwrap();
-        self.builder.build_store(raw_ptr, inner_value).unwrap();
-
-        Some(raw_ptr.as_basic_value_enum())
     }
 
     fn compile_block(&mut self, stmts: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
@@ -1422,7 +1405,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 => self.compile_binary_operation(*operator, left, right),
             MIRNodeKind::ConditionalOperation { operator, left, right }
                 => self.compile_conditional_operation(*operator, left, right),
-            MIRNodeKind::HeapExpression(expr) => self.compile_heap_expression(expr),
             MIRNodeKind::Block(stmts) => self.compile_block(stmts),
             MIRNodeKind::ExpressionStatement(expr) => {
                 self.compile_node(expr);

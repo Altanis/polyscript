@@ -499,7 +499,6 @@ impl<'a> MIRBuilder<'a> {
 
             AstNodeKind::Identifier(name) => MIRNodeKind::Identifier(name.clone()),
             AstNodeKind::SelfExpr => MIRNodeKind::SelfExpr,
-            AstNodeKind::HeapExpression(expr) => MIRNodeKind::HeapExpression(Box::new(self.lower_node(expr)?)),
             AstNodeKind::ExpressionStatement(expr) => {
                 MIRNodeKind::ExpressionStatement(Box::new(self.lower_node(expr)?))
             }
