@@ -522,8 +522,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_identifier(&mut self, value_id: ValueSymbolId, ty: &Type) -> BasicValueEnum<'ctx> {
         if let Some(&ptr) = self.variables.get(&value_id) {
-            let ty = self.map_semantic_type(ty).unwrap();
-            return self.builder.build_load(ty, ptr, "").unwrap();
+            let llvm_ty = self.map_semantic_type(ty).unwrap();
+            let load = self.builder.build_load(llvm_ty, ptr, "").unwrap();
+
+            if ty.is_heap_ref() {
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[ptr.into()], &format!("increfr_{ptr}")).unwrap();
+            }
+
+            return load;
         }
 
         if let Some(func) = self.functions.get(&value_id).cloned() {
@@ -846,18 +853,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
-        let llvm_inner_type = self.map_semantic_type(&Type::new_base(inner_expr.type_id.as_ref().unwrap().get_base_symbol())).unwrap();
+     fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
+        let rc_repr = self.wrap_in_rc(inner_expr.type_id.as_ref().unwrap());
 
-        let size = llvm_inner_type.size_of().unwrap();
+        let size = rc_repr.rc_struct_type.size_of().unwrap();
         let raw_ptr = self.build_malloc(size);
+        let rc_ptr = self.builder.build_pointer_cast(raw_ptr, self.context.ptr_type(AddressSpace::default()), "rc_ptr").unwrap();
+        
+        let ref_count_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 0, "ref_count_ptr").unwrap();
+        let ref_count_inner_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), ref_count_ptr, 0, "").unwrap();
+        self.builder.build_store(ref_count_inner_ptr, self.context.i64_type().const_int(1, false)).unwrap();
+        
+        let drop_fn_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), ref_count_ptr, 1, "").unwrap();
+        self.builder.build_store(drop_fn_ptr, rc_repr.drop_data_fn.as_global_value().as_pointer_value()).unwrap();
 
+        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "data_ptr").unwrap();
         let inner_value = self.compile_node(inner_expr).unwrap();
-        self.builder.build_store(raw_ptr, inner_value).unwrap();
-
+        self.builder.build_store(data_ptr, inner_value).unwrap();
+        
         Some(raw_ptr.as_basic_value_enum())
-    }
-
+     }
+ 
     fn compile_block(&mut self, stmts: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         let mut last_val = None;
 
