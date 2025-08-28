@@ -59,19 +59,16 @@ impl SemanticAnalyzer {
                 );
             }
             None => match operator {
-                Operation::Dereference => self.unification_context.register_constraint(
-                    Constraint::Equality(uv_type, Type::Reference { inner: Box::new(result_uv), is_heap: false }),
-                    info,
-                ),
-                Operation::ImmutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(result_uv, Type::Reference { inner: boxed!(uv_type), is_heap: false }),
-                    info,
-                ),
-                Operation::MutableAddressOf => self.unification_context.register_constraint(
-                    Constraint::Equality(result_uv, Type::MutableReference { inner: boxed!(uv_type), is_heap: false }),
-                    info,
-                ),
-                _ => unreachable!(),
+                Operation::Dereference => self.unification_context.register_constraint(Constraint::Dereference(uv_type, result_uv), info),
+                Operation::ImmutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                    result_uv,
+                    Type::Reference { inner: boxed!(uv_type), is_heap: false }
+                ), info),
+                Operation::MutableAddressOf => self.unification_context.register_constraint(Constraint::Equality(
+                    result_uv,
+                    Type::MutableReference { inner: boxed!(uv_type), is_heap: false },
+                ), info),
+                _ => unreachable!()
             },
         }
 

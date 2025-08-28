@@ -1276,7 +1276,8 @@ impl SemanticAnalyzer {
             Constraint::Operation(uv_symbol_id, trait_type, lhs, rhs, operation) => {
                 self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info, operation)
             },
-            Constraint::Cast(source, target) => self.unify_cast(source, target, info)
+            Constraint::Cast(source, target) => self.unify_cast(source, target, info),
+            Constraint::Dereference(operand_ty, result_ty) => self.unify_dereference(operand_ty, result_ty, info)
         }
     }
 
@@ -1979,6 +1980,24 @@ impl SemanticAnalyzer {
                 info.span,
                 &[info.span],
             ))
+        }
+    }
+
+    fn unify_dereference(&mut self, operand_ty: Type, result_ty: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+        let resolved_operand = self.resolve_type(&operand_ty);
+        match &resolved_operand {
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
+                self.unify(*inner.clone(), result_ty, info)?;
+                Ok(true)
+            }
+            Type::Base { symbol, .. } if self.is_uv(*symbol) => {
+                Ok(false)
+            }
+            _ => Err(self.create_error(
+                ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
+                info.span,
+                &[info.span],
+            )),
         }
     }
 }
