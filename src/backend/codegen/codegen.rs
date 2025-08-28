@@ -296,15 +296,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn build_clone_data_fn(&mut self, ty: &Type, name: &String, llvm_data_type: BasicTypeEnum<'ctx>) -> FunctionValue<'ctx> {
-        let fn_type = llvm_data_type.fn_type(&[llvm_data_type.into()], false);
+        let fn_type = llvm_data_type.fn_type(&[self.context.ptr_type(AddressSpace::default()).into()], false);
         let function = self.module.add_function(&format!("clone_data_{}", name), fn_type, Some(Linkage::Internal));
 
         let old_block = self.builder.get_insert_block();
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        let original_data = function.get_first_param().unwrap();
-        original_data.set_name("original_data");
+        let original_data_ptr = function.get_first_param().unwrap().into_pointer_value();
+        original_data_ptr.set_name("original_data_ptr");
+
+        let original_data = self.builder.build_load(llvm_data_type, original_data_ptr, "original_data").unwrap();
 
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
@@ -677,9 +679,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             if is_heap {
                 let rc_repr = self.wrap_in_rc(inner_type);
                 let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap();
-                let data_val = self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "data_val").unwrap();
-
-                let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_val.into()], "cloned_val").unwrap();
+                
+                let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "cloned_val").unwrap();
                 return cloned_val.try_as_basic_value().left();
             } else {
                 let pointee_type = self.map_semantic_type(inner_type).unwrap();
