@@ -53,7 +53,7 @@ pub struct CodeGen<'a, 'ctx> {
     
     type_map: HashMap<TypeSymbolId, BasicTypeEnum<'ctx>>,
 
-    rc_map: HashMap<TypeSymbolId, RcRepr<'ctx>>
+    rc_map: HashMap<Type, RcRepr<'ctx>>
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -118,7 +118,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn mangle_name(&self, ty: &Type) -> String {
-        format!("{}_{}", ty, ty.get_base_symbol())
+        self.analyzer.symbol_table.display_type(ty).replace(|c: char| !c.is_alphanumeric(), "_")
     }
 
     fn get_rc_header_type(&self) -> StructType<'ctx> {
@@ -144,6 +144,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let function = self.module.add_function("incref", fn_type, Some(Linkage::Internal));
     
         let entry = self.context.append_basic_block(function, "entry");
+        let old_block = self.builder.get_insert_block();
         self.builder.position_at_end(entry);
     
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
@@ -156,9 +157,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(not_null_block);
         
         let rc_header_type = self.get_rc_header_type();
-        let rc_header_ptr = self.builder.build_pointer_cast(rc_ptr_generic, self.context.ptr_type(AddressSpace::default()), "rc_header_ptr").unwrap();
-        
-        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 0, "ref_count_ptr").unwrap();
+
+        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 0, "ref_count_ptr").unwrap();
         
         let old_count = self.builder.build_load(self.context.i64_type(), ref_count_ptr, "old_count").unwrap().into_int_value();
         let new_count = self.builder.build_int_add(old_count, self.context.i64_type().const_int(1, false), "new_count").unwrap();
@@ -168,6 +168,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(end_block);
         self.builder.build_return(None).unwrap();
     
+        if let Some(bb) = old_block { self.builder.position_at_end(bb); }
         function
     }
 
@@ -181,6 +182,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let function = self.module.add_function("decref", fn_type, Some(Linkage::Internal));
     
         let entry = self.context.append_basic_block(function, "entry");
+        let old_block = self.builder.get_insert_block();
         self.builder.position_at_end(entry);
     
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
@@ -193,9 +195,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(not_null_block);
     
         let rc_header_type = self.get_rc_header_type();
-        let rc_header_ptr = self.builder.build_pointer_cast(rc_ptr_generic, self.context.ptr_type(AddressSpace::default()), "rc_header_ptr").unwrap();
-        
-        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 0, "ref_count_ptr").unwrap();
+
+        let ref_count_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 0, "ref_count_ptr").unwrap();
         let old_count = self.builder.build_load(self.context.i64_type(), ref_count_ptr, "old_count").unwrap().into_int_value();
         let new_count = self.builder.build_int_sub(old_count, self.context.i64_type().const_int(1, false), "new_count").unwrap();
         self.builder.build_store(ref_count_ptr, new_count).unwrap();
@@ -207,10 +208,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         self.builder.position_at_end(drop_block);
     
-        let drop_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_header_ptr, 1, "drop_fn_ptr_ptr").unwrap();
+        let drop_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 1, "drop_fn_ptr_ptr").unwrap();
         let drop_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), drop_fn_ptr_ptr, "drop_fn_ptr").unwrap().into_pointer_value();
         
-        let header_size = self.get_rc_header_type().size_of().unwrap();
+        let header_size = rc_header_type.size_of().unwrap();
         let data_ptr = unsafe {
             self.builder.build_gep(self.context.i8_type(), rc_ptr_generic, &[header_size], "data_ptr").unwrap()
         };
@@ -224,12 +225,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(end_block);
         self.builder.build_return(None).unwrap();
         
+        if let Some(bb) = old_block { self.builder.position_at_end(bb); }
         function
     }
 
     fn wrap_in_rc(&mut self, ty: &Type) -> RcRepr<'ctx> {
-        let type_id = ty.get_base_symbol();
-        if let Some(repr) = self.rc_map.get(&type_id) {
+        if let Some(repr) = self.rc_map.get(ty) {
             return *repr;
         }
 
@@ -244,7 +245,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let clone_data_fn = self.build_clone_data_fn(ty, &type_name_mangled, llvm_data_type);
 
         let repr = RcRepr { rc_struct_type, llvm_data_type, clone_data_fn, drop_data_fn };
-        self.rc_map.insert(type_id, repr);
+        self.rc_map.insert(ty.clone(), repr);
         repr
     }
 
@@ -274,12 +275,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
 
                     if field_semantic_type.is_heap_ref() {
-                        let field_ptr = self.builder.build_struct_gep(
+                        let field_ptr_ptr = self.builder.build_struct_gep(
                             llvm_struct_type,
                             data_ptr_generic,
                             i as u32,
-                            &format!("field{idx}_ptr", idx = i),
+                            &format!("field{idx}_ptr_ptr", idx = i),
                         ).unwrap();
+                        let field_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), field_ptr_ptr, "").unwrap();
 
                         let decref = self.get_decref();
                         self.builder.build_call(decref, &[field_ptr.into()], &format!("decref_{i}")).unwrap();
@@ -304,14 +306,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let original_data = function.get_first_param().unwrap();
         original_data.set_name("original_data");
 
-        let data_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
-        data_ptr_generic.set_name("data_ptr_generic");
-
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
             if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
-                let llvm_struct_type = llvm_data_type.into_struct_type();
-
                 let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
                 let mut field_symbols: Vec<_> = scope.values.values()
                     .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
@@ -321,15 +318,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
                     if field_semantic_type.is_heap_ref() {
-                        let field_ptr = self.builder.build_struct_gep(
-                            llvm_struct_type,
-                            data_ptr_generic,
+                        let field_val = self.builder.build_extract_value(
+                            original_data.into_struct_value(),
                             i as u32,
-                            &format!("field{idx}_ptr", idx = i),
+                            &format!("field_{i}_val")
                         ).unwrap();
 
-                        let decref = self.get_decref();
-                        self.builder.build_call(decref, &[field_ptr.into()], &format!("decref_{i}")).unwrap();
+                        let incref = self.get_incref();
+                        self.builder.build_call(incref, &[field_val.into()], "").unwrap();
                     }
                 }
             }
@@ -553,7 +549,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if ty.is_heap_ref() {
                 let incref = self.get_incref();
-                self.builder.build_call(incref, &[ptr.into()], &format!("increfr_{ptr}")).unwrap();
+                self.builder.build_call(incref, &[load.into()], &format!("increfr_{ptr}")).unwrap();
             }
 
             return load;
@@ -612,9 +608,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.variables.get(&var_id).copied()
             },
             MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
-                let ptr_to_ptr = self.compile_node(operand).unwrap().into_pointer_value();
-                let inner_ptr_type = self.map_semantic_type(node.type_id.as_ref().unwrap()).unwrap();
-                Some(self.builder.build_load(inner_ptr_type, ptr_to_ptr, "").unwrap().into_pointer_value())
+                let operand_type = operand.type_id.as_ref().unwrap();
+                let is_heap = operand_type.is_heap_ref();
+                let ptr = self.compile_node(operand).unwrap().into_pointer_value();
+
+                if is_heap {
+                    let inner_type = match operand_type {
+                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
+                        _ => unreachable!(),
+                    };
+                    let rc_repr = self.wrap_in_rc(inner_type);
+                    Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap())
+                } else {
+                    Some(ptr)
+                }
             },
             MIRNodeKind::FieldAccess { left, .. } => {
                 let struct_ptr = self.compile_place_expression(left)?;
@@ -661,13 +668,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let ptr = operand.into_pointer_value();
             let operand_type = operand_node.type_id.as_ref().unwrap();
 
-            let pointee_type_id = match operand_type {
-                Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
+            let (inner_type, is_heap) = match operand_type {
+                Type::Reference { inner, is_heap } => (&**inner, *is_heap),
+                Type::MutableReference { inner, is_heap } => (&**inner, *is_heap),
                 _ => panic!("CodeGen: cannot dereference non-pointer type"),
             };
 
-            let pointee_type = self.map_semantic_type(pointee_type_id).unwrap();
-            return Some(self.builder.build_load(pointee_type, ptr, "").unwrap());
+            if is_heap {
+                let rc_repr = self.wrap_in_rc(inner_type);
+                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap();
+                let data_val = self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "data_val").unwrap();
+
+                let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_val.into()], "cloned_val").unwrap();
+                return cloned_val.try_as_basic_value().left();
+            } else {
+                let pointee_type = self.map_semantic_type(inner_type).unwrap();
+                return Some(self.builder.build_load(pointee_type, ptr, "").unwrap());
+            }
         }
     
         let operand_type = operand_node.type_id.as_ref().unwrap();
@@ -874,16 +891,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let size = rc_repr.rc_struct_type.size_of().unwrap();
         let raw_ptr = self.build_malloc(size);
-        let rc_ptr = self.builder.build_pointer_cast(raw_ptr, self.context.ptr_type(AddressSpace::default()), "rc_ptr").unwrap();
         
-        let ref_count_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 0, "ref_count_ptr").unwrap();
-        let ref_count_inner_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), ref_count_ptr, 0, "").unwrap();
-        self.builder.build_store(ref_count_inner_ptr, self.context.i64_type().const_int(1, false)).unwrap();
+        let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 0, "header_ptr").unwrap();
+        let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "").unwrap();
+        self.builder.build_store(ref_count_ptr, self.context.i64_type().const_int(1, false)).unwrap();
         
-        let drop_fn_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), ref_count_ptr, 1, "").unwrap();
-        self.builder.build_store(drop_fn_ptr, rc_repr.drop_data_fn.as_global_value().as_pointer_value()).unwrap();
+        let drop_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "").unwrap();
+        self.builder.build_store(drop_fn_ptr_ptr, rc_repr.drop_data_fn.as_global_value().as_pointer_value()).unwrap();
 
-        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "data_ptr").unwrap();
+        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 1, "data_ptr").unwrap();
         let inner_value = self.compile_node(inner_expr).unwrap();
         self.builder.build_store(data_ptr, inner_value).unwrap();
         
@@ -1223,12 +1239,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 })
                 .collect();
             let env_struct_type = self.context.struct_type(&capture_types, false);
-            let env_ptr = self.builder.build_pointer_cast(env_raw_ptr, self.context.ptr_type(AddressSpace::default()), "").unwrap();
 
             for (i, capture) in captures.iter().enumerate() {
                 let capture_id = capture.value_id.unwrap();
                 let MIRNodeKind::EnvironmentCapture { strategy, .. } = &capture.kind else { unreachable!(); };
-                let field_ptr = self.builder.build_struct_gep(env_struct_type, env_ptr, i as u32, "").unwrap();
+                let field_ptr = self.builder.build_struct_gep(env_struct_type, env_raw_ptr, i as u32, "").unwrap();
 
                 let ptr_to_store_in_vars = match strategy {
                     CaptureStrategy::Copy => {
@@ -1373,13 +1388,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .unwrap();
 
         if let ValueSymbolKind::Function(_, _) = symbol.kind {
-            return Some(
-                self.functions
-                    .get(&symbol.id)
-                    .unwrap()
-                    .as_global_value()
-                    .as_basic_value_enum(),
-            );
+            let func_val = *self.functions.get(&symbol.id).unwrap();
+            let closure_struct_type = self.map_semantic_type(stmt.type_id.as_ref().unwrap()).unwrap().into_struct_type();
+            let closure_ptr = self.builder.build_alloca(closure_struct_type, "").unwrap();
+            
+            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, "").unwrap();
+            self.builder.build_store(fn_ptr_field, func_val.as_global_value().as_pointer_value()).unwrap();
+
+            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, "").unwrap();
+            let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+            self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
+            
+            return Some(self.builder.build_load(closure_struct_type, closure_ptr, "").unwrap());
         }
 
         let field_ptr = self.compile_place_expression(stmt).unwrap();
