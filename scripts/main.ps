@@ -1,3 +1,4 @@
+// monomorphize &self and &mut self methods to also take &'heap self and &'heap mut self
 // memory safety (reference counting)
     // when finished, add trait Drop that can be implemented on types
 // real compiler that takes file input + import/export system
@@ -9,9 +10,18 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-{
-    let x: int = 4;
-    let y: &mut int = &mut x;
-    let z: &'heap mut int = heap 4;
-    let a: &'heap mut int = z;
+struct X {}
+impl X {
+    fn test(&self) {}
+    fn test2(&mut self) {} 
 }
+
+let x: X = X {};
+let ref: &mut X = &mut x;
+let y: &'heap mut X = heap (X {});
+
+ref.test();
+y.test();
+
+ref.test2();
+y.test2();

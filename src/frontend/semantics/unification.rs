@@ -1400,17 +1400,29 @@ impl SemanticAnalyzer {
                 Err(self.type_mismatch_error(t1, t2, info, None))
             },
 
-            (Type::Reference { inner: inner1, is_heap: heap1 }, Type::Reference { inner: inner2, is_heap: heap2 }) if heap1 == heap2 => {
+            (Type::Reference { inner: inner1, is_heap: h1 }, Type::Reference { inner: inner2, is_heap: h2 }) => {
+                if h1 != h2 {
+                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
+                }
+
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::Reference { inner: Box::new(unified), is_heap: heap1 })
+                Ok(Type::Reference { inner: Box::new(unified), is_heap: h1 })
             },
-            (Type::MutableReference { inner: inner1, is_heap: heap1 }, Type::MutableReference { inner: inner2, is_heap: heap2 }) if heap1 == heap2 => {
+            (Type::MutableReference { inner: inner1, is_heap: h1 }, Type::MutableReference { inner: inner2, is_heap: h2 }) => {
+                if h1 != h2 {
+                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
+                }
+
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::MutableReference { inner: Box::new(unified), is_heap: heap1 })
+                Ok(Type::MutableReference { inner: Box::new(unified), is_heap: h1 })
             },
-            (Type::MutableReference { inner: p_inner, is_heap: p_heap }, Type::Reference { inner: e_inner, is_heap: e_heap }) if p_heap == e_heap => {
+            (Type::MutableReference { inner: p_inner, is_heap: h1 }, Type::Reference { inner: e_inner, is_heap: h2 }) => {
+                if h1 != h2 {
+                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
+                }
+                
                 let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-                Ok(Type::Reference { inner: Box::new(unified_inner), is_heap: p_heap })
+                Ok(Type::Reference { inner: Box::new(unified_inner), is_heap: h1 })
             },
 
             (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),
@@ -1594,26 +1606,38 @@ impl SemanticAnalyzer {
     }
 
     fn unify_receiver(&mut self, passed: Type, expected: Type, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
-        let current_passed = self.resolve_type(&passed);
+        let resolved_passed = self.resolve_type(&passed);
         let resolved_expected = self.resolve_type(&expected);
 
-        if self.is_uv(current_passed.get_base_symbol()) || self.is_uv(resolved_expected.get_base_symbol()) {
+        if self.is_uv(resolved_passed.get_base_symbol()) || self.is_uv(resolved_expected.get_base_symbol()) {
             return Ok(None);
         }
 
+        let resolved_passed = match resolved_passed.clone() {
+            Type::MutableReference { inner, .. } => Type::MutableReference { inner, is_heap: false },
+            Type::Reference { inner, .. } => Type::Reference { inner, is_heap: false },
+            _ => resolved_passed
+        };
+
+        let resolved_expected = match resolved_expected.clone() {
+            Type::MutableReference { inner, .. } => Type::MutableReference { inner, is_heap: false },
+            Type::Reference { inner, .. } => Type::Reference { inner, is_heap: false },
+            _ => resolved_expected
+        };
+
         // Direct substitution.
-        if let Ok(unified) = self.unify(current_passed.clone(), resolved_expected.clone(), info) {
+        if let Ok(unified) = self.unify(resolved_passed.clone(), resolved_expected.clone(), info) {
             return Ok(Some(unified));
         }
 
         // `&mut T` -> `&T`
-        if let (Type::MutableReference { inner: p_inner, .. }, Type::Reference { inner: e_inner, .. }) = (current_passed.clone(), resolved_expected.clone()) {
+        if let (Type::MutableReference { inner: p_inner, .. }, Type::Reference { inner: e_inner, .. }) = (resolved_passed.clone(), resolved_expected.clone()) {
             let unified_inner = self.unify(*p_inner, *e_inner, info)?;
             return Ok(Some(Type::Reference { inner: Box::new(unified_inner), is_heap: false }));
         }
 
         // `&^n T` | `&^n mut T` -> `T`
-        let mut deref_passed = current_passed.clone();
+        let mut deref_passed = resolved_passed.clone();
         while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = deref_passed {
             deref_passed = *inner;
             if let Ok(unified) = self.unify(deref_passed.clone(), resolved_expected.clone(), info) {
@@ -1622,7 +1646,7 @@ impl SemanticAnalyzer {
         }
         
         // `T` -> `&^n T` | `&^n mut T`
-        if let p @ Type::Base { .. } = current_passed.clone() {
+        if let p @ Type::Base { .. } = resolved_passed.clone() {
              match resolved_expected.clone() {
                 e @ Type::Reference { .. } => return self.unify(Type::Reference{ inner: Box::new(p), is_heap: false }, e, info).map(Some),
                 e @ Type::MutableReference { .. } => return self.unify(Type::MutableReference { inner: Box::new(p), is_heap: false }, e, info).map(Some),
@@ -1631,7 +1655,7 @@ impl SemanticAnalyzer {
         }
 
         Err(self.type_mismatch_error(
-            &current_passed,
+            &resolved_passed,
             &resolved_expected,
             info,
             Some("receiver type mismatch".to_string()),
