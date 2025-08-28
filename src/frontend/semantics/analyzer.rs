@@ -144,7 +144,8 @@ pub enum ScopeKind {
     Impl,
     Trait,
     Type,
-    ForLoop
+    ForLoop,
+    WhileLoop
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -164,7 +165,7 @@ impl Type {
     }
 
     pub fn is_heap_ref(&self) -> bool {
-        matches!(self, Type::Reference { is_heap, .. } | Type::MutableReference { is_heap, .. })
+        matches!(self, Type::Reference { is_heap: true, .. } | Type::MutableReference { is_heap: true, .. })
     }
 
     pub fn get_base_symbol(&self) -> TypeSymbolId {

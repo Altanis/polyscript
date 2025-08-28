@@ -7,7 +7,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Functi
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
@@ -20,6 +20,15 @@ pub struct RcRepr<'ctx> {
     pub llvm_data_type: BasicTypeEnum<'ctx>,
     pub clone_data_fn: FunctionValue<'ctx>,
     pub drop_data_fn: FunctionValue<'ctx>,
+}
+
+fn get_base_variable(node: &MIRNode) -> Option<usize> {
+    match &node.kind {
+        MIRNodeKind::Identifier(_) => node.value_id,
+        MIRNodeKind::FieldAccess { left, .. } => get_base_variable(left),
+        MIRNodeKind::UnaryOperation { operator: Operation::Dereference, .. } => None,
+        _ => None,
+    }
 }
 
 pub struct CodeGen<'a, 'ctx> {
@@ -91,6 +100,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_scope_drop(&mut self, scope_id: ScopeId) {
+        let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+        for &value_id in scope.values.values() {
+            let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+
+            if symbol.allocation_kind == AllocationKind::Heap
+                && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id)
+            {
+                let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
+                let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, "").unwrap();
+
+                let decref_fn = self.get_decref();
+                self.builder.build_call(decref_fn, &[rc_ptr.into()], "").unwrap();
+            }
+        }
+    }
+
     fn mangle_name(&self, ty: &Type) -> String {
         format!("{}_{}", ty, ty.get_base_symbol())
     }
@@ -560,23 +586,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let ty = symbol.type_id.as_ref().unwrap();
 
-        let ptr = match symbol.allocation_kind {
-            AllocationKind::Stack => {
-                let ty = self.map_semantic_type(ty).unwrap();
-                self.builder.build_alloca(ty, "").unwrap()
-            },
-            AllocationKind::Heap if matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) => {
-                let ty = self.map_semantic_type(ty).unwrap();
-                self.builder.build_alloca(ty, "").unwrap()
-            },
-            AllocationKind::Heap => {
-                let llvm_ty = self.map_semantic_type(ty).unwrap();
-                let size = llvm_ty.size_of().unwrap();
-                self.build_malloc(size)
-            },
-            _ => unreachable!(),
+        let llvm_ty_for_alloca = if symbol.allocation_kind == AllocationKind::Heap {
+            self.context.ptr_type(AddressSpace::default()).as_basic_type_enum()
+        } else {
+            self.map_semantic_type(ty).unwrap()
         };
 
+        let ptr = self.builder.build_alloca(llvm_ty_for_alloca, "").unwrap();
         self.variables.insert(value_id, ptr);
 
         let init_val = self.compile_node(initializer).unwrap();
@@ -874,13 +890,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(raw_ptr.as_basic_value_enum())
      }
  
-    fn compile_block(&mut self, stmts: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_block(&mut self, stmts: &[MIRNode], scope_id: ScopeId) -> Option<BasicValueEnum<'ctx>> {
         let mut last_val = None;
+        let last_stmt_is_expr = stmts.last().is_some_and(|s| !matches!(s.kind, MIRNodeKind::ExpressionStatement(_)));
 
         for stmt in stmts {
             last_val = self.compile_node(stmt);
         }
 
+        if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
+            if last_stmt_is_expr
+                && let Some(last_expr) = stmts.last()
+                && let Some(base_var_id) = get_base_variable(last_expr)
+            {
+                let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
+                if symbol.allocation_kind == AllocationKind::Heap {
+                    let val = last_val.unwrap();
+                    let incref = self.get_incref();
+                    self.builder.build_call(incref, &[val.into()], "").unwrap();
+                }
+            }
+            
+            self.compile_scope_drop(scope_id);
+        }
+        
         last_val
     }
 
@@ -1463,23 +1496,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::ConditionalOperation { operator, left, right }
                 => self.compile_conditional_operation(*operator, left, right),
             MIRNodeKind::HeapExpression(expr) => self.compile_heap_expression(expr),
-            MIRNodeKind::Block(stmts) => self.compile_block(stmts),
+            MIRNodeKind::Block(stmts) => self.compile_block(stmts, stmt.scope_id),
             MIRNodeKind::ExpressionStatement(expr) => {
                 self.compile_node(expr);
                 None
             },
             MIRNodeKind::Return(opt_expr) => {
-                if let Some(ret_ptr) = self.rvo_return_ptr {
-                    if let Some(expr) = opt_expr {
-                        let value = self.compile_node(expr).unwrap();
-                        self.builder.build_store(ret_ptr, value).unwrap();
-                    }
-                    
-                    self.builder.build_return(None).unwrap();
-                } else if let Some(expr) = opt_expr {
+                if let Some(expr) = opt_expr {
                     let value = self.compile_node(expr).unwrap();
-                    self.builder.build_return(Some(&value)).unwrap();
+                    if let Some(base_var_id) = get_base_variable(expr) {
+                        let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
+                        if symbol.allocation_kind == AllocationKind::Heap {
+                            let incref = self.get_incref();
+                            self.builder.build_call(incref, &[value.into()], "").unwrap();
+                        }
+                    }
+
+                    let mut current_scope_id = Some(stmt.scope_id);
+                    while let Some(scope_id) = current_scope_id {
+                        let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                        self.compile_scope_drop(scope_id);
+                        if scope.kind == ScopeKind::Function {
+                            break;
+                        }
+                        current_scope_id = scope.parent;
+                    }
+
+                    if let Some(ret_ptr) = self.rvo_return_ptr {
+                        self.builder.build_store(ret_ptr, value).unwrap();
+                        self.builder.build_return(None).unwrap();
+                    } else {
+                        self.builder.build_return(Some(&value)).unwrap();
+                    }
                 } else {
+                    let mut current_scope_id = Some(stmt.scope_id);
+                    while let Some(scope_id) = current_scope_id {
+                        let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                        self.compile_scope_drop(scope_id);
+                        if scope.kind == ScopeKind::Function {
+                            break;
+                        }
+                        current_scope_id = scope.parent;
+                    }
                     self.builder.build_return(None).unwrap();
                 }
 
@@ -1495,13 +1553,39 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::ForLoop { initializer, condition, increment, body }
                 => self.compile_for_loop(initializer, condition, increment, body),
             MIRNodeKind::Break => {
-                let break_block = self.break_blocks.last().unwrap();
-                self.builder.build_unconditional_branch(*break_block).unwrap();
+                let break_block = *self.break_blocks.last().unwrap();
+
+                let mut current_scope_id = Some(stmt.scope_id);
+                while let Some(scope_id) = current_scope_id {
+                    let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                    self.compile_scope_drop(scope_id);
+
+                    if scope.kind == ScopeKind::ForLoop || scope.kind == ScopeKind::WhileLoop {
+                        break;
+                    }
+
+                    current_scope_id = scope.parent;
+                }
+
+                self.builder.build_unconditional_branch(break_block).unwrap();
                 None
             },
             MIRNodeKind::Continue => {
-                let continue_block = self.continue_blocks.last().unwrap();
-                self.builder.build_unconditional_branch(*continue_block).unwrap();
+                let continue_block = *self.continue_blocks.last().unwrap();
+
+                let mut current_scope_id = Some(stmt.scope_id);
+                while let Some(scope_id) = current_scope_id {
+                    let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                    self.compile_scope_drop(scope_id);
+
+                    if scope.kind == ScopeKind::ForLoop || scope.kind == ScopeKind::WhileLoop {
+                        break;
+                    }
+
+                    current_scope_id = scope.parent;
+                }
+
+                self.builder.build_unconditional_branch(continue_block).unwrap();
                 None
             },
             MIRNodeKind::TypeCast { expr, .. }

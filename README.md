@@ -1,4 +1,4 @@
-must explicitly specify type for T when using a static method on Type<T>, i.e. `[Type<T>].Member` or `[Type<int>].Member`
+must explicitly specify type for T when using a static method on Type<T>, i.e. `[Type<T>].Member` or `[Self as Trait<T>].Member`
 
 Notes on references:
 1. Aliasing is allowed (mutable references are NOT exclusive).
