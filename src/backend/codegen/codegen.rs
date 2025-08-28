@@ -246,7 +246,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
-                    // todo decref
+
+                    if field_semantic_type.is_heap_ref() {
+                        let field_ptr = self.builder.build_struct_gep(
+                            llvm_struct_type,
+                            data_ptr_generic,
+                            i as u32,
+                            &format!("field{idx}_ptr", idx = i),
+                        ).unwrap();
+
+                        let decref = self.get_decref();
+                        self.builder.build_call(decref, &[field_ptr.into()], &format!("decref_{i}")).unwrap();
+                    }
                 }
             }
         }
@@ -267,9 +278,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let original_data = function.get_first_param().unwrap();
         original_data.set_name("original_data");
 
+        let data_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+        data_ptr_generic.set_name("data_ptr_generic");
+
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
             if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+                let llvm_struct_type = llvm_data_type.into_struct_type();
+
                 let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
                 let mut field_symbols: Vec<_> = scope.values.values()
                     .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
@@ -278,8 +294,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+                    if field_semantic_type.is_heap_ref() {
+                        let field_ptr = self.builder.build_struct_gep(
+                            llvm_struct_type,
+                            data_ptr_generic,
+                            i as u32,
+                            &format!("field{idx}_ptr", idx = i),
+                        ).unwrap();
 
-                    // todo incref
+                        let decref = self.get_decref();
+                        self.builder.build_call(decref, &[field_ptr.into()], &format!("decref_{i}")).unwrap();
+                    }
                 }
             }
         }

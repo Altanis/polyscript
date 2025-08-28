@@ -7,7 +7,7 @@ type of the expression being heap allocated.
 Internally, the data is represented by a struct `Rc<T>` that roughly contains the following attributes:
 - `t: T;`: The data the container is holding.
 - `ref_count: int;`: The number of existing references to the data.
-- `drop: fn();`: The function that runs before the data is freed. In the future, this may be overriden by implementing `Drop` on `T`.
+- `drop: fn(Self);`: The function that runs before the data is freed. In the future, this may be overriden by implementing `Drop` on `T`.
 - `clone: fn(Self): Self;`: The function that performs a "shallow copy" of the data. In the future, this may be overriden by implementing `Clone` on `T`.
 
 When a heap allocation occurs, the `Rc` container is allocated and populated with the appropriate data. This marks the

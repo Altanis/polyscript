@@ -163,6 +163,10 @@ impl Type {
         matches!(self, Type::Base { .. })
     }
 
+    pub fn is_heap_ref(&self) -> bool {
+        matches!(self, Type::Reference { is_heap, .. } | Type::MutableReference { is_heap, .. })
+    }
+
     pub fn get_base_symbol(&self) -> TypeSymbolId {
         match self {
             Type::Base { symbol, .. } => *symbol,
