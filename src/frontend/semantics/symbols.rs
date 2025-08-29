@@ -162,7 +162,12 @@ impl SemanticAnalyzer {
         self.collect_optional_node(return_type)?;
 
         if let Some(b) = body {
-            self.symbol_collector_check_node(b)?;
+            b.scope_id = Some(scope_id);
+            if let AstNodeKind::Block(statements) = &mut b.kind {
+                for statement in statements {
+                    self.symbol_collector_check_node(statement)?;
+                }
+            }
         }
 
         self.symbol_table.exit_scope();
