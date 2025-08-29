@@ -1,7 +1,5 @@
 use crate::{
-    frontend::semantics::analyzer::{PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind},
-    mir::ir_node::{MIRNode, MIRNodeKind},
-    utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
+    boxed, frontend::semantics::analyzer::{PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, mir::ir_node::{MIRNode, MIRNodeKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
 };
 
 fn is_primitive(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
@@ -221,6 +219,8 @@ fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Resul
     };
 
     if kind == ValueSymbolKind::Variable && !ty.is_heap_ref() {
+        *ty = Type::MutableReference { inner: boxed!(ty.clone()), is_heap: true };
+
         let name = analyzer.symbol_table.get_value_name(name_id).to_string();
         let span = span.unwrap_or_default();
         return Err(analyzer.create_error(ErrorKind::NeedsHeapAllocation(name), span, &[span]));

@@ -12,7 +12,6 @@ use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
 
-use colored::Colorize;
 use frontend::syntax::ast::AstNode;
 use frontend::syntax::parser::Parser;
 use frontend::semantics::analyzer::SemanticAnalyzer;

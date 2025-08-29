@@ -168,15 +168,6 @@ impl Type {
         matches!(self, Type::Reference { is_heap: true, .. } | Type::MutableReference { is_heap: true, .. })
     }
 
-    pub fn mark_for_heap_alloc(&mut self) -> bool {
-        match self {
-            Type::Reference { is_heap, .. } | Type::MutableReference { is_heap, .. } => *is_heap = true,
-            _ => return false
-        }
-
-        true
-    }
-
     pub fn get_base_symbol(&self) -> TypeSymbolId {
         match self {
             Type::Base { symbol, .. } => *symbol,

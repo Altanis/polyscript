@@ -9,9 +9,15 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-fn ident(): &int {
-    let x = 5;
-    &x
+{
+    let a: &'heap mut int = heap 10;
+    let b: &'heap mut int = a;  // refcount +1
+    let c: int = *b;             // shallow copy to stack
+
+    {
+        let d: &'heap mut int = b; // refcount +1
+    } // `d` goes out of scope, refcount -1
+
 }
 
-let x = ident();
+let x = 5;
