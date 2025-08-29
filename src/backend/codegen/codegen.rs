@@ -234,18 +234,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let rc_struct_type = self.context.opaque_struct_type(&format!("Rc_{}", type_name_mangled));
         rc_struct_type.set_body(&[rc_header_type.into(), llvm_data_type], false);
 
-        let drop_data_fn = self.build_drop_data_fn(ty, &type_name_mangled, llvm_data_type);
-        let clone_data_fn = self.build_clone_data_fn(ty, &type_name_mangled, llvm_data_type);
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        let drop_data_fn = self.module.add_function(&format!("drop_data_{}", type_name_mangled), drop_fn_type, Some(Linkage::Internal));
 
+        let clone_fn_type = llvm_data_type.fn_type(&[ptr_type.into()], false);
+        let clone_data_fn = self.module.add_function(&format!("clone_data_{}", type_name_mangled), clone_fn_type, Some(Linkage::Internal));
+        
         let repr = RcRepr { rc_struct_type, llvm_data_type, clone_data_fn, drop_data_fn };
         self.rc_map.insert(ty.clone(), repr);
+
+        self.build_drop_data_fn_body(ty, drop_data_fn);
+        self.build_clone_data_fn_body(ty, clone_data_fn);
+
         repr
     }
 
-    fn build_drop_data_fn(&mut self, ty: &Type, name: &String, llvm_data_type: BasicTypeEnum<'ctx>) -> FunctionValue<'ctx> {
-        let fn_type = self.context.void_type().fn_type(&[self.context.ptr_type(AddressSpace::default()).into()], false);
-        let function = self.module.add_function(&format!("drop_data_{}", name), fn_type, Some(Linkage::Internal));
-
+    fn build_drop_data_fn_body(&mut self, ty: &Type, function: FunctionValue<'ctx>) {
         let old_block = self.builder.get_insert_block();
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
@@ -259,7 +264,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let rc_repr = self.wrap_in_rc(ty);
 
                 let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr").unwrap();
-                let data_struct_val = self.builder.build_load(llvm_data_type, data_ptr, "struct_val").unwrap().into_struct_value();
+                let data_struct_val = self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "struct_val").unwrap().into_struct_value();
 
                 let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
                 let mut field_symbols: Vec<_> = scope.values.values()
@@ -286,13 +291,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.build_return(None).unwrap();
         if let Some(block) = old_block { self.builder.position_at_end(block); }
-        function
     }
 
-    fn build_clone_data_fn(&mut self, ty: &Type, name: &String, llvm_data_type: BasicTypeEnum<'ctx>) -> FunctionValue<'ctx> {
-        let fn_type = llvm_data_type.fn_type(&[self.context.ptr_type(AddressSpace::default()).into()], false);
-        let function = self.module.add_function(&format!("clone_data_{}", name), fn_type, Some(Linkage::Internal));
-
+    fn build_clone_data_fn_body(&mut self, ty: &Type, function: FunctionValue<'ctx>) {
         let old_block = self.builder.get_insert_block();
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
@@ -300,7 +301,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let original_data_ptr = function.get_first_param().unwrap().into_pointer_value();
         original_data_ptr.set_name("original_data_ptr");
 
-        let original_data = self.builder.build_load(llvm_data_type, original_data_ptr, "original_data").unwrap();
+        let rc_repr = self.wrap_in_rc(ty);
+        let original_data = self.builder.build_load(rc_repr.llvm_data_type, original_data_ptr, "original_data").unwrap();
 
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
@@ -329,7 +331,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.build_return(Some(&original_data)).unwrap();
         if let Some(block) = old_block { self.builder.position_at_end(block); }
-        function
     }
 }
 
