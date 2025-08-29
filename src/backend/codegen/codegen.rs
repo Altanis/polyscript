@@ -780,7 +780,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let value_to_store = self.compile_node(right_node).unwrap();
             
             let right_type = right_node.type_id.as_ref().unwrap();
-            if right_type.is_heap_ref() {
+            if right_type.is_heap_ref() && !matches!(right_node.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[value_to_store.into()], "assign.incref").unwrap();
             }
@@ -933,6 +933,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_block(&mut self, stmts: &[MIRNode], scope_id: ScopeId) -> Option<BasicValueEnum<'ctx>> {
         let mut last_val = None;
         let last_stmt_is_expr = stmts.last().is_some_and(|s| !matches!(s.kind, MIRNodeKind::ExpressionStatement(_)));
+        let last_stmt_is_heap_expr = stmts.last().is_some_and(|s| !matches!(s.kind, MIRNodeKind::HeapExpression(_)));
 
         for stmt in stmts {
             last_val = self.compile_node(stmt);
@@ -944,7 +945,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 && let Some(base_var_id) = get_base_variable(last_expr)
             {
                 let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                if symbol.type_id.as_ref().unwrap().is_heap_ref() {
+                if symbol.type_id.as_ref().unwrap().is_heap_ref() && !last_stmt_is_heap_expr {
                     let val = last_val.unwrap();
                     let incref = self.get_incref();
                     self.builder.build_call(incref, &[val.into()], "block_expr.incref").unwrap();
@@ -1355,7 +1356,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let field_index = *field_name_to_index.get(field_name).unwrap();
 
             let field_type = field_expr.type_id.as_ref().unwrap();
-            if field_type.is_heap_ref() {
+            if field_type.is_heap_ref() && !matches!(field_expr.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
             }
@@ -1374,7 +1375,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let arg_val = self.compile_node(arg).unwrap();
             let arg_type = arg.type_id.as_ref().unwrap();
             
-            if arg_type.is_heap_ref() {
+            if arg_type.is_heap_ref() && !matches!(arg.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[arg_val.into()], &format!("incref.arg{}", i)).unwrap();
             }
@@ -1568,7 +1569,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let value = self.compile_node(expr).unwrap();
 
                     let expr_type = expr.type_id.as_ref().unwrap();
-                    if expr_type.is_heap_ref() {
+                    if expr_type.is_heap_ref() && !matches!(expr.kind, MIRNodeKind::HeapExpression(_)) {
                         let incref = self.get_incref();
                         self.builder.build_call(incref, &[value.into()], "ret.incref").unwrap();
                     }
