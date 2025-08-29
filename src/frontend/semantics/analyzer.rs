@@ -168,6 +168,15 @@ impl Type {
         matches!(self, Type::Reference { is_heap: true, .. } | Type::MutableReference { is_heap: true, .. })
     }
 
+    pub fn mark_for_heap_alloc(&mut self) -> bool {
+        match self {
+            Type::Reference { is_heap, .. } | Type::MutableReference { is_heap, .. } => *is_heap = true,
+            _ => return false
+        }
+
+        true
+    }
+
     pub fn get_base_symbol(&self) -> TypeSymbolId {
         match self {
             Type::Base { symbol, .. } => *symbol,
@@ -190,13 +199,6 @@ impl Type {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AllocationKind {
-    Stack,
-    Heap,
-    Unresolved
-}
-
 #[derive(Debug, Clone)]
 pub struct ValueSymbol {
     pub id: ValueSymbolId,
@@ -207,7 +209,6 @@ pub struct ValueSymbol {
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<Type>,
-    pub allocation_kind: AllocationKind,
     pub statically_known_return_value_id: Option<ValueSymbolId>
 }
 
@@ -585,7 +586,6 @@ impl SymbolTable {
             type_id,
             span,
             scope_id,
-            allocation_kind: AllocationKind::Unresolved,
             statically_known_return_value_id: None
         };
         self.registry.value_symbols.insert(id, symbol);
@@ -1146,13 +1146,7 @@ impl SymbolTable {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let name = self.table.get_value_name(self.symbol.name_id);
                 write!(f, "{}", name.cyan().bold())?;
-                write!(f, " ({}{})", if matches!(self.symbol.kind, ValueSymbolKind::Variable) {
-                    match self.symbol.allocation_kind {
-                        AllocationKind::Stack => "Stack ",
-                        AllocationKind::Heap => "Heap ",
-                        AllocationKind::Unresolved => "?? "
-                    }
-                } else { "" }, self.symbol.kind)?;
+                write!(f, " ({})", self.symbol.kind)?;
                 if self.symbol.mutable {
                     write!(f, " {}", "mut".red())?;
                 }

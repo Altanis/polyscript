@@ -1,7 +1,5 @@
 use crate::{
-    frontend::semantics::analyzer::{
-            AllocationKind, PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind
-        },
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind},
     mir::ir_node::{MIRNode, MIRNodeKind},
     utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
 };
@@ -43,12 +41,6 @@ pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error
             Err(e) => {
                 errors.push(*e);
             }
-        }
-    }
-
-    for symbol in analyzer.symbol_table.registry.value_symbols.values_mut() {
-        if symbol.kind == ValueSymbolKind::Variable && symbol.allocation_kind == AllocationKind::Unresolved {
-            symbol.allocation_kind = AllocationKind::Stack;
         }
     }
 
@@ -153,7 +145,7 @@ fn check_for_escape(
 
                 if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
                     let symbol_type = symbol.type_id.as_ref().unwrap();
-                    if !is_primitive(analyzer, symbol_type) && !is_fn_ptr(analyzer, symbol_type) {
+                    if !is_fn_ptr(analyzer, symbol_type) {
                         match move_to_heap(analyzer, var_id) {
                             Ok(c) => changed |= c,
                             Err(e) => return Err(e),
@@ -218,25 +210,19 @@ fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
 }
 
 fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Result<bool, BoxedError> {
-    let symbol_info = {
-        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+    let (kind, ty, name_id, span) = {
+        let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
         (
             symbol.kind.clone(),
-            symbol.allocation_kind,
+            symbol.type_id.as_mut().unwrap(),
             symbol.name_id,
             symbol.span,
         )
     };
 
-    if symbol_info.0 == ValueSymbolKind::Variable && symbol_info.1 != AllocationKind::Heap {
-        analyzer
-            .symbol_table
-            .get_value_symbol_mut(var_id)
-            .unwrap()
-            .allocation_kind = AllocationKind::Heap;
-
-        let name = analyzer.symbol_table.get_value_name(symbol_info.2).to_string();
-        let span = symbol_info.3.unwrap_or_default();
+    if kind == ValueSymbolKind::Variable && !ty.is_heap_ref() {
+        let name = analyzer.symbol_table.get_value_name(name_id).to_string();
+        let span = span.unwrap_or_default();
         return Err(analyzer.create_error(ErrorKind::NeedsHeapAllocation(name), span, &[span]));
     }
 

@@ -217,118 +217,118 @@ fn assert_scripts_work() {
     println!("All files checked.");
 }
 
-fn test_escape_analysis() {
-    let code = r#"fn test1() {
-            let outer_ref = {
-                let f = 60;
-                &f
-            };
+// fn test_escape_analysis() {
+//     let code = r#"fn test1() {
+//             let outer_ref = {
+//                 let f = 60;
+//                 &f
+//             };
 
-            const val = *outer_ref;
-        }
+//             const val = *outer_ref;
+//         }
 
-        struct Point { x: int; }
-        fn test2() {
-            let p2 = Point { x: 2 };
-            let x2 = p2.x;
-        }
+//         struct Point { x: int; }
+//         fn test2() {
+//             let p2 = Point { x: 2 };
+//             let x2 = p2.x;
+//         }
 
-        fn create_point(): Point {
-            let p3 = Point { x: 1 };
-            return p3;
-        }
+//         fn create_point(): Point {
+//             let p3 = Point { x: 1 };
+//             return p3;
+//         }
 
-        fn create_ref_point(): &Point {
-            let p4 = Point { x: 1 };
-            &p4
-        }
+//         fn create_ref_point(): &Point {
+//             let p4 = Point { x: 1 };
+//             &p4
+//         }
 
 
-        struct Inner { public val: int; }
-        struct Outer { public data: Inner; }
-        fn test5() {
-            let outer_instance = heap Outer { data: Inner { val: 0 } };
-            let local_inner = Inner { val: 100 };
-            outer_instance.data = local_inner;
-        }
+//         struct Inner { public val: int; }
+//         struct Outer { public data: Inner; }
+//         fn test5() {
+//             let outer_instance = heap Outer { data: Inner { val: 0 } };
+//             let local_inner = Inner { val: 100 };
+//             outer_instance.data = local_inner;
+//         }
 
-        struct Config { public setting: bool; }
-        fn helper_test6(c: &Config) {}
-        fn test6() {
-            let my_config = Config { setting: true };
-            helper_test6(&my_config);
-        }
+//         struct Config { public setting: bool; }
+//         fn helper_test6(c: &Config) {}
+//         fn test6() {
+//             let my_config = Config { setting: true };
+//             helper_test6(&my_config);
+//         }
 
-        struct Message { public content: str; }
-        fn test7(): Message {
-            if (true) {
-                let m = Message { content: "hello" };
-                return m;
-            };
+//         struct Message { public content: str; }
+//         fn test7(): Message {
+//             if (true) {
+//                 let m = Message { content: "hello" };
+//                 return m;
+//             };
             
-            return Message { content: "world" };
-        }
+//             return Message { content: "world" };
+//         }
 
-        struct A { public b: B; }
-        struct B { public c: C; }
-        struct C { public val: int; }
-        fn test8(): C {
-            let my_a = A { b: B { c: C { val: 1 } } };
-            let my_b = my_a.b;
-            let my_c = my_b.c;
-            return my_c;
-        }
+//         struct A { public b: B; }
+//         struct B { public c: C; }
+//         struct C { public val: int; }
+//         fn test8(): C {
+//             let my_a = A { b: B { c: C { val: 1 } } };
+//             let my_b = my_a.b;
+//             let my_c = my_b.c;
+//             return my_c;
+//         }
         
-        fn id<T>(x: T): T {
-            return x;
-        }
+//         fn id<T>(x: T): T {
+//             return x;
+//         }
         
-        fn test9(): &int {
-            let ester = 10;
-            return id(&ester);
-        }
-        "#;
+//         fn test9(): &int {
+//             let ester = 10;
+//             return id(&ester);
+//         }
+//         "#;
 
-    let (lined_source, tokens) = generate_tokens(code.to_string());
-    let program = parse_tokens(lined_source.clone(), tokens);
-    let (mut program, mut analyzer) = analyze_ast(lined_source, program);
-    let (_, mut mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
-    optimize(&mut mir_program, &mut analyzer);
+//     let (lined_source, tokens) = generate_tokens(code.to_string());
+//     let program = parse_tokens(lined_source.clone(), tokens);
+//     let (mut program, mut analyzer) = analyze_ast(lined_source, program);
+//     let (_, mut mir_program) = lower_ast_to_mir(&mut program, &mut analyzer);
+//     optimize(&mut mir_program, &mut analyzer);
 
-    let expected = [
-        ("f",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("outer_ref",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("p2",             crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("x2",              crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("p3",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("p4",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("outer_instance", crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("local_inner",    crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("my_config",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("m",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("my_a",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("my_b",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
-        ("my_c",           crate::frontend::semantics::analyzer::AllocationKind::Heap),
-        ("ester",          crate::frontend::semantics::analyzer::AllocationKind::Heap)
-    ];
+//     let expected = [
+//         ("f",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("outer_ref",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("p2",             crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("x2",              crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("p3",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("p4",             crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("outer_instance", crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("local_inner",    crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("my_config",      crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("m",              crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("my_a",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("my_b",           crate::frontend::semantics::analyzer::AllocationKind::Stack),
+//         ("my_c",           crate::frontend::semantics::analyzer::AllocationKind::Heap),
+//         ("ester",          crate::frontend::semantics::analyzer::AllocationKind::Heap)
+//     ];
 
-    println!("{}", analyzer.symbol_table);
+//     println!("{}", analyzer.symbol_table);
 
-    for (name, alloc_type) in expected {
-        for (&id, _) in analyzer.symbol_table.scopes.iter() {
-            if let Some(symbol) = analyzer.symbol_table.find_value_symbol_in_scope(name, id) {
-                if symbol.allocation_kind == alloc_type {
-                    println!("{}", format!("{name} allocates properly [expected {:?} and found {:?}]!", alloc_type, symbol.allocation_kind).green());
-                } else {
-                    println!("{}", format!("{name} does not allocate properly [expected {:?} but found {:?}]...", alloc_type, symbol.allocation_kind).red());
-                }
+//     for (name, alloc_type) in expected {
+//         for (&id, _) in analyzer.symbol_table.scopes.iter() {
+//             if let Some(symbol) = analyzer.symbol_table.find_value_symbol_in_scope(name, id) {
+//                 if symbol.allocation_kind == alloc_type {
+//                     println!("{}", format!("{name} allocates properly [expected {:?} and found {:?}]!", alloc_type, symbol.allocation_kind).green());
+//                 } else {
+//                     println!("{}", format!("{name} does not allocate properly [expected {:?} but found {:?}]...", alloc_type, symbol.allocation_kind).red());
+//                 }
 
-                break;
-            }
-        }
+//                 break;
+//             }
+//         }
 
-    }
-}
+//     }
+// }
 
 fn main() {
     unsafe {

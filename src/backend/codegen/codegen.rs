@@ -7,7 +7,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Functi
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{AllocationKind, NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
@@ -105,9 +105,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for &value_id in scope.values.values() {
             let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
 
-            if symbol.allocation_kind == AllocationKind::Heap
-                && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id)
-            {
+            if symbol.type_id.as_ref().unwrap().is_heap_ref() && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
                 let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
                 let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, "").unwrap();
 
@@ -211,13 +209,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let drop_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 1, "drop_fn_ptr_ptr").unwrap();
         let drop_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), drop_fn_ptr_ptr, "drop_fn_ptr").unwrap().into_pointer_value();
         
-        let header_size = rc_header_type.size_of().unwrap();
-        let data_ptr = unsafe {
-            self.builder.build_gep(self.context.i8_type(), rc_ptr_generic, &[header_size], "data_ptr").unwrap()
-        };
-        
         let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[data_ptr.into()], "").unwrap();
+        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[rc_ptr_generic.into()], "").unwrap();
         
         self.build_free(rc_ptr_generic);
     
@@ -257,14 +250,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        let data_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
-        data_ptr_generic.set_name("data_ptr_generic");
+        let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+        rc_ptr_generic.set_name("rc_ptr_generic");
 
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
             if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
-                let llvm_struct_type = llvm_data_type.into_struct_type();
-                
+                let rc_repr = self.wrap_in_rc(ty);
+
+                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr").unwrap();
+                let data_struct_val = self.builder.build_load(llvm_data_type, data_ptr, "struct_val").unwrap().into_struct_value();
+
                 let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
                 let mut field_symbols: Vec<_> = scope.values.values()
                     .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
@@ -275,16 +271,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
 
                     if field_semantic_type.is_heap_ref() {
-                        let field_ptr_ptr = self.builder.build_struct_gep(
-                            llvm_struct_type,
-                            data_ptr_generic,
+                        let field_rc_ptr = self.builder.build_extract_value(
+                            data_struct_val,
                             i as u32,
-                            &format!("field{idx}_ptr_ptr", idx = i),
+                            &format!("field{i}_rc_ptr"),
                         ).unwrap();
-                        let field_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), field_ptr_ptr, "").unwrap();
 
                         let decref = self.get_decref();
-                        self.builder.build_call(decref, &[field_ptr.into()], &format!("decref_{i}")).unwrap();
+                        self.builder.build_call(decref, &[field_rc_ptr.into()], &format!("decref_{i}")).unwrap();
                     }
                 }
             }
@@ -583,12 +577,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_variable_declaration(&mut self, initializer: &BoxedMIRNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let ty = symbol.type_id.as_ref().unwrap();
-
-        let llvm_ty_for_alloca = if symbol.allocation_kind == AllocationKind::Heap {
-            self.context.ptr_type(AddressSpace::default()).as_basic_type_enum()
-        } else {
-            self.map_semantic_type(ty).unwrap()
-        };
+        let llvm_ty_for_alloca = self.map_semantic_type(ty).unwrap();
 
         let ptr = self.builder.build_alloca(llvm_ty_for_alloca, "").unwrap();
         self.variables.insert(value_id, ptr);
@@ -921,7 +910,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 && let Some(base_var_id) = get_base_variable(last_expr)
             {
                 let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                if symbol.allocation_kind == AllocationKind::Heap {
+                if symbol.type_id.as_ref().unwrap().is_heap_ref() {
                     let val = last_val.unwrap();
                     let incref = self.get_incref();
                     self.builder.build_call(incref, &[val.into()], "").unwrap();
@@ -1527,7 +1516,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let value = self.compile_node(expr).unwrap();
                     if let Some(base_var_id) = get_base_variable(expr) {
                         let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                        if symbol.allocation_kind == AllocationKind::Heap {
+                        if symbol.type_id.as_ref().unwrap().is_heap_ref() {
                             let incref = self.get_incref();
                             self.builder.build_call(incref, &[value.into()], "").unwrap();
                         }

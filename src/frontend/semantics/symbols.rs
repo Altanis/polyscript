@@ -1,6 +1,6 @@
 use super::analyzer::{ScopeKind, SemanticAnalyzer, ValueSymbolKind};
 use crate::{
-    frontend::{semantics::analyzer::{AllocationKind, InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, syntax::ast::{AstNode, AstNodeKind, BoxedAstNode}},
+    frontend::{semantics::analyzer::{InherentImpl, PrimitiveKind, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId}, syntax::ast::{AstNode, AstNodeKind, BoxedAstNode}},
     utils::{
         error::*,
         kind::{QualifierKind, Span},
@@ -117,12 +117,6 @@ impl SemanticAnalyzer {
             None,
             Some(span),
         )?;
-
-        self.symbol_table.get_value_symbol_mut(value_id).unwrap().allocation_kind = if matches!(initializer.kind, AstNodeKind::HeapExpression(_)) {
-            AllocationKind::Heap
-        } else {
-            AllocationKind::Stack
-        };
 
         Ok((Some(value_id), None))
     }
