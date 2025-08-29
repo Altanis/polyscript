@@ -78,11 +78,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module.add_function("free", free_type, None)
     }
 
-    pub fn build_malloc(&self, size: IntValue<'ctx>) -> PointerValue<'ctx> {
+    pub fn build_malloc(&self, size: IntValue<'ctx>, name: &str) -> PointerValue<'ctx> {
         let malloc_fn = self.get_malloc();
 
         self.builder
-            .build_call(malloc_fn, &[size.into()], "")
+            .build_call(malloc_fn, &[size.into()], name)
             .unwrap()
             .try_as_basic_value()
             .left()
@@ -94,7 +94,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let free_fn = self.get_free();
 
         self.builder
-            .build_call(free_fn, &[ptr.into()], "")
+            .build_call(free_fn, &[ptr.into()], "free")
             .unwrap();
     }
 }
@@ -104,13 +104,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
         for &value_id in scope.values.values() {
             let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+            let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
 
             if symbol.type_id.as_ref().unwrap().is_heap_ref() && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
                 let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
-                let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, "").unwrap();
+                let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, &format!("{}_rc_ptr", name)).unwrap();
 
                 let decref_fn = self.get_decref();
-                self.builder.build_call(decref_fn, &[rc_ptr.into()], "").unwrap();
+                self.builder.build_call(decref_fn, &[rc_ptr.into()], &format!("decref_{}", name)).unwrap();
             }
         }
     }
@@ -146,6 +147,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(entry);
     
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+        rc_ptr_generic.set_name("rc_ptr");
     
         let is_null = self.builder.build_is_null(rc_ptr_generic, "is_null").unwrap();
         let not_null_block = self.context.append_basic_block(function, "not_null");
@@ -184,6 +186,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(entry);
     
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
+        rc_ptr_generic.set_name("rc_ptr");
     
         let is_null = self.builder.build_is_null(rc_ptr_generic, "is_null").unwrap();
         let not_null_block = self.context.append_basic_block(function, "not_null");
@@ -210,7 +213,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let drop_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), drop_fn_ptr_ptr, "drop_fn_ptr").unwrap().into_pointer_value();
         
         let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[rc_ptr_generic.into()], "").unwrap();
+        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[rc_ptr_generic.into()], "drop_call").unwrap();
         
         self.build_free(rc_ptr_generic);
     
@@ -274,16 +277,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+                    let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
 
                     if field_semantic_type.is_heap_ref() {
                         let field_rc_ptr = self.builder.build_extract_value(
                             data_struct_val,
                             i as u32,
-                            &format!("field{i}_rc_ptr"),
+                            &format!("{}_rc_ptr", field_name),
                         ).unwrap();
 
                         let decref = self.get_decref();
-                        self.builder.build_call(decref, &[field_rc_ptr.into()], &format!("decref_{i}")).unwrap();
+                        self.builder.build_call(decref, &[field_rc_ptr.into()], &format!("decref_{}", field_name)).unwrap();
                     }
                 }
             }
@@ -316,14 +320,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
                     if field_semantic_type.is_heap_ref() {
+                        let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
                         let field_val = self.builder.build_extract_value(
                             original_data.into_struct_value(),
                             i as u32,
-                            &format!("field_{i}_val")
+                            &format!("{}_val", field_name)
                         ).unwrap();
 
                         let incref = self.get_incref();
-                        self.builder.build_call(incref, &[field_val.into()], "").unwrap();
+                        self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
                     }
                 }
             }
@@ -529,7 +534,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let string_const = self.context.const_string(value.as_bytes(), true);
 
-        let global = self.module.add_global(string_const.get_type(), None, "");
+        let global = self.module.add_global(string_const.get_type(), None, &format!(".str.{}", key));
         global.set_initializer(&string_const);
         global.set_constant(true);
         global.set_linkage(Linkage::Private);
@@ -550,49 +555,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_identifier(&mut self, value_id: ValueSymbolId, ty: &Type) -> BasicValueEnum<'ctx> {
+        let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+        let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
+
         if let Some(&ptr) = self.variables.get(&value_id) {
             let llvm_ty = self.map_semantic_type(ty).unwrap();
-            let load = self.builder.build_load(llvm_ty, ptr, "").unwrap();
-
-            return load;
+            return self.builder.build_load(llvm_ty, ptr, name).unwrap();
         }
 
         if let Some(func) = self.functions.get(&value_id).cloned() {
             let closure_struct_type = self.map_semantic_type(ty).unwrap().into_struct_type();
-            let closure_ptr = self.builder.build_alloca(closure_struct_type, "fn_ptr_wrapper").unwrap();
+            let closure_ptr = self.builder.build_alloca(closure_struct_type, &format!("{}_closure", name)).unwrap();
 
-            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, "").unwrap();
+            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, &format!("{}_fn_ptr.addr", name)).unwrap();
             self.builder.build_store(fn_ptr_field, func.as_global_value().as_pointer_value()).unwrap();
 
-            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, "").unwrap();
+            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, &format!("{}_env_ptr.addr", name)).unwrap();
             let env_ptr_type = self.context.ptr_type(AddressSpace::default());
             self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
 
-            return self.builder.build_load(closure_struct_type, closure_ptr, "").unwrap();
+            return self.builder.build_load(closure_struct_type, closure_ptr, &format!("{}_closure.val", name)).unwrap();
         }
 
         if let Some(konst) = self.constants.get(&value_id) {
             return *konst;
         }
 
-        panic!("unresolved identifier during codegen {}", 
-            self.analyzer.symbol_table.display_value_symbol(self.analyzer.symbol_table.get_value_symbol(value_id).as_ref().unwrap())
-        );
+        panic!("unresolved identifier during codegen {}", self.analyzer.symbol_table.display_value_symbol(symbol));
     }
 
-    fn compile_variable_declaration(&mut self, initializer: &BoxedMIRNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_variable_declaration(&mut self, name: &str, initializer: &BoxedMIRNode, value_id: ValueSymbolId) -> Option<BasicValueEnum<'ctx>> {
         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
         let ty = symbol.type_id.as_ref().unwrap();
         let llvm_ty_for_alloca = self.map_semantic_type(ty).unwrap();
 
-        let ptr = self.builder.build_alloca(llvm_ty_for_alloca, "").unwrap();
+        let ptr = self.builder.build_alloca(llvm_ty_for_alloca, name).unwrap();
         self.variables.insert(value_id, ptr);
 
         let init_val = self.compile_node(initializer).unwrap();
 
         if ty.is_heap_ref() {
             let incref = self.get_incref();
-            self.builder.build_call(incref, &[init_val.into()], "").unwrap();
+            self.builder.build_call(incref, &[init_val.into()], &format!("incref_{}", name)).unwrap();
         }
 
         self.builder.build_store(ptr, init_val).unwrap();
@@ -602,11 +606,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_place_expression(&mut self, node: &MIRNode) -> Option<PointerValue<'ctx>> {
         match &node.kind {
-            MIRNodeKind::Identifier(_) => {
-                let var_id = node.value_id.unwrap();
-                self.variables.get(&var_id).copied()
-            },
-            MIRNodeKind::SelfExpr => {
+            MIRNodeKind::Identifier(_) | MIRNodeKind::SelfExpr => {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
@@ -621,7 +621,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         _ => unreachable!(),
                     };
                     let rc_repr = self.wrap_in_rc(inner_type);
-                    Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap())
+                    Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap())
                 } else {
                     Some(ptr)
                 }
@@ -630,6 +630,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let struct_ptr = self.compile_place_expression(left)?;
     
                 let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                let member_name = self.analyzer.symbol_table.get_value_name(member_symbol.name_id);
                 if !matches!(member_symbol.kind, ValueSymbolKind::StructField) {
                     return None;
                 }
@@ -653,8 +654,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 };
                 
                 let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
-                let field_ptr = self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, "").unwrap();
-                Some(field_ptr)
+                Some(self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, &format!("{}.addr", member_name)).unwrap())
             },
             _ => panic!("Expression is not a valid place expression for codegen: {:?}", node.kind),
         }
@@ -679,18 +679,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if is_heap {
                 let rc_repr = self.wrap_in_rc(inner_type);
-                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap();
+                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap();
                 
                 if self.is_copy_type(inner_type) {
                     let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
-                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "load_copy").unwrap());
+                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "deref.copy").unwrap());
                 } else {
-                    let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "cloned_val").unwrap();
+                    let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "deref.clone").unwrap();
                     return cloned_val.try_as_basic_value().left();
                 }
             } else {
                 let pointee_type = self.map_semantic_type(inner_type).unwrap();
-                return Some(self.builder.build_load(pointee_type, ptr, "").unwrap());
+                return Some(self.builder.build_load(pointee_type, ptr, "deref").unwrap());
             }
         }
     
@@ -700,7 +700,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
             
             let operand = self.compile_node(operand_node).unwrap();
-            let call = self.builder.build_call(callee, &[operand.into()], "").unwrap();
+            let call = self.builder.build_call(callee, &[operand.into()], &format!("{}_call", fn_name)).unwrap();
             
             return call.try_as_basic_value().left();
         }
@@ -711,13 +711,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match operator {
             Operation::Neg => {
                 if is_float {
-                    Some(self.builder.build_float_neg(operand.into_float_value(), "").unwrap().into())
+                    Some(self.builder.build_float_neg(operand.into_float_value(), "neg").unwrap().into())
                 } else {
-                    Some(self.builder.build_int_neg(operand.into_int_value(), "").unwrap().into())
+                    Some(self.builder.build_int_neg(operand.into_int_value(), "neg").unwrap().into())
                 }
             },
             Operation::Not | Operation::BitwiseNegate => {
-                Some(self.builder.build_not(operand.into_int_value(), "").unwrap().into())
+                Some(self.builder.build_not(operand.into_int_value(), "not").unwrap().into())
             },
             _ => unreachable!("Operator `{:?}` was not handled", operator),
         }
@@ -728,39 +728,39 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let l = left.into_float_value();
             let r = right.into_float_value();
             match operator {
-                Operation::Plus => self.builder.build_float_add(l, r, "").unwrap().into(),
-                Operation::Minus => self.builder.build_float_sub(l, r, "").unwrap().into(),
-                Operation::Mul => self.builder.build_float_mul(l, r, "").unwrap().into(),
-                Operation::Div => self.builder.build_float_div(l, r, "").unwrap().into(),
-                Operation::Mod => self.builder.build_float_rem(l, r, "").unwrap().into(),
-                Operation::Equivalence => self.builder.build_float_compare(FloatPredicate::OEQ, l, r, "").unwrap().into(),
-                Operation::NotEqual => self.builder.build_float_compare(FloatPredicate::ONE, l, r, "").unwrap().into(),
-                Operation::GreaterThan => self.builder.build_float_compare(FloatPredicate::OGT, l, r, "").unwrap().into(),
-                Operation::Geq => self.builder.build_float_compare(FloatPredicate::OGE, l, r, "").unwrap().into(),
-                Operation::LessThan => self.builder.build_float_compare(FloatPredicate::OLT, l, r, "").unwrap().into(),
-                Operation::Leq => self.builder.build_float_compare(FloatPredicate::OLE, l, r, "").unwrap().into(),
+                Operation::Plus => self.builder.build_float_add(l, r, "add").unwrap().into(),
+                Operation::Minus => self.builder.build_float_sub(l, r, "sub").unwrap().into(),
+                Operation::Mul => self.builder.build_float_mul(l, r, "mul").unwrap().into(),
+                Operation::Div => self.builder.build_float_div(l, r, "div").unwrap().into(),
+                Operation::Mod => self.builder.build_float_rem(l, r, "rem").unwrap().into(),
+                Operation::Equivalence => self.builder.build_float_compare(FloatPredicate::OEQ, l, r, "eq").unwrap().into(),
+                Operation::NotEqual => self.builder.build_float_compare(FloatPredicate::ONE, l, r, "ne").unwrap().into(),
+                Operation::GreaterThan => self.builder.build_float_compare(FloatPredicate::OGT, l, r, "gt").unwrap().into(),
+                Operation::Geq => self.builder.build_float_compare(FloatPredicate::OGE, l, r, "ge").unwrap().into(),
+                Operation::LessThan => self.builder.build_float_compare(FloatPredicate::OLT, l, r, "lt").unwrap().into(),
+                Operation::Leq => self.builder.build_float_compare(FloatPredicate::OLE, l, r, "le").unwrap().into(),
                 _ => unreachable!("codegen for non-primitive float binary op: {:?}", operator)
             }
         } else {
             let l = left.into_int_value();
             let r = right.into_int_value();
             match operator {
-                Operation::Plus => self.builder.build_int_add(l, r, "").unwrap().into(),
-                Operation::Minus => self.builder.build_int_sub(l, r, "").unwrap().into(),
-                Operation::Mul => self.builder.build_int_mul(l, r, "").unwrap().into(),
-                Operation::Div => self.builder.build_int_signed_div(l, r, "").unwrap().into(),
-                Operation::Mod => self.builder.build_int_signed_rem(l, r, "").unwrap().into(),
-                Operation::BitwiseAnd => self.builder.build_and(l, r, "").unwrap().into(),
-                Operation::BitwiseOr => self.builder.build_or(l, r, "").unwrap().into(),
-                Operation::BitwiseXor => self.builder.build_xor(l, r, "").unwrap().into(),
-                Operation::LeftBitShift => self.builder.build_left_shift(l, r, "").unwrap().into(),
-                Operation::RightBitShift => self.builder.build_right_shift(l, r, true, "").unwrap().into(),
-                Operation::Equivalence => self.builder.build_int_compare(IntPredicate::EQ, l, r, "").unwrap().into(),
-                Operation::NotEqual => self.builder.build_int_compare(IntPredicate::NE, l, r, "").unwrap().into(),
-                Operation::GreaterThan => self.builder.build_int_compare(IntPredicate::SGT, l, r, "").unwrap().into(),
-                Operation::Geq => self.builder.build_int_compare(IntPredicate::SGE, l, r, "").unwrap().into(),
-                Operation::LessThan => self.builder.build_int_compare(IntPredicate::SLT, l, r, "").unwrap().into(),
-                Operation::Leq => self.builder.build_int_compare(IntPredicate::SLE, l, r, "").unwrap().into(),
+                Operation::Plus => self.builder.build_int_add(l, r, "add").unwrap().into(),
+                Operation::Minus => self.builder.build_int_sub(l, r, "sub").unwrap().into(),
+                Operation::Mul => self.builder.build_int_mul(l, r, "mul").unwrap().into(),
+                Operation::Div => self.builder.build_int_signed_div(l, r, "div").unwrap().into(),
+                Operation::Mod => self.builder.build_int_signed_rem(l, r, "rem").unwrap().into(),
+                Operation::BitwiseAnd => self.builder.build_and(l, r, "and").unwrap().into(),
+                Operation::BitwiseOr => self.builder.build_or(l, r, "or").unwrap().into(),
+                Operation::BitwiseXor => self.builder.build_xor(l, r, "xor").unwrap().into(),
+                Operation::LeftBitShift => self.builder.build_left_shift(l, r, "shl").unwrap().into(),
+                Operation::RightBitShift => self.builder.build_right_shift(l, r, true, "shr").unwrap().into(),
+                Operation::Equivalence => self.builder.build_int_compare(IntPredicate::EQ, l, r, "eq").unwrap().into(),
+                Operation::NotEqual => self.builder.build_int_compare(IntPredicate::NE, l, r, "ne").unwrap().into(),
+                Operation::GreaterThan => self.builder.build_int_compare(IntPredicate::SGT, l, r, "gt").unwrap().into(),
+                Operation::Geq => self.builder.build_int_compare(IntPredicate::SGE, l, r, "ge").unwrap().into(),
+                Operation::LessThan => self.builder.build_int_compare(IntPredicate::SLT, l, r, "lt").unwrap().into(),
+                Operation::Leq => self.builder.build_int_compare(IntPredicate::SLE, l, r, "le").unwrap().into(),
                 _ => unreachable!("codegen for non-primitive int/bool binary op: {:?}", operator)
             }
         }
@@ -772,9 +772,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             
             let left_type = left_node.type_id.as_ref().unwrap();
             if left_type.is_heap_ref() {
-                let old_val = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "").unwrap();
+                let old_val = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "assign.old_val").unwrap();
                 let decref = self.get_decref();
-                self.builder.build_call(decref, &[old_val.into()], "").unwrap();
+                self.builder.build_call(decref, &[old_val.into()], "assign.decref").unwrap();
             }
 
             let value_to_store = self.compile_node(right_node).unwrap();
@@ -782,7 +782,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let right_type = right_node.type_id.as_ref().unwrap();
             if right_type.is_heap_ref() {
                 let incref = self.get_incref();
-                self.builder.build_call(incref, &[value_to_store.into()], "").unwrap();
+                self.builder.build_call(incref, &[value_to_store.into()], "assign.incref").unwrap();
             }
 
             self.builder.build_store(target_ptr, value_to_store).unwrap();
@@ -799,7 +799,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let left = self.compile_node(left_node).unwrap();
             let right = self.compile_node(right_node).unwrap();
 
-            let call = self.builder.build_call(callee, &[left.into(), right.into()], "").unwrap();
+            let call = self.builder.build_call(callee, &[left.into(), right.into()], &format!("{}_call", fn_name)).unwrap();
             return call.try_as_basic_value().left();
         }
 
@@ -820,7 +820,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 _ => unreachable!("unhandled compound assignment op {:?}", operator),
             };
             
-            let loaded_left = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "").unwrap();
+            let loaded_left = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "compound.load").unwrap();
             let right = self.compile_node(right_node).unwrap();
             let is_float = loaded_left.is_float_value();
             
@@ -843,9 +843,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match operator {
             Operation::And => {
                 let left_val = self.compile_node(left).unwrap().into_int_value();
-                let then_block = self.context.append_basic_block(function, "");
-                let else_block = self.context.append_basic_block(function, "");
-                let merge_block = self.context.append_basic_block(function, "");
+                let then_block = self.context.append_basic_block(function, "and.rhs");
+                let else_block = self.context.append_basic_block(function, "and.short_circuit");
+                let merge_block = self.context.append_basic_block(function, "and.end");
     
                 self.builder.build_conditional_branch(left_val, then_block, else_block).unwrap();
     
@@ -859,7 +859,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let else_block_end = self.builder.get_insert_block().unwrap();
                 
                 self.builder.position_at_end(merge_block);
-                let phi = self.builder.build_phi(self.context.bool_type(), "").unwrap();
+                let phi = self.builder.build_phi(self.context.bool_type(), "and.result").unwrap();
                 phi.add_incoming(&[
                     (&right_val, then_block_end),
                     (&left_val, else_block_end),
@@ -869,9 +869,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             Operation::Or => {
                 let left_val = self.compile_node(left).unwrap().into_int_value();
-                let then_block = self.context.append_basic_block(function, "");
-                let else_block = self.context.append_basic_block(function, "");
-                let merge_block = self.context.append_basic_block(function, "");
+                let then_block = self.context.append_basic_block(function, "or.rhs");
+                let else_block = self.context.append_basic_block(function, "or.short_circuit");
+                let merge_block = self.context.append_basic_block(function, "or.end");
     
                 self.builder.build_conditional_branch(left_val, else_block, then_block).unwrap();
     
@@ -885,7 +885,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let else_block_end = self.builder.get_insert_block().unwrap();
                 
                 self.builder.position_at_end(merge_block);
-                let phi = self.builder.build_phi(self.context.bool_type(), "").unwrap();
+                let phi = self.builder.build_phi(self.context.bool_type(), "or.result").unwrap();
                 phi.add_incoming(&[
                     (&right_val, then_block_end),
                     (&left_val, else_block_end),
@@ -909,19 +909,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
      fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
-        let rc_repr = self.wrap_in_rc(inner_expr.type_id.as_ref().unwrap());
+        let inner_type = inner_expr.type_id.as_ref().unwrap();
+        let mangled_name = self.mangle_name(inner_type);
+        let rc_repr = self.wrap_in_rc(inner_type);
 
         let size = rc_repr.rc_struct_type.size_of().unwrap();
-        let raw_ptr = self.build_malloc(size);
+        let raw_ptr = self.build_malloc(size, &format!("heap_alloc.{}", mangled_name));
         
-        let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 0, "header_ptr").unwrap();
-        let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "").unwrap();
+        let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 0, "rc.header_ptr").unwrap();
+        let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "rc.ref_count_ptr").unwrap();
         self.builder.build_store(ref_count_ptr, self.context.i64_type().const_int(1, false)).unwrap();
         
-        let drop_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "").unwrap();
+        let drop_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "rc.drop_fn_ptr").unwrap();
         self.builder.build_store(drop_fn_ptr_ptr, rc_repr.drop_data_fn.as_global_value().as_pointer_value()).unwrap();
 
-        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 1, "data_ptr").unwrap();
+        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 1, "rc.data_ptr").unwrap();
         let inner_value = self.compile_node(inner_expr).unwrap();
         self.builder.build_store(data_ptr, inner_value).unwrap();
         
@@ -945,7 +947,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if symbol.type_id.as_ref().unwrap().is_heap_ref() {
                     let val = last_val.unwrap();
                     let incref = self.get_incref();
-                    self.builder.build_call(incref, &[val.into()], "").unwrap();
+                    self.builder.build_call(incref, &[val.into()], "block_expr.incref").unwrap();
                 }
             }
             
@@ -965,15 +967,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
         
-        let merge_block = self.context.append_basic_block(function, "");
+        let merge_block = self.context.append_basic_block(function, "if.end");
         
         let mut incoming_phis = vec![];
 
         let cond_val = self.compile_node(condition).unwrap().into_int_value();
-        let then_block = self.context.append_basic_block(function, "");
+        let then_block = self.context.append_basic_block(function, "if.then");
         
-        let mut last_else_block = self.context.append_basic_block(function, "");
-        self.builder.build_conditional_branch(cond_val, then_block, last_else_block).unwrap();
+        let mut next_cond_block = self.context.append_basic_block(function, "if.else");
+        self.builder.build_conditional_branch(cond_val, then_block, next_cond_block).unwrap();
 
         self.builder.position_at_end(then_block);
         let then_val = self.compile_node(then_branch);
@@ -984,11 +986,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             incoming_phis.push((val, self.builder.get_insert_block().unwrap()));
         }
 
-        for (else_if_cond, elseif_branch) in else_if_branches.iter() {
-            self.builder.position_at_end(last_else_block);
+        for (i, (else_if_cond, elseif_branch)) in else_if_branches.iter().enumerate() {
+            self.builder.position_at_end(next_cond_block);
             
-            let elseif_then_block = self.context.append_basic_block(function, "");
-            let next_else_block = self.context.append_basic_block(function, "");
+            let elseif_then_block = self.context.append_basic_block(function, &format!("elseif.then.{}", i));
+            let next_else_block = self.context.append_basic_block(function, &format!("elseif.else.{}", i));
 
             let elseif_cond_val = self.compile_node(else_if_cond).unwrap().into_int_value();
             self.builder.build_conditional_branch(elseif_cond_val, elseif_then_block, next_else_block).unwrap();
@@ -1002,10 +1004,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 incoming_phis.push((val, self.builder.get_insert_block().unwrap()));
             }
             
-            last_else_block = next_else_block;
+            next_cond_block = next_else_block;
         }
 
-        self.builder.position_at_end(last_else_block);
+        self.builder.position_at_end(next_cond_block);
         if let Some(else_node) = else_branch {
             let else_val = self.compile_node(else_node);
             if let Some(val) = else_val {
@@ -1023,7 +1025,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             && !incoming_phis.is_empty()
         {
             let llvm_type = self.map_semantic_type(ty).unwrap();
-            let phi = self.builder.build_phi(llvm_type, "").unwrap();
+            let phi = self.builder.build_phi(llvm_type, "if.result").unwrap();
 
             for (val, block) in incoming_phis {
                 phi.add_incoming(&[(&val, block)]);
@@ -1038,9 +1040,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_while_loop(&mut self, condition: &BoxedMIRNode, body: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let function = self.current_function.unwrap();
 
-        let cond_block = self.context.append_basic_block(function, "");
-        let body_block = self.context.append_basic_block(function, "");
-        let after_block = self.context.append_basic_block(function, "");
+        let cond_block = self.context.append_basic_block(function, "while.cond");
+        let body_block = self.context.append_basic_block(function, "while.body");
+        let after_block = self.context.append_basic_block(function, "while.end");
 
         self.continue_blocks.push(cond_block);
         self.break_blocks.push(after_block);
@@ -1078,10 +1080,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.compile_node(init);
         }
 
-        let cond_block = self.context.append_basic_block(function, "");
-        let body_block = self.context.append_basic_block(function, "");
-        let inc_block = self.context.append_basic_block(function, "");
-        let after_block = self.context.append_basic_block(function, "");
+        let cond_block = self.context.append_basic_block(function, "for.cond");
+        let body_block = self.context.append_basic_block(function, "for.body");
+        let inc_block = self.context.append_basic_block(function, "for.inc");
+        let after_block = self.context.append_basic_block(function, "for.end");
 
         self.continue_blocks.push(inc_block);
         self.break_blocks.push(after_block);
@@ -1153,12 +1155,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             (Some(CastableKind::Int), Some(CastableKind::Float)) => Some(self.builder.build_signed_int_to_float(
                 source_val.into_int_value(), 
                 llvm_target_type.into_float_type(), 
-                ""
+                "sitofp"
             ).unwrap().into()),
             (Some(CastableKind::Float), Some(CastableKind::Int)) => Some(self.builder.build_float_to_signed_int(
                 source_val.into_float_value(), 
                 llvm_target_type.into_int_type(), 
-                ""
+                "fptosi"
             ).unwrap().into()),
             (Some(CastableKind::Int), Some(CastableKind::Int)) |
             (Some(CastableKind::Char), Some(CastableKind::Int)) |
@@ -1166,11 +1168,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             (Some(CastableKind::Enum), Some(CastableKind::Int)) => Some(self.builder.build_int_cast_sign_flag(
                 source_val.into_int_value(),
                 llvm_target_type.into_int_type(), 
-                true, ""
+                true, "intcast"
             ).unwrap().into()),
             (Some(CastableKind::Float), Some(CastableKind::Float)) => Some(self.builder.build_float_cast(
                 source_val.into_float_value(),
-                llvm_target_type.into_float_type(), ""
+                llvm_target_type.into_float_type(), "fpcast"
             ).unwrap().into()),
             (s, t) => panic!("codegen cannot handle cast from {:?} to {:?}", s, t)
         }
@@ -1245,8 +1247,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let mut param_offset = 0;
         if is_closure {
-            param_offset = 1;
             let env_raw_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
+            env_raw_ptr.set_name("closure_env");
+            param_offset = 1;
 
             let capture_types: Vec<_> = captures.iter()
                 .map(|c| {
@@ -1264,18 +1267,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             for (i, capture) in captures.iter().enumerate() {
                 let capture_id = capture.value_id.unwrap();
+                let capture_symbol = self.analyzer.symbol_table.get_value_symbol(capture_id).unwrap();
+                let capture_name = self.analyzer.symbol_table.get_value_name(capture_symbol.name_id);
                 let MIRNodeKind::EnvironmentCapture { strategy, .. } = &capture.kind else { unreachable!(); };
-                let field_ptr = self.builder.build_struct_gep(env_struct_type, env_raw_ptr, i as u32, "").unwrap();
+                let field_ptr = self.builder.build_struct_gep(env_struct_type, env_raw_ptr, i as u32, &format!("{}.addr", capture_name)).unwrap();
 
                 let ptr_to_store_in_vars = match strategy {
                     CaptureStrategy::Copy => {
-                        let loaded_val = self.builder.build_load(capture_types[i], field_ptr, "").unwrap();
-                        let alloca = self.builder.build_alloca(capture_types[i], "").unwrap();
+                        let loaded_val = self.builder.build_load(capture_types[i], field_ptr, &format!("{}.val", capture_name)).unwrap();
+                        let alloca = self.builder.build_alloca(capture_types[i], &format!("{}.local", capture_name)).unwrap();
                         self.builder.build_store(alloca, loaded_val).unwrap();
                         alloca
                     },
                     CaptureStrategy::Reference | CaptureStrategy::MutableReference => {
-                        self.builder.build_load(capture_types[i], field_ptr, "").unwrap().into_pointer_value()
+                        self.builder.build_load(capture_types[i], field_ptr, &format!("{}.ref", capture_name)).unwrap().into_pointer_value()
                     }
                 };
 
@@ -1285,6 +1290,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         if use_rvo {
             let return_val_ptr = function.get_nth_param(param_offset as u32).unwrap().into_pointer_value();
+            return_val_ptr.set_name("rvo.return_ptr");
             self.rvo_return_ptr = Some(return_val_ptr);
             param_offset += 1;
         }
@@ -1295,7 +1301,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let param_name = self.analyzer.symbol_table.get_value_name(param_symbol.name_id);
             param_value.set_name(param_name);
 
-            let alloca = self.builder.build_alloca(param_value.get_type(), param_name).unwrap();
+            let alloca = self.builder.build_alloca(param_value.get_type(), &format!("{}.addr", param_name)).unwrap();
             self.builder.build_store(alloca, param_value).unwrap();
             self.variables.insert(param_node.value_id.unwrap(), alloca);
         }
@@ -1351,11 +1357,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let field_type = field_expr.type_id.as_ref().unwrap();
             if field_type.is_heap_ref() {
                 let incref = self.get_incref();
-                self.builder.build_call(incref, &[field_val.into()], "").unwrap();
+                self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
             }
 
             aggregate = self.builder
-                .build_insert_value(aggregate, field_val, field_index, "")
+                .build_insert_value(aggregate, field_val, field_index, &format!("insert.{}", field_name))
                 .unwrap()
                 .into_struct_value();
         }
@@ -1364,13 +1370,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
-        let compiled_args: Vec<BasicValueEnum> = arguments.iter().map(|arg| {
+        let compiled_args: Vec<BasicValueEnum> = arguments.iter().enumerate().map(|(i, arg)| {
             let arg_val = self.compile_node(arg).unwrap();
             let arg_type = arg.type_id.as_ref().unwrap();
             
             if arg_type.is_heap_ref() {
                 let incref = self.get_incref();
-                self.builder.build_call(incref, &[arg_val.into()], "").unwrap();
+                self.builder.build_call(incref, &[arg_val.into()], &format!("incref.arg{}", i)).unwrap();
             }
 
             arg_val
@@ -1408,10 +1414,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         final_args.extend(compiled_args.iter().map(|v| BasicMetadataValueEnum::from(*v)));
 
         let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap(), is_closure);
-        let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "").unwrap();
+        let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "call").unwrap();
 
         if use_rvo {
-            let loaded_val = self.builder.build_load(self.map_semantic_type(return_type).unwrap(), return_ptr.unwrap(), "").unwrap();
+            let loaded_val = self.builder.build_load(self.map_semantic_type(return_type).unwrap(), return_ptr.unwrap(), "rvo.load").unwrap();
             Some(loaded_val)
         } else {
             call.try_as_basic_value().left()
@@ -1419,31 +1425,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_field_access(&mut self, stmt: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
-        let symbol = self
-            .analyzer
-            .symbol_table
-            .get_value_symbol(stmt.value_id.unwrap())
-            .unwrap();
+        let symbol = self.analyzer.symbol_table.get_value_symbol(stmt.value_id.unwrap()).unwrap();
+        let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
 
         if let ValueSymbolKind::Function(_, _) = symbol.kind {
             let func_val = *self.functions.get(&symbol.id).unwrap();
             let closure_struct_type = self.map_semantic_type(stmt.type_id.as_ref().unwrap()).unwrap().into_struct_type();
-            let closure_ptr = self.builder.build_alloca(closure_struct_type, "").unwrap();
+            let closure_ptr = self.builder.build_alloca(closure_struct_type, &format!("{}.closure", name)).unwrap();
             
-            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, "").unwrap();
+            let fn_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 0, &format!("{}.fn_ptr.addr", name)).unwrap();
             self.builder.build_store(fn_ptr_field, func_val.as_global_value().as_pointer_value()).unwrap();
 
-            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, "").unwrap();
+            let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, &format!("{}.env_ptr.addr", name)).unwrap();
             let env_ptr_type = self.context.ptr_type(AddressSpace::default());
             self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
             
-            return Some(self.builder.build_load(closure_struct_type, closure_ptr, "").unwrap());
+            return Some(self.builder.build_load(closure_struct_type, closure_ptr, &format!("{}.closure.val", name)).unwrap());
         }
 
         let field_ptr = self.compile_place_expression(stmt).unwrap();
         let field_type = stmt.type_id.as_ref().unwrap();
         let llvm_field_type = self.map_semantic_type(field_type).unwrap();
-        Some(self.builder.build_load(llvm_field_type, field_ptr, "").unwrap())
+        Some(self.builder.build_load(llvm_field_type, field_ptr, name).unwrap())
     }
 }
 
@@ -1540,13 +1543,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::CharLiteral(value) => Some(self.compile_char_literal(*value)),
             MIRNodeKind::Identifier(_) => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
             MIRNodeKind::SelfExpr => Some(self.compile_identifier(stmt.value_id.unwrap(), stmt.type_id.as_ref().unwrap())),
-            MIRNodeKind::VariableDeclaration { initializer, mutable: false, .. } => {
+            MIRNodeKind::VariableDeclaration { name, initializer, mutable: false, .. } => {
                 let init_val = self.compile_node(initializer).unwrap();
+                init_val.set_name(name);
                 self.constants.insert(stmt.value_id.unwrap(), init_val);
                 Some(init_val)
             },
-            MIRNodeKind::VariableDeclaration { initializer, mutable: true, .. }
-                => self.compile_variable_declaration(initializer, stmt.value_id.unwrap()),
+            MIRNodeKind::VariableDeclaration { name, initializer, mutable: true, .. }
+                => self.compile_variable_declaration(name, initializer, stmt.value_id.unwrap()),
             MIRNodeKind::UnaryOperation { operator, operand }
                 => self.compile_unary_operation(*operator, operand),
             MIRNodeKind::BinaryOperation { operator, left, right }
@@ -1566,14 +1570,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let expr_type = expr.type_id.as_ref().unwrap();
                     if expr_type.is_heap_ref() {
                         let incref = self.get_incref();
-                        self.builder.build_call(incref, &[value.into()], "").unwrap();
+                        self.builder.build_call(incref, &[value.into()], "ret.incref").unwrap();
                     }
 
                     if let Some(base_var_id) = get_base_variable(expr) {
                         let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
                         if symbol.type_id.as_ref().unwrap().is_heap_ref() {
                             let incref = self.get_incref();
-                            self.builder.build_call(incref, &[value.into()], "").unwrap();
+                            self.builder.build_call(incref, &[value.into()], "ret.incref_base").unwrap();
                         }
                     }
 
