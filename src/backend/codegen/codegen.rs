@@ -594,7 +594,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let init_val = self.compile_node(initializer).unwrap();
 
-        if ty.is_heap_ref() {
+        if ty.is_heap_ref() && !matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) {
             let incref = self.get_incref();
             self.builder.build_call(incref, &[init_val.into()], &format!("incref_{}", name)).unwrap();
         }
@@ -908,7 +908,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-     fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let inner_type = inner_expr.type_id.as_ref().unwrap();
         let mangled_name = self.mangle_name(inner_type);
         let rc_repr = self.wrap_in_rc(inner_type);
@@ -928,7 +928,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.build_store(data_ptr, inner_value).unwrap();
         
         Some(raw_ptr.as_basic_value_enum())
-     }
+    }
  
     fn compile_block(&mut self, stmts: &[MIRNode], scope_id: ScopeId) -> Option<BasicValueEnum<'ctx>> {
         let mut last_val = None;
