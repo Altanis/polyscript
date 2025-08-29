@@ -4,7 +4,7 @@ use std::process::Command;
 use std::rc::Rc;
 
 use inkwell::context::Context;
-use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetTriple};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::OptimizationLevel;
 
 use crate::backend::codegen::codegen::CodeGen;
@@ -36,7 +36,8 @@ pub struct CompilerConfig {
     pub emit_type: EmitType,
     pub output_file: PathBuf,
     pub debug_symbols: bool,
-    pub features: String
+    pub features: String,
+    pub linker: String
 }
 
 pub struct Compiler {
@@ -162,14 +163,17 @@ impl Compiler {
 
         Target::initialize_all(&InitializationConfig::default());
 
-        let target_triple = TargetTriple::create(&self.config.target_triple);
-        module.set_triple(&target_triple);
+        let target_triple = if self.config.target_triple.is_empty() { TargetMachine::get_default_triple() } else { TargetTriple::create(&self.config.target_triple) };
+        let cpu = if self.config.cpu.is_empty() { TargetMachine::get_host_cpu_name().to_string() } else { self.config.cpu.clone() };
+        let features = if self.config.features.is_empty() { TargetMachine::get_host_cpu_features().to_string() } else { self.config.features.clone() };
 
+        module.set_triple(&target_triple);
         let target = Target::from_triple(&target_triple).expect("Target not found");
+
         let target_machine = target.create_target_machine(
             &target_triple,
-            &self.config.cpu,
-            &self.config.features,
+            &cpu,
+            &features,
             self.config.opt_level,
             RelocMode::Default,
             CodeModel::Default,
@@ -187,7 +191,7 @@ impl Compiler {
         if let Some(parent) = self.config.output_file.parent() && !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).expect("Failed to create output directory");
         }
-        
+
         match self.config.emit_type {
             EmitType::LLVMIR => {
                 module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file");
@@ -202,12 +206,29 @@ impl Compiler {
                 let temp_obj_path = self.config.output_file.with_extension("o");
                 target_machine.write_to_file(&module, FileType::Object, &temp_obj_path).expect("Failed to write object file");
 
-                let status = Command::new("clang")
+                let linker_cmd = {
+                    if !self.config.linker.is_empty() {
+                        self.config.linker.clone()
+                    } else if Command::new("clang").arg("--version").output().is_ok() {
+                        "clang".to_string()
+                    } else if Command::new("gcc").arg("--version").output().is_ok() {
+                        "gcc".to_string()
+                    } else {
+                        eprintln!("Error: Could not find a linker.");
+                        eprintln!("Please specify one with the --linker flag, or make sure 'clang' or 'gcc' is in your PATH.");
+                        std::process::exit(1);
+                    }
+                };
+
+                let status = Command::new(&linker_cmd)
                     .arg(&temp_obj_path)
                     .arg("-o")
                     .arg(&self.config.output_file)
                     .status()
-                    .expect("Failed to run clang to link the executable");
+                    .unwrap_or_else(|e| {
+                        eprintln!("Failed to run linker '{}': {}", linker_cmd, e);
+                        std::process::exit(1);
+                    });
 
                 if !status.success() {
                     eprintln!("Linking failed.");
