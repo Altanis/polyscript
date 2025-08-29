@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
 
@@ -19,17 +19,37 @@ use crate::utils::kind::Token;
 
 pub const DEBUG: bool = true;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EmitType {
+    Asm,
+    Obj,
+    LLVMIR,
+    Executable,
+}
+
+#[derive(Debug)]
+pub struct CompilerConfig {
+    pub entry_file: String,
+    pub opt_level: OptimizationLevel,
+    pub target_triple: String,
+    pub cpu: String,
+    pub emit_type: EmitType,
+    pub output_file: PathBuf,
+    pub debug_symbols: bool,
+    pub features: String
+}
+
 pub struct Compiler {
-    entry_file: &'static str,
+    config: CompilerConfig,
 }
 
 impl Compiler {
-    pub fn new(entry_file: &'static str) -> Compiler {
-        Compiler { entry_file }
+    pub fn new(config: CompilerConfig) -> Compiler {
+        Compiler { config }
     }
 
     pub fn run(&self) {
-        let program = fs::read_to_string(self.entry_file).expect("Invalid source file.");
+        let program = fs::read_to_string(&self.config.entry_file).expect("Invalid source file.");
 
         let (lined_source, tokens) = self.generate_tokens(program);
         let program = self.parse_tokens(lined_source.clone(), tokens.clone());
@@ -137,35 +157,65 @@ impl Compiler {
 
     fn compile_mir(&self, program: MIRNode, analyzer: &SemanticAnalyzer) {
         let context = Context::create();
-        let module = context.create_module("a");
+        let module = context.create_module("main_module");
         let builder = context.create_builder();
 
         Target::initialize_all(&InitializationConfig::default());
 
-        let target_triple = TargetTriple::create("arm64-apple-darwin");
+        let target_triple = TargetTriple::create(&self.config.target_triple);
         module.set_triple(&target_triple);
 
         let target = Target::from_triple(&target_triple).expect("Target not found");
         let target_machine = target.create_target_machine(
             &target_triple,
-            "apple-m2",
-            "",
-            OptimizationLevel::None,
+            &self.config.cpu,
+            &self.config.features,
+            self.config.opt_level,
             RelocMode::Default,
             CodeModel::Default,
         ).expect("Failed to create target machine");
 
         module.set_data_layout(&target_machine.get_target_data().get_data_layout());
 
+        if self.config.debug_symbols {
+            println!("[WARN] Debug symbols are not supported yet.");
+        }
+
         let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
         codegen.compile_program(&program);
 
-        let path = Path::new("bin/output.ll");
-        module.print_to_file(path).expect("couldn't write to output.ll");
+        if let Some(parent) = self.config.output_file.parent() && !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).expect("Failed to create output directory");
+        }
+        
+        match self.config.emit_type {
+            EmitType::LLVMIR => {
+                module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file");
+            },
+            EmitType::Asm => {
+                target_machine.write_to_file(&module, FileType::Assembly, &self.config.output_file).expect("Failed to write assembly file");
+            },
+            EmitType::Obj => {
+                target_machine.write_to_file(&module, FileType::Object, &self.config.output_file).expect("Failed to write object file");
+            },
+            EmitType::Executable => {
+                let temp_obj_path = self.config.output_file.with_extension("o");
+                target_machine.write_to_file(&module, FileType::Object, &temp_obj_path).expect("Failed to write object file");
 
-        let asm_path = Path::new("bin/output_macos.s");
-        target_machine.write_to_file(&module, FileType::Assembly, asm_path).expect("Failed to write assembly");
+                let status = Command::new("clang")
+                    .arg(&temp_obj_path)
+                    .arg("-o")
+                    .arg(&self.config.output_file)
+                    .status()
+                    .expect("Failed to run clang to link the executable");
 
-        Command::new("clang").args(["bin/output_macos.s", "-o", "bin/a"]).status().expect("Failed to run clang");
+                if !status.success() {
+                    eprintln!("Linking failed.");
+                    std::process::exit(1);
+                }
+
+                fs::remove_file(&temp_obj_path).expect("Failed to remove temporary object file");
+            }
+        }
     }
 }
