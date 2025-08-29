@@ -9,10 +9,15 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-let a: &'heap mut int = heap 5;
-
-fn take(x: &'heap mut int) {
-    let b: &'heap mut int = x;
+struct Pair {
+    x: &'heap mut int;
+    y: &'heap mut int;
 }
 
-take(a);
+{
+    let p1: &'heap mut Pair = heap Pair { x: heap 1, y: heap 2 };
+    let p2: &'heap mut Pair = p1;  // shallow copy, refcounts of x and y incremented
+
+    let a: int = *p2.x; // copy to stack
+    let b: int = *p2.y; // copy to stack
+}

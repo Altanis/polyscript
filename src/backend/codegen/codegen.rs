@@ -334,6 +334,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn is_copy_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Base { symbol, .. } => {
+                let Some(type_symbol) = self.analyzer.symbol_table.get_type_symbol(*symbol) else { return false; };
+                matches!(&type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
+            },
+            Type::Reference { .. } | Type::MutableReference { .. } => true,
+        }
+    }
+
     /// Determines if a type should be returned through return-value optimizations.
     fn is_rvo_candidate(&self, ty: &Type) -> bool {
         match ty {
@@ -543,11 +553,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let llvm_ty = self.map_semantic_type(ty).unwrap();
             let load = self.builder.build_load(llvm_ty, ptr, "").unwrap();
 
-            if ty.is_heap_ref() {
-                let incref = self.get_incref();
-                self.builder.build_call(incref, &[load.into()], &format!("increfr_{ptr}")).unwrap();
-            }
-
             return load;
         }
 
@@ -583,6 +588,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.variables.insert(value_id, ptr);
 
         let init_val = self.compile_node(initializer).unwrap();
+
+        if ty.is_heap_ref() {
+            let incref = self.get_incref();
+            self.builder.build_call(incref, &[init_val.into()], "").unwrap();
+        }
+
         self.builder.build_store(ptr, init_val).unwrap();
 
         None
@@ -669,8 +680,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let rc_repr = self.wrap_in_rc(inner_type);
                 let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "data_ptr").unwrap();
                 
-                let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "cloned_val").unwrap();
-                return cloned_val.try_as_basic_value().left();
+                if self.is_copy_type(inner_type) {
+                    let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
+                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "load_copy").unwrap());
+                } else {
+                    let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "cloned_val").unwrap();
+                    return cloned_val.try_as_basic_value().left();
+                }
             } else {
                 let pointee_type = self.map_semantic_type(inner_type).unwrap();
                 return Some(self.builder.build_load(pointee_type, ptr, "").unwrap());
@@ -752,7 +768,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_binary_operation(&mut self, operator: Operation, left_node: &BoxedMIRNode, right_node: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         if operator == Operation::Assign {
             let target_ptr = self.compile_place_expression(left_node).unwrap();
+            
+            let left_type = left_node.type_id.as_ref().unwrap();
+            if left_type.is_heap_ref() {
+                let old_val = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "").unwrap();
+                let decref = self.get_decref();
+                self.builder.build_call(decref, &[old_val.into()], "").unwrap();
+            }
+
             let value_to_store = self.compile_node(right_node).unwrap();
+            
+            let right_type = right_node.type_id.as_ref().unwrap();
+            if right_type.is_heap_ref() {
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[value_to_store.into()], "").unwrap();
+            }
+
             self.builder.build_store(target_ptr, value_to_store).unwrap();
             return None;
         }
@@ -1316,6 +1347,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let field_val = self.compile_node(field_expr).unwrap();
             let field_index = *field_name_to_index.get(field_name).unwrap();
 
+            let field_type = field_expr.type_id.as_ref().unwrap();
+            if field_type.is_heap_ref() {
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[field_val.into()], "").unwrap();
+            }
+
             aggregate = self.builder
                 .build_insert_value(aggregate, field_val, field_index, "")
                 .unwrap()
@@ -1326,7 +1363,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
-        let compiled_args: Vec<BasicValueEnum> = arguments.iter().map(|arg| self.compile_node(arg).unwrap()).collect();
+        let compiled_args: Vec<BasicValueEnum> = arguments.iter().map(|arg| {
+            let arg_val = self.compile_node(arg).unwrap();
+            let arg_type = arg.type_id.as_ref().unwrap();
+            
+            if arg_type.is_heap_ref() {
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[arg_val.into()], "").unwrap();
+            }
+
+            arg_val
+        }).collect();
 
         let callee_value = self.compile_node(function).unwrap();
         let closure_struct = callee_value.into_struct_value();
@@ -1514,6 +1561,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
                     let value = self.compile_node(expr).unwrap();
+
+                    let expr_type = expr.type_id.as_ref().unwrap();
+                    if expr_type.is_heap_ref() {
+                        let incref = self.get_incref();
+                        self.builder.build_call(incref, &[value.into()], "").unwrap();
+                    }
+
                     if let Some(base_var_id) = get_base_variable(expr) {
                         let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
                         if symbol.type_id.as_ref().unwrap().is_heap_ref() {
