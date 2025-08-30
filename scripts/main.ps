@@ -1,16 +1,27 @@
-// c ffi
-// array literals
+// arrays + Indexable trait
 // stdlib
-    // io + math + vec + hashmap + string
+    // math + vec + string + io + hashmap
 // default traits such as Drop, Clone, Default, ToString
-// arrays + vectors + Indexable trait
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-import { DEBUG, is_div_by_2, Scalar } from "./main2.ps";
+struct Scalar {
+    x: int;
+}
 
-if !DEBUG && is_div_by_2(4) {
-    let scalar = Scalar.new(4);
-    let x = scalar.get_x();
-};
+impl Drop for Scalar {
+    fn drop(&mut self) {
+        let x = 2 + 3;
+    }
+}
+
+impl Clone for Scalar {
+    fn clone(&self): Self {
+        Scalar { x: self.x + 1 }
+    }
+}
+
+{
+    let a: &'heap mut Scalar = heap Scalar { x: 2 };
+}

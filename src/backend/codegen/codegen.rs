@@ -7,7 +7,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Functi
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
-use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
@@ -261,6 +261,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
         rc_ptr_generic.set_name("rc_ptr_generic");
 
+        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
+        let type_id = ty.get_base_symbol();
+        
+        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
+            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+        {
+            let applicable_impl = impls_for_type.iter().find(|imp| {
+                self.check_trait_impl_applicability_mir(ty, imp)
+            });
+
+            if let Some(imp) = applicable_impl
+                && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
+                && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
+            {
+                let rc_repr = self.wrap_in_rc(ty);
+                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr_for_drop").unwrap();
+                self.builder.build_call(drop_fn_val, &[data_ptr.into()], "user_drop_call").unwrap();
+            }
+        }
+
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
             if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
@@ -305,6 +325,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let original_data_ptr = function.get_first_param().unwrap().into_pointer_value();
         original_data_ptr.set_name("original_data_ptr");
 
+        let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
+        let type_id = ty.get_base_symbol();
+        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&clone_trait_id)
+            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+        {
+            let applicable_impl = impls_for_type.iter().find(|imp| {
+                self.check_trait_impl_applicability_mir(ty, imp)
+            });
+
+            if let Some(imp) = applicable_impl
+                && let Some(clone_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("clone", imp.impl_scope_id)
+                && let Some(clone_fn_val) = self.functions.get(&clone_fn_symbol.id).copied()
+            {
+                let call = self.builder.build_call(clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
+                let cloned_val = call.try_as_basic_value().left().unwrap();
+                self.builder.build_return(Some(&cloned_val)).unwrap();
+                
+                if let Some(block) = old_block { self.builder.position_at_end(block); }
+                return;
+            }
+        }
+        
         let rc_repr = self.wrap_in_rc(ty);
         let original_data = self.builder.build_load(rc_repr.llvm_data_type, original_data_ptr, "original_data").unwrap();
 
@@ -350,7 +392,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    /// Determines if a type should be returned through return-value optimizations.
     fn is_rvo_candidate(&self, ty: &Type) -> bool {
         match ty {
             Type::Base { symbol, .. } => {
@@ -360,6 +401,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             _ => false
         }
+    }
+
+    fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &&TraitImpl) -> bool {
+        let instance_args = match instance_type {
+            Type::Base { args, .. } => args,
+            _ => return imp.type_specialization.is_empty(),
+        };
+        
+        if instance_args.len() != imp.type_specialization.len() {
+            return false;
+        }
+    
+        for (instance_arg, &impl_target_arg_id) in instance_args.iter().zip(&imp.type_specialization) {
+            if imp.impl_generic_params.contains(&impl_target_arg_id) {
+                continue;
+            }
+    
+            if instance_arg.get_base_symbol() != impl_target_arg_id {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Maps a semantic type from the analyzer to a concrete LLVM type.

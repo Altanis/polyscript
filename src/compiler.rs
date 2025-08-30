@@ -93,7 +93,7 @@ impl Compiler {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
                         let canonical_dep_path = if rel_path_str == "@intrinsics" {
-                            let is_part_of_stdlib = self.config.stdlib_path.as_ref().map_or(false, |stdlib_path| current_path.starts_with(stdlib_path));
+                            let is_part_of_stdlib = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
 
                             if !is_part_of_stdlib {
                                 let err = self.analyzer.create_error(

@@ -539,6 +539,106 @@ impl SymbolTable {
             }
         }
 
+        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
+        let self_type_id = self.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+
+        let func_scope_id = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+
+        let params = vec![Type::MutableReference {
+            inner: Box::new(Type::new_base(self_type_id)),
+            is_heap: false,
+        }];
+
+        let fn_sig_type_id = self.add_type_symbol(
+            "drop",
+            TypeSymbolKind::FunctionSignature {
+                params,
+                return_type: Type::new_base(self.find_type_symbol("void").unwrap().id),
+                instance: Some(ReferenceKind::MutableReference),
+            },
+            vec![],
+            QualifierKind::Private,
+            None,
+        ).unwrap();
+
+        self.add_value_symbol(
+            "drop",
+            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::new_base(fn_sig_type_id)),
+            None,
+        ).unwrap();
+
+        self.exit_scope();
+
+        let trait_id = self.add_type_symbol(
+            "Drop",
+            TypeSymbolKind::Trait(trait_scope_id),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+
+        trait_registry.default_traits.insert("Drop".to_string(), trait_id);
+        
+        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
+        let self_type_id = self.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+
+        let func_scope_id = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+
+        let params = vec![Type::Reference {
+            inner: Box::new(Type::new_base(self_type_id)),
+            is_heap: false,
+        }];
+
+        let fn_sig_type_id = self.add_type_symbol(
+            "clone",
+            TypeSymbolKind::FunctionSignature {
+                params,
+                return_type: Type::new_base(self_type_id),
+                instance: Some(ReferenceKind::Reference),
+            },
+            vec![],
+            QualifierKind::Private,
+            None,
+        ).unwrap();
+
+        self.add_value_symbol(
+            "clone",
+            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::new_base(fn_sig_type_id)),
+            None,
+        ).unwrap();
+
+        self.exit_scope();
+
+        let trait_id = self.add_type_symbol(
+            "Clone",
+            TypeSymbolKind::Trait(trait_scope_id),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+
+        trait_registry.default_traits.insert("Clone".to_string(), trait_id);
+
         self.current_scope_id = old_scope;
     }
 

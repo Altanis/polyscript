@@ -74,16 +74,22 @@ struct CliArgs {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum OptLevelArg {
     /// -O0: No optimizations
+    #[value(alias = "0")]
     O0,
     /// -O1: Basic optimizations
+    #[value(alias = "1")]
     O1,
     /// -O2: More optimizations
+    #[value(alias = "2")]
     O2,
     /// -O3: Aggressive optimizations
+    #[value(alias = "3")]
     O3,
     /// -Os: Optimize for size
+    #[value(alias = "s")]
     Os,
     /// -Oz: Aggressively optimize for size
+    #[value(alias = "z")]
     Oz,
 }
 
