@@ -9,7 +9,7 @@
 
 use clap::{Parser, ValueEnum};
 use inkwell::OptimizationLevel;
-use std::path::{Path, PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
 use crate::compiler::{Compiler, CompilerConfig, EmitType};
 
@@ -65,6 +65,10 @@ struct CliArgs {
     /// The linker to use for the final executable
     #[arg(long, value_name = "LINKER")]
     linker: Option<String>,
+
+    /// The standard library to compile with.
+    #[arg(long, value_name = "STDLIB")]
+    stdlib: Option<String>
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -124,6 +128,7 @@ fn main() {
         debug_symbols: cli.debug_symbols,
         features: cli.features.unwrap_or_default(),
         linker: cli.linker.unwrap_or_default(),
+        stdlib_path: cli.stdlib.map(|p| fs::canonicalize(p).expect("Standard library path not found or is invalid.")),
     };
 
     let mut compiler = Compiler::new(config);

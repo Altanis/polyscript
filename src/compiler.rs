@@ -5,12 +5,14 @@ use std::process::Command;
 use std::rc::Rc;
 
 use inkwell::context::Context;
-use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::targets::{
+    CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
+};
 use inkwell::OptimizationLevel;
 
 use crate::backend::codegen::codegen::CodeGen;
 use crate::backend::optimizations::{capture_analysis, escape_analysis};
-use crate::frontend::semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
+use crate::frontend::semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, TypeSymbolId, ValueSymbolId,};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::frontend::syntax::parser::Parser;
@@ -39,7 +41,8 @@ pub struct CompilerConfig {
     pub output_file: PathBuf,
     pub debug_symbols: bool,
     pub features: String,
-    pub linker: String
+    pub linker: String,
+    pub stdlib_path: Option<PathBuf>,
 }
 
 pub struct Module {
@@ -80,24 +83,63 @@ impl Compiler {
 
             let source_code = fs::read_to_string(&current_path).unwrap_or_else(|_| panic!("Could not read source file: {:?}", current_path));
             let (lined_source, tokens) = self.generate_tokens(source_code);
-            let mut ast = self.parse_tokens(lined_source.clone(), tokens.clone());
+            let lined_source_rc = Rc::new(lined_source);
+            self.analyzer.set_source(lined_source_rc.clone());
+
+            let mut ast = self.parse_tokens((*lined_source_rc).clone(), tokens.clone());
 
             let mut dependencies = vec![];
             if let AstNodeKind::Program(stmts) = &ast.kind {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
-                        let mut dep_path = current_path.parent().unwrap().to_path_buf();
-                        dep_path.push(rel_path_str);
-                        let canonical_dep_path = fs::canonicalize(&dep_path)
-                            .unwrap_or_else(|_| panic!("Failed to resolve import path: {:?}", dep_path));
-                        
+                        let canonical_dep_path = if rel_path_str == "@intrinsics" {
+                            let is_part_of_stdlib = self.config.stdlib_path.as_ref().map_or(false, |stdlib_path| current_path.starts_with(stdlib_path));
+
+                            if !is_part_of_stdlib {
+                                let err = self.analyzer.create_error(
+                                    ErrorKind::InvalidImport(" intrinsics".to_string(), "Only standard library modules can import it.".to_string()),
+                                    stmt.span,
+                                    &[stmt.span]
+                                );
+                                eprintln!("{}", err);
+                                std::process::exit(1);
+                            }
+                            continue;
+                        } else if let Some(stdlib_prefix_path) = rel_path_str.strip_prefix("stdlib/") {
+                            if let Some(stdlib_path) = &self.config.stdlib_path {
+                                let mut dep_path = stdlib_path.clone();
+                                dep_path.push(stdlib_prefix_path);
+                                fs::canonicalize(&dep_path).unwrap_or_else(|_| {
+                                    panic!("Failed to resolve stdlib import path: {:?}", dep_path)
+                                })
+                            } else {
+                                let err = self.analyzer.create_error(
+                                    ErrorKind::InvalidImport(
+                                        rel_path_str.clone(),
+                                        "Standard library not linked. Use the --stdlib flag.".to_string(),
+                                    ),
+                                    stmt.span,
+                                    &[stmt.span],
+                                );
+                                eprintln!("{}", err);
+                                std::process::exit(1);
+                            }
+                        } else {
+                            let mut dep_path = current_path.parent().unwrap().to_path_buf();
+                            dep_path.push(rel_path_str);
+                            fs::canonicalize(&dep_path).unwrap_or_else(|_| {
+                                panic!("Failed to resolve import path: {:?}", dep_path)
+                            })
+                        };
+
                         dependencies.push(canonical_dep_path.clone());
                         file_queue.push_back(canonical_dep_path);
                     }
                 }
             }
+
             dep_graph.insert(current_path.clone(), dependencies);
-            
+
             self.analyzer.symbol_table.current_scope_id = self.analyzer.symbol_table.real_starting_scope;
             let module_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Block);
             ast.scope_id = Some(module_scope_id);
@@ -105,14 +147,14 @@ impl Compiler {
             let module = Module {
                 path: current_path.clone(),
                 ast,
-                lined_source: Rc::new(lined_source),
+                lined_source: lined_source_rc,
                 scope_id: module_scope_id,
                 exports: HashMap::new(),
             };
 
             self.modules.insert(current_path, module);
         }
-        
+
         let compilation_order = match self.topological_sort(&dep_graph) {
             Ok(order) => order,
             Err(_) => std::process::exit(1),
@@ -121,7 +163,7 @@ impl Compiler {
         for path in &compilation_order {
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
-            
+
             let errors = self.analyzer.symbol_collector_pass(&mut module.ast);
             if !errors.is_empty() {
                 println!("{} errors emitted... printing:", errors.len());
@@ -138,7 +180,7 @@ impl Compiler {
         for path in &compilation_order {
             self.link_imports_for_module(path).unwrap();
         }
-        
+
         for path in &compilation_order {
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
@@ -146,20 +188,28 @@ impl Compiler {
 
             if let Err(errs) = self.analyzer.analyze(&mut module.ast) {
                 println!("{} errors emitted in {:?}... printing:", errs.len(), path);
-                for err in errs { eprintln!("{}", err); }
+                for err in errs {
+                    eprintln!("{}", err);
+                }
                 std::process::exit(1);
             }
         }
 
         let (mir_builder, mut mir_program) = self.lower_ast_to_mir(&compilation_order);
 
-        let mir_builder_fmt = if DEBUG { format!("{}", mir_builder) } else { String::new() };
+        let mir_builder_fmt = if DEBUG {
+            format!("{}", mir_builder)
+        } else {
+            String::new()
+        };
         std::mem::drop(mir_builder);
 
         self.optimize(&mut mir_program);
 
         let mut mir_program_fmt = String::new();
-        if DEBUG { let _ = mir_program.fmt_with_indent(&mut mir_program_fmt, 0, Some(&self.analyzer.symbol_table)); }
+        if DEBUG {
+            let _ = mir_program.fmt_with_indent(&mut mir_program_fmt, 0, Some(&self.analyzer.symbol_table));
+        }
 
         if DEBUG {
             println!("-- SEMANTIC ANALYZER --");
@@ -174,6 +224,7 @@ impl Compiler {
 
         self.compile_mir(mir_program);
     }
+
     fn topological_sort_util(
         node: &PathBuf,
         dep_graph: &HashMap<PathBuf, Vec<PathBuf>>,
@@ -196,7 +247,7 @@ impl Compiler {
                 }
             }
         }
-        
+
         recursion_stack.remove(node);
         sorted.push(node.clone());
         Ok(())
@@ -219,7 +270,7 @@ impl Compiler {
     fn resolve_exports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
         let module = self.modules.get(path).unwrap();
         self.analyzer.symbol_table.current_scope_id = module.scope_id;
-        
+
         let mut exports = HashMap::new();
         if let AstNodeKind::Program(stmts) = &module.ast.kind {
             for stmt in stmts {
@@ -230,15 +281,19 @@ impl Compiler {
                         let type_sym = self.analyzer.symbol_table.find_type_symbol_in_scope(&name, module.scope_id);
 
                         if value_sym.is_none() && type_sym.is_none() {
-                             return Err(self.analyzer.create_error(ErrorKind::UnknownIdentifier(name), ident_node.span, &[ident_node.span]));
+                            return Err(self.analyzer.create_error(
+                                ErrorKind::UnknownIdentifier(name),
+                                ident_node.span,
+                                &[ident_node.span],
+                            ));
                         }
-                        
+
                         exports.insert(name, (value_sym.map(|s| s.id), type_sym.map(|s| s.id)));
                     }
                 }
             }
         }
-        
+
         self.modules.get_mut(path).unwrap().exports = exports;
 
         Ok(())
@@ -261,18 +316,20 @@ impl Compiler {
         for (dep_path, identifiers) in dependencies {
             let importing_module = self.modules.get(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = importing_module.scope_id;
-            
+
             let imported_module = self.modules.get(&dep_path).unwrap();
-            
+
             for ident_node in &identifiers {
                 let name = ident_node.get_name().unwrap();
-                let (exported_value_id, exported_type_id) = imported_module.exports.get(&name)
-                    .ok_or_else(|| self.analyzer.create_error(
-                        ErrorKind::MemberNotFound(name.clone(), format!("module {:?}", imported_module.path)), 
-                        ident_node.span, 
-                        &[ident_node.span])
-                    )?;
-                
+                let (exported_value_id, exported_type_id) =
+                    imported_module.exports.get(&name).ok_or_else(|| {
+                        self.analyzer.create_error(
+                            ErrorKind::MemberNotFound(name.clone(), format!("module {:?}", imported_module.path)),
+                            ident_node.span,
+                            &[ident_node.span],
+                        )
+                    })?;
+
                 if let Some(val_id) = exported_value_id {
                     let name_id = self.analyzer.symbol_table.value_names.intern(&name);
                     self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().values.insert(name_id, *val_id);
@@ -347,7 +404,7 @@ impl Compiler {
         } else {
             Span::default()
         };
-        
+
         let mir_program = MIRNode {
             kind: MIRNodeKind::Program(all_mir_stmts),
             span: program_span,
@@ -411,15 +468,9 @@ impl Compiler {
         }
 
         match self.config.emit_type {
-            EmitType::LLIR => {
-                module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file");
-            },
-            EmitType::Asm => {
-                target_machine.write_to_file(&module, FileType::Assembly, &self.config.output_file).expect("Failed to write assembly file");
-            },
-            EmitType::Obj => {
-                target_machine.write_to_file(&module, FileType::Object, &self.config.output_file).expect("Failed to write object file");
-            },
+            EmitType::LLIR => module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file"),
+            EmitType::Asm => target_machine.write_to_file(&module, FileType::Assembly, &self.config.output_file).expect("Failed to write assembly file"),
+            EmitType::Obj => target_machine.write_to_file(&module, FileType::Object, &self.config.output_file).expect("Failed to write object file"),
             EmitType::Executable => {
                 let temp_obj_path = self.config.output_file.with_extension("o");
                 target_machine.write_to_file(&module, FileType::Object, &temp_obj_path).expect("Failed to write object file");
