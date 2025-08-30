@@ -1288,6 +1288,10 @@ impl SemanticAnalyzer {
     fn collect_uvs(&mut self, expr: &mut AstNode) -> Result<Type, BoxedError> {
         use AstNodeKind::*;
 
+        if matches!(expr.kind, AstNodeKind::ImportStatement { .. } | AstNodeKind::ExportStatement { .. }) {
+            return Ok(Type::new_base(self.get_primitive_type(PrimitiveKind::Void)));
+        }
+
         let uv = self.unification_context.generate_uv_type(&mut self.symbol_table, expr.span);
         let uv_id = uv.get_base_symbol();
 
@@ -1502,8 +1506,7 @@ impl SemanticAnalyzer {
                     info,
                 );
             },
-            ImportStatement { .. } | ExportStatement { .. } => {},
-            Program(_) => unreachable!()
+            ImportStatement { .. } | ExportStatement { .. } | Program(_) => unreachable!()
         }
 
         expr.type_id = Some(uv.clone());

@@ -1123,7 +1123,6 @@ impl Parser {
         let mut items = vec![];
 
         self.consume(TokenKind::OpenBrace)?;
-
         loop {
             items.push(self.spanned_node(|parser| {
                 let identifier = parser.consume(TokenKind::Identifier)?.get_value().to_string();
@@ -1136,8 +1135,7 @@ impl Parser {
                 break;
             }
         }
-
-        self.consume_generic_greater()?;
+        self.consume(TokenKind::CloseBrace)?;
 
         Ok(items)   
     }
@@ -1601,6 +1599,7 @@ impl Parser {
             let AstNodeKind::StringLiteral(file_path) = file_path_node.kind else {
                 return Err(parser.generate_error(ErrorKind::ExpectedString, parser.create_span_from_current_token()));
             };
+            parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::ImportStatement { identifiers, file_path })
         })
@@ -1610,6 +1609,7 @@ impl Parser {
         self.spanned_node(|parser| {
             parser.advance();
             let identifiers = parser.parse_set()?;
+            parser.consume(TokenKind::Semicolon)?;
 
             Ok(AstNodeKind::ExportStatement { identifiers })
         })
