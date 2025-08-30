@@ -718,7 +718,16 @@ impl<'a> MIRBuilder<'a> {
                 mutable: *mutable,
             },
             AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
-                if let AstNodeKind::Function { .. } = &mut function.kind {
+                if let Some(fn_id) = function.value_id && fn_id == self.analyzer.print_fn_id {
+                    let arg = self.lower_node(&mut arguments[0])?;
+                    let void_type = self
+                        .analyzer
+                        .symbol_table
+                        .find_type_symbol("void")
+                        .unwrap();
+                    node.type_id = Some(Type::new_base(void_type.id));
+                    MIRNodeKind::PrintStatement(Box::new(arg))
+                } else if let AstNodeKind::Function { .. } = &mut function.kind {
                     let function_mir = self.lower_node(function).unwrap();
                     let hoisted_name = if let MIRNodeKind::Function { name, .. } = &function_mir.kind { name.clone() } else { unreachable!(); };
                     

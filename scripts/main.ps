@@ -7,4 +7,32 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-const x: int = 5;
+struct Scalar {
+    private x: int;
+}
+
+impl Scalar {
+    fn new(x: int): Scalar {
+        Scalar { x }
+    }
+
+    fn get_x(&self): int {
+        self.x
+    }
+}
+
+let scalar = Scalar.new(4);
+let x = scalar.get_x();
+
+print(scalar);
+print(x);
+
+enum Level {
+    Easy,
+    Medium,
+    Hard = 4 * 3 + 2
+}
+
+let difficulty: Level = Level.Hard;
+
+print(difficulty);
