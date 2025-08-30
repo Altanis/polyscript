@@ -692,7 +692,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::Enum => "Keyword::Enum".green(),
                 KeywordKind::Public => "Keyword::Public".blue(),
                 KeywordKind::Private => "Keyword::Private".blue(),
-                KeywordKind::SelfKw => "Keyword::This".blue(),
+                KeywordKind::SelfKw => "Keyword::SelfKw".blue(),
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
                 KeywordKind::Type => "Keyword::Type".purple(),

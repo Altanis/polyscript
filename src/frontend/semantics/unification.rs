@@ -2306,11 +2306,67 @@ impl SemanticAnalyzer {
                 }
             }
 
-            UnaryOperation { operand, .. } => self.is_const_expr(operand, name),
-            BinaryOperation { left, right, .. } => {
+            UnaryOperation { operator, operand } => {
+                self.is_const_expr(operand, name.clone())?;
+
+                let operand_type = operand.type_id.as_ref().unwrap();
+                let base_symbol_id = operand_type.get_base_symbol();
+                let base_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap();
+
+                if let TypeSymbolKind::Primitive(primitive_kind) = base_symbol.kind {
+                    if operator.to_default_trait_return_type(primitive_kind).is_some() {
+                        Ok(())
+                    } else {
+                        Err(self.create_error(
+                            ErrorKind::NonConstantInitializer(name, format!("operator `{}` is not a constant operation for type `{}`", operator, self.symbol_table.display_type(operand_type))),
+                            node.span,
+                            &[node.span],
+                        ))
+                    }
+                } else {
+                    Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, format!("unary operation on non-primitive type `{}`", self.symbol_table.display_type(operand_type))),
+                        node.span,
+                        &[node.span],
+                    ))
+                }
+            },
+            BinaryOperation { operator, left, right } => {
                 self.is_const_expr(left, name.clone())?;
-                self.is_const_expr(right, name)
-            }
+                self.is_const_expr(right, name.clone())?;
+
+                let left_type = left.type_id.as_ref().unwrap();
+                let right_type = right.type_id.as_ref().unwrap();
+
+                if left_type != right_type {
+                     return Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, format!("binary operation between incompatible types `{}` and `{}`", self.symbol_table.display_type(left_type), self.symbol_table.display_type(right_type))),
+                        node.span,
+                        &[left.span, right.span],
+                    ));
+                }
+
+                let base_symbol_id = left_type.get_base_symbol();
+                let base_symbol = self.symbol_table.get_type_symbol(base_symbol_id).unwrap();
+
+                if let TypeSymbolKind::Primitive(primitive_kind) = base_symbol.kind {
+                    if operator.to_default_trait_return_type(primitive_kind).is_some() {
+                        Ok(())
+                    } else {
+                        Err(self.create_error(
+                            ErrorKind::NonConstantInitializer(name, format!("operator `{}` is not a constant operation for type `{}`", operator, self.symbol_table.display_type(left_type))),
+                            node.span,
+                            &[node.span],
+                        ))
+                    }
+                } else {
+                    Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, format!("binary operation on non-primitive type `{}`", self.symbol_table.display_type(left_type))),
+                        node.span,
+                        &[node.span],
+                    ))
+                }
+            },
 
             StructLiteral { fields, .. } => {
                 for field_expr in fields.values() {

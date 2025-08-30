@@ -508,6 +508,92 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    // fn compile_const_expr(&mut self, node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
+    //     match &node.kind {
+    //         MIRNodeKind::IntegerLiteral(v) => Some(self.context.i64_type().const_int(*v as u64, true).into()),
+    //         MIRNodeKind::FloatLiteral(v) => Some(self.context.f64_type().const_float(*v).into()),
+    //         MIRNodeKind::BooleanLiteral(v) => Some(self.context.bool_type().const_int(*v as u64, false).into()),
+    //         MIRNodeKind::CharLiteral(v) => Some(self.context.i8_type().const_int(*v as u64, false).into()),
+    //         MIRNodeKind::StringLiteral(v) => {
+    //             let key = self.string_interner.intern(v);
+    //             if let Some(ptr) = self.string_literals.get(&key) {
+    //                 return Some(ptr.as_basic_value_enum());
+    //             }
+
+    //             let string_const = self.context.const_string(v.as_bytes(), true);
+    //             let global = self.module.add_global(string_const.get_type(), None, &format!(".str.{}", key));
+    //             global.set_initializer(&string_const);
+    //             global.set_constant(true);
+    //             global.set_linkage(Linkage::Private);
+
+    //             let ptr_type = string_const.get_type();
+    //             let zero = self.context.i32_type().const_int(0, false);
+    //             let ptr = unsafe { global.as_pointer_value().const_gep(ptr_type, &[zero, zero]) };
+    //             self.string_literals.insert(key, ptr);
+    //             Some(ptr.as_basic_value_enum())
+    //         },
+    //         MIRNodeKind::Identifier(_) | MIRNodeKind::FieldAccess { .. } => {
+    //             let value_id = node.value_id.unwrap();
+    //             self.constants.get(&value_id).copied()
+    //         }
+    //         MIRNodeKind::BinaryOperation { operator, left, right } => {
+    //             let l = self.compile_const_expr(left)?;
+    //             let r = self.compile_const_expr(right)?;
+
+    //             if l.is_float_value() {
+    //                 let l_f = l.into_float_value();
+    //                 let r_f = r.into_float_value();
+    //                 Some(match operator {
+    //                     Operation::Plus => l_f.const_add(r_f).into(),
+    //                     Operation::Minus => l_f.const_sub(r_f).into(),
+    //                     Operation::Mul => l_f.const_mul(r_f).into(),
+    //                     Operation::Div => l_f.const_div(r_f).into(),
+    //                     Operation::Mod => l_f.const_rem(r_f).into(),
+    //                     _ => return None
+    //                 })
+    //             } else {
+    //                 let l_i = l.into_int_value();
+    //                 let r_i = r.into_int_value();
+    //                  Some(match operator {
+    //                     Operation::Plus => l_i.const_add(r_i).into(),
+    //                     Operation::Minus => l_i.const_sub(r_i).into(),
+    //                     Operation::Mul => l_i.const_mul(r_i).into(),
+    //                     Operation::Div => l_i.const_signed_div(r_i).into(),
+    //                     Operation::Mod => l_i.const_signed_rem(r_i).into(),
+    //                     Operation::BitwiseAnd => l_i.const_and(r_i).into(),
+    //                     Operation::BitwiseOr => l_i.const_or(r_i).into(),
+    //                     Operation::BitwiseXor => l_i.const_xor(r_i).into(),
+    //                     _ => return None
+    //                 })
+    //             }
+    //         },
+    //         MIRNodeKind::StructLiteral { fields, .. } => {
+    //             let struct_type = node.type_id.as_ref().unwrap();
+    //             let llvm_struct_type = self.map_semantic_type(struct_type).unwrap().into_struct_type();
+                
+    //             let Type::Base { symbol, .. } = struct_type else { unreachable!() };
+    //             let struct_type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+    //             let TypeSymbolKind::Struct((scope_id, _)) = struct_type_symbol.kind else { unreachable!() };
+                
+    //             let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+    //             let mut sorted_field_symbols: Vec<_> = scope.values.values()
+    //                 .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+    //                 .collect();
+    //             sorted_field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+    //             let mut const_fields = Vec::new();
+    //             for field_symbol in sorted_field_symbols {
+    //                 let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
+    //                 let field_expr = fields.get(field_name).unwrap();
+    //                 const_fields.push(self.compile_const_expr(field_expr)?);
+    //             }
+
+    //             Some(llvm_struct_type.const_named_struct(&const_fields).into())
+    //         },
+    //         _ => None
+    //     }
+    // }
+
     fn compile_integer_literal(&mut self, value: i64) -> BasicValueEnum<'ctx> {
         self.context.i64_type()
             .const_int(value as u64, true)
