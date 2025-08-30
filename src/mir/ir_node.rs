@@ -118,7 +118,6 @@ pub enum MIRNodeKind {
         arguments: Vec<MIRNode>,
     },
 
-    PrintStatement(Box<MIRNode>),
     ExpressionStatement(Box<MIRNode>),
 
     Program(Vec<MIRNode>),
@@ -228,8 +227,7 @@ impl MIRNode {
                 let mut children = vec![function.as_mut()];
                 children.extend(arguments.iter_mut());
                 children
-            },
-            PrintStatement(expr) => vec![expr.as_mut()],
+            }
             ExpressionStatement(expr) => vec![expr.as_mut()],
         }
     }
@@ -327,9 +325,8 @@ impl MIRNode {
                 let mut children = vec![function.as_ref()];
                 children.extend(arguments.iter());
                 children
-            },
-            PrintStatement(expr) => vec![expr.as_ref()],
-            ExpressionStatement(expr) => vec![expr.as_ref()]
+            }
+            ExpressionStatement(expr) => vec![expr.as_ref()],
         }
     }
 }
@@ -646,11 +643,6 @@ impl MIRNode {
                     param.fmt_with_indent(f, 0, table)?;
                 }
                 write!(f, ")")?;
-            }
-
-            MIRNodeKind::PrintStatement(expr) => {
-                write!(f, "{}print ", indent_str)?;
-                expr.fmt_with_indent(f, 0, table)?;
             }
 
             MIRNodeKind::ExpressionStatement(expr) => {

@@ -548,53 +548,6 @@ impl SymbolTable {
         self.current_scope_id = old_scope;
     }
 
-    fn add_print_builtin(&mut self) -> ValueSymbolId {
-        let old_scope = self.current_scope_id;
-        self.current_scope_id = 0;
-
-        let print_fn_scope_id = self.enter_scope(ScopeKind::Function);
-
-        let generic_t_id = self
-            .add_type_symbol(
-                "T",
-                TypeSymbolKind::Generic(vec![]),
-                vec![],
-                QualifierKind::Public,
-                None,
-            )
-            .unwrap();
-
-        let print_fn_sig_id = self
-            .add_type_symbol(
-                "#print_sig",
-                TypeSymbolKind::FunctionSignature {
-                    params: vec![Type::new_base(generic_t_id)],
-                    return_type: Type::new_base(self.find_type_symbol("void").unwrap().id),
-                    instance: None,
-                },
-                vec![generic_t_id],
-                QualifierKind::Private,
-                None,
-            )
-            .unwrap();
-
-        self.exit_scope();
-
-        let print_fn_id = self
-            .add_value_symbol(
-                "print",
-                ValueSymbolKind::Function(print_fn_scope_id, HashSet::new()),
-                false,
-                QualifierKind::Public,
-                Some(Type::new_base(print_fn_sig_id)),
-                None,
-            )
-            .unwrap();
-        
-        self.current_scope_id = old_scope;
-        print_fn_id
-    }
-
     pub fn add_value_symbol(
         &mut self,
         name: &str,
@@ -1036,7 +989,6 @@ pub struct SemanticAnalyzer {
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     pub uv_collection_ctx: UVCollectionContext,
-    pub print_fn_id: ValueSymbolId,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
 }
@@ -1044,7 +996,6 @@ pub struct SemanticAnalyzer {
 impl SemanticAnalyzer {
     pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
         let mut symbol_table = SymbolTable::new(lines.clone());
-        let print_fn_id = symbol_table.add_print_builtin();
         let mut trait_registry = TraitRegistry::new();
 
         symbol_table.populate_with_defaults(&mut trait_registry);
@@ -1059,7 +1010,6 @@ impl SemanticAnalyzer {
             builtin_types,
             unification_context: UnificationContext::default(),
             uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false, current_function_stack: vec![] },
-            print_fn_id,
             errors: vec![],
             lines,
         }
