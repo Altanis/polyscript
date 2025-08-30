@@ -71,6 +71,7 @@ impl Compiler {
         file_queue.push_back(entry_path.clone());
 
         let mut all_modules_paths = vec![entry_path.clone()];
+        let mut dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
 
         while let Some(current_path) = file_queue.pop_front() {
             if self.modules.contains_key(&current_path) {
@@ -81,6 +82,7 @@ impl Compiler {
             let (lined_source, tokens) = self.generate_tokens(source_code);
             let mut ast = self.parse_tokens(lined_source.clone(), tokens.clone());
 
+            let mut dependencies = Vec::new();
             if let AstNodeKind::Program(stmts) = &ast.kind {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
@@ -89,6 +91,7 @@ impl Compiler {
                         let canonical_dep_path = fs::canonicalize(&dep_path)
                             .unwrap_or_else(|_| panic!("Failed to resolve import path: {:?}", dep_path));
                         
+                        dependencies.push(canonical_dep_path.clone());
                         if !all_modules_paths.contains(&canonical_dep_path) {
                             file_queue.push_back(canonical_dep_path.clone());
                             all_modules_paths.push(canonical_dep_path);
@@ -97,7 +100,9 @@ impl Compiler {
                 }
             }
             
-            self.analyzer.symbol_table.current_scope_id = 0;
+            dep_graph.insert(current_path.clone(), dependencies);
+            
+            self.analyzer.symbol_table.current_scope_id = self.analyzer.symbol_table.real_starting_scope;
             let module_scope_id = self.analyzer.symbol_table.enter_scope(crate::frontend::semantics::analyzer::ScopeKind::Block);
             ast.scope_id = Some(module_scope_id);
 
@@ -111,6 +116,45 @@ impl Compiler {
 
             self.modules.insert(current_path, module);
         }
+
+        let mut rev_dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        let mut out_degrees: HashMap<PathBuf, usize> = HashMap::new();
+
+        for (module_path, deps) in &dep_graph {
+            out_degrees.entry(module_path.clone()).or_insert(deps.len());
+            for dep in deps {
+                rev_dep_graph.entry(dep.clone()).or_default().push(module_path.clone());
+                out_degrees.entry(dep.clone()).or_insert(0);
+            }
+        }
+        
+        let mut queue: VecDeque<PathBuf> = VecDeque::new();
+        for path in &all_modules_paths {
+            if out_degrees.get(path).cloned().unwrap_or(0) == 0 {
+                queue.push_back(path.clone());
+            }
+        }
+        
+        let mut sorted_modules_paths: Vec<PathBuf> = Vec::new();
+        while let Some(path) = queue.pop_front() {
+            sorted_modules_paths.push(path.clone());
+
+            if let Some(dependents) = rev_dep_graph.get(&path) {
+                for dependent in dependents {
+                    let degree = out_degrees.get_mut(dependent).unwrap();
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(dependent.clone());
+                    }
+                }
+            }
+        }
+
+        if sorted_modules_paths.len() != all_modules_paths.len() {
+            panic!("Cyclic dependency detected in modules.");
+        }
+        
+        let all_modules_paths = sorted_modules_paths;
 
         for path in &all_modules_paths {
             let module = self.modules.get_mut(path).unwrap();
@@ -150,11 +194,10 @@ impl Compiler {
         let mir_builder_fmt = if DEBUG { format!("{}", mir_builder) } else { String::new() };
         std::mem::drop(mir_builder);
 
+        self.optimize(&mut mir_program);
+
         let mut mir_program_fmt = String::new();
         if DEBUG { let _ = mir_program.fmt_with_indent(&mut mir_program_fmt, 0, Some(&self.analyzer.symbol_table)); }
-
-        self.optimize(&mut mir_program);
-        self.compile_mir(mir_program);
 
         if DEBUG {
             println!("-- SEMANTIC ANALYZER --");
@@ -166,6 +209,8 @@ impl Compiler {
             println!("-- MIR PROGRAM --");
             println!("{}", mir_program_fmt);
         }
+
+        self.compile_mir(mir_program);
     }
 
     fn resolve_exports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {

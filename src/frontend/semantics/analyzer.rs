@@ -267,7 +267,7 @@ pub struct SymbolTable {
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
 
-    real_starting_scope: ScopeId,
+    pub real_starting_scope: ScopeId,
 }
 
 impl SymbolTable {
