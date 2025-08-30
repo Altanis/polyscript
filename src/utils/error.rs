@@ -40,6 +40,7 @@ pub enum ErrorKind {
     SelfOutsideImpl,
     InvalidSelf(&'static str),
     ExpectedIdentifier,
+    ExpectedInteger,
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
     ArityMismatch(usize, usize),
@@ -139,9 +140,8 @@ impl ErrorKind {
             ErrorKind::TypeAnnotationNeeded(id) => format!("cannot infer type for this; a type annotation may be needed (#uv_{})", id),
             ErrorKind::SelfOutsideImpl => "use of Self outside of an impl block".to_string(),
             ErrorKind::InvalidSelf(place) => format!("found \"self\" {place}"),
-            ErrorKind::ExpectedIdentifier => {
-                "expected an identifier for the rhs of a field access operation".to_string()
-            }
+            ErrorKind::ExpectedIdentifier => "expected an identifier for the rhs of a field access operation".to_string(),
+            ErrorKind::ExpectedInteger => "expected an integer literal in this position".to_string(),
             ErrorKind::TypeMismatch(t1, t2, str) => {
                 format!("types {t1} and {t2} are incompatible{}", match str {
                     Some(s) => format!(" [{s}]"),

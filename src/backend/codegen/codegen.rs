@@ -1202,8 +1202,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut current_discriminant: i64 = 0;
 
         for (variant_name, (_variant_node, initializer_opt)) in variants.iter() {
-            if let Some(initializer) = initializer_opt && let MIRNodeKind::IntegerLiteral(val) = initializer.kind {
-                current_discriminant = val;
+            if let Some(val) = initializer_opt {
+                current_discriminant = *val;
             }
 
             let variant_symbol = self.analyzer.symbol_table.find_value_symbol_in_scope(variant_name, scope_id).unwrap();

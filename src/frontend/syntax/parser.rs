@@ -1433,8 +1433,12 @@ impl Parser {
                 };
 
                 if parser.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
-                    parser.advance();
-                    variants.insert(name.clone(), (variant, Some(parser.parse_expression()?)));
+                    let expr = parser.parse_expression()?;
+                    let AstNodeKind::IntegerLiteral(num) = expr.kind else {
+                        return Err(parser.generate_error(ErrorKind::ExpectedInteger, parser.create_span_from_current_token()));
+                    };
+
+                    variants.insert(name.clone(), (variant, Some(num)));
                 } else {
                     variants.insert(name.clone(), (variant, None));
                 }

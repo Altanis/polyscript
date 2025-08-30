@@ -2380,14 +2380,6 @@ impl SemanticAnalyzer {
             StructDeclaration { fields, .. } => {
                 for f in fields { self.generic_value_check_node(f)?; }
             },
-            EnumDeclaration { variants, .. } => {
-                for (_, expr_opt) in variants.values_mut() {
-                    if let Some(expr) = expr_opt {
-                        self.check_node_is_not_generic_fn(expr)?;
-                        self.generic_value_check_node(expr)?;
-                    }
-                }
-            },
             ImplDeclaration { associated_constants, associated_functions, .. } => {
                 for c in associated_constants { self.generic_value_check_node(c)?; }
                 for f in associated_functions { self.generic_value_check_node(f)?; }
@@ -2473,7 +2465,7 @@ impl SemanticAnalyzer {
             Identifier(_) | EnumVariant(_) | Break | Continue | SelfExpr | FunctionParameter {..} |
             StructField {..} | TraitDeclaration {..} | TraitConstant {..} |
             TraitType(_) | GenericParameter {..} | ReferenceType {..} | TypeReference {..} |
-            TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} => {}
+            TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} | EnumDeclaration {..} => {}
         }
         Ok(())
     }

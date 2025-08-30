@@ -112,7 +112,7 @@ pub enum AstNodeKind {
 
     EnumDeclaration {
         name: String,
-        variants: IndexMap<String, (AstNode, Option<AstNode>)>,
+        variants: IndexMap<String, (AstNode, Option<i64>)>,
     },
     EnumVariant(String),
 
@@ -683,13 +683,12 @@ impl AstNode {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
 
-                for (_, (variant, expr)) in variants {
+                for (_, (variant, num)) in variants {
                     write!(f, "{}", " ".repeat(child_indent + 4))?;
                     variant.fmt_with_indent(f, 0, table)?;
 
-                    if let Some(expr) = expr {
-                        write!(f, " = ")?;
-                        expr.fmt_with_indent(f, 0, table)?;
+                    if let Some(num) = num {
+                        write!(f, " = {}", num)?;
                     }
                     writeln!(f)?;
                 }
@@ -1054,15 +1053,12 @@ impl AstNode {
             EnumDeclaration { variants, .. } => {
                 let mut children = vec![];
 
-                for (_, (variant_node, opt_payload)) in variants.iter_mut() {
+                for (_, (variant_node, _)) in variants.iter_mut() {
                     children.push(variant_node);
-                    if let Some(payload) = opt_payload.as_mut() {
-                        children.push(payload);
-                    }
                 }
 
                 children
-            }
+            },
 
             ImplDeclaration {
                 generic_parameters,
@@ -1368,11 +1364,8 @@ impl AstNode {
             EnumDeclaration { variants, .. } => {
                 let mut children = vec![];
 
-                for (_, (variant_node, opt_payload)) in variants.iter() {
+                for (_, (variant_node, _)) in variants.iter() {
                     children.push(variant_node);
-                    if let Some(payload) = opt_payload.as_ref() {
-                        children.push(payload);
-                    }
                 }
 
                 children

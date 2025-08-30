@@ -973,7 +973,7 @@ impl<'a> MIRBuilder<'a> {
                     .map(|(k, (v, e))| {
                         (
                             k.clone(),
-                            (self.lower_node(v).unwrap(), e.as_mut().map(|expr| self.lower_node(expr).unwrap())),
+                            (self.lower_node(v).unwrap(), *e),
                         )
                     })
                     .collect(),

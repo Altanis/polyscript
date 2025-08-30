@@ -103,7 +103,7 @@ pub enum MIRNodeKind {
 
     EnumDeclaration {
         name: String,
-        variants: IndexMap<String, (MIRNode, Option<MIRNode>)>,
+        variants: IndexMap<String, (MIRNode, Option<i64>)>,
     },
     EnumVariant(String),
 
@@ -211,14 +211,8 @@ impl MIRNode {
             StructLiteral { fields, .. } => fields.values_mut().collect(),
             EnumDeclaration { variants, .. } => variants
                 .iter_mut()
-                .flat_map(|(_, (v_node, e_node_opt))| {
-                    let mut nodes: Vec<&mut MIRNode> = vec![v_node];
-                    if let Some(e_node) = e_node_opt.as_mut() {
-                        nodes.push(e_node);
-                    }
-                    nodes.into_iter()
-                })
-                .collect(),
+                .map(|(_, (v_node, _))| v_node)
+                .collect::<Vec<&mut MIRNode>>(),
             FieldAccess { left, right } => vec![left.as_mut(), right.as_mut()],
             FunctionCall {
                 function,
@@ -309,14 +303,8 @@ impl MIRNode {
             StructLiteral { fields, .. } => fields.values().collect(),
             EnumDeclaration { variants, .. } => variants
                 .iter()
-                .flat_map(|(_, (v_node, e_node_opt))| {
-                    let mut nodes: Vec<&MIRNode> = vec![v_node];
-                    if let Some(e_node) = e_node_opt.as_ref() {
-                        nodes.push(e_node);
-                    }
-                    nodes.into_iter()
-                })
-                .collect(),
+                .map(|(_, (v_node, _))| v_node)
+                .collect::<Vec<&MIRNode>>(),
             FieldAccess { left, right } => vec![left.as_ref(), right.as_ref()],
             FunctionCall {
                 function,
@@ -608,12 +596,11 @@ impl MIRNode {
                 write!(f, "{}enum {}", indent_str, name.yellow())?;
                 writeln!(f, " {}", "{".dimmed())?;
 
-                for (_, (variant, expr)) in variants {
+                for (_, (variant, num)) in variants {
                     variant.fmt_with_indent(f, child_indent, table)?;
 
-                    if let Some(expr) = expr {
-                        write!(f, " = ")?;
-                        expr.fmt_with_indent(f, 0, table)?;
+                    if let Some(num) = num {
+                        write!(f, " = {}", num)?;
                     }
                     writeln!(f, ",")?;
                 }
