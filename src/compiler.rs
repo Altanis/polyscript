@@ -145,9 +145,27 @@ impl Compiler {
             }
         }
 
-        let (_, mut mir_program) = self.lower_ast_to_mir(entry_path);
+        let (mir_builder, mut mir_program) = self.lower_ast_to_mir(entry_path);
+
+        let mir_builder_fmt = if DEBUG { format!("{}", mir_builder) } else { String::new() };
+        std::mem::drop(mir_builder);
+
+        let mut mir_program_fmt = String::new();
+        if DEBUG { let _ = mir_program.fmt_with_indent(&mut mir_program_fmt, 0, Some(&self.analyzer.symbol_table)); }
+
         self.optimize(&mut mir_program);
         self.compile_mir(mir_program);
+
+        if DEBUG {
+            println!("-- SEMANTIC ANALYZER --");
+            println!("{}", &self.analyzer);
+
+            println!("-- MIR BUILDER --");
+            println!("{}", mir_builder_fmt);
+
+            println!("-- MIR PROGRAM --");
+            println!("{}", mir_program_fmt);
+        }
     }
 
     fn resolve_exports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
