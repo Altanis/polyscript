@@ -372,21 +372,6 @@ impl Compiler {
         }
     }
 
-    fn analyze_ast(&self, lined_source: Vec<String>, mut program: AstNode) -> (AstNode, SemanticAnalyzer) {
-        let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
-        match analyzer.analyze(&mut program) {
-            Err(errs) => {
-                println!("{} errors emitted... printing:", errs.len());
-                for err in errs {
-                    eprintln!("{}", err);
-                }
-
-                std::process::exit(1);
-            },
-            Ok(_) => (program, analyzer)
-        }
-    }
-
     fn lower_ast_to_mir<'s>(&'s mut self, compilation_order: &[PathBuf]) -> (MIRBuilder<'s>, MIRNode) {
         let mut builder = MIRBuilder::new(&mut self.analyzer);
         let mut all_mir_stmts = vec![];

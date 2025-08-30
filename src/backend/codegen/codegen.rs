@@ -338,8 +338,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 && let Some(clone_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("clone", imp.impl_scope_id)
                 && let Some(clone_fn_val) = self.functions.get(&clone_fn_symbol.id).copied()
             {
-                let call = self.builder.build_call(clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
-                let cloned_val = call.try_as_basic_value().left().unwrap();
+                let cloned_val = if self.is_rvo_candidate(ty) {
+                    let return_llvm_type = self.map_semantic_type(ty).unwrap();
+                    let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "clone_rvo_ret_ptr").unwrap();
+
+                    let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), original_data_ptr.into()];
+
+                    self.builder.build_call(clone_fn_val, &args, "").unwrap();
+                    self.builder.build_load(return_llvm_type, rvo_return_ptr, "cloned_val").unwrap()
+                } else {
+                    let call = self.builder.build_call(clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
+                    call.try_as_basic_value().left().unwrap()
+                };
+                
                 self.builder.build_return(Some(&cloned_val)).unwrap();
                 
                 if let Some(block) = old_block { self.builder.position_at_end(block); }
