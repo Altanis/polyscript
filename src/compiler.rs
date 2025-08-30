@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -71,7 +71,6 @@ impl Compiler {
         file_queue.push_back(entry_path.clone());
 
         let mut all_modules_paths = vec![entry_path.clone()];
-        let mut dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
 
         while let Some(current_path) = file_queue.pop_front() {
             if self.modules.contains_key(&current_path) {
@@ -82,7 +81,6 @@ impl Compiler {
             let (lined_source, tokens) = self.generate_tokens(source_code);
             let mut ast = self.parse_tokens(lined_source.clone(), tokens.clone());
 
-            let mut dependencies = Vec::new();
             if let AstNodeKind::Program(stmts) = &ast.kind {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
@@ -91,7 +89,6 @@ impl Compiler {
                         let canonical_dep_path = fs::canonicalize(&dep_path)
                             .unwrap_or_else(|_| panic!("Failed to resolve import path: {:?}", dep_path));
                         
-                        dependencies.push(canonical_dep_path.clone());
                         if !all_modules_paths.contains(&canonical_dep_path) {
                             file_queue.push_back(canonical_dep_path.clone());
                             all_modules_paths.push(canonical_dep_path);
@@ -99,8 +96,6 @@ impl Compiler {
                     }
                 }
             }
-            
-            dep_graph.insert(current_path.clone(), dependencies);
             
             self.analyzer.symbol_table.current_scope_id = self.analyzer.symbol_table.real_starting_scope;
             let module_scope_id = self.analyzer.symbol_table.enter_scope(crate::frontend::semantics::analyzer::ScopeKind::Block);
@@ -116,86 +111,6 @@ impl Compiler {
 
             self.modules.insert(current_path, module);
         }
-
-        let mut rev_dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-        let mut out_degrees: HashMap<PathBuf, usize> = HashMap::new();
-
-        for (module_path, deps) in &dep_graph {
-            out_degrees.entry(module_path.clone()).or_insert(deps.len());
-            for dep in deps {
-                rev_dep_graph.entry(dep.clone()).or_default().push(module_path.clone());
-                out_degrees.entry(dep.clone()).or_insert(0);
-            }
-        }
-        
-        let mut queue: VecDeque<PathBuf> = VecDeque::new();
-        for path in &all_modules_paths {
-            if out_degrees.get(path).cloned().unwrap_or(0) == 0 {
-                queue.push_back(path.clone());
-            }
-        }
-        
-        let mut sorted_modules_paths: Vec<PathBuf> = Vec::new();
-        while let Some(path) = queue.pop_front() {
-            sorted_modules_paths.push(path.clone());
-
-            if let Some(dependents) = rev_dep_graph.get(&path) {
-                for dependent in dependents {
-                    let degree = out_degrees.get_mut(dependent).unwrap();
-                    *degree -= 1;
-                    if *degree == 0 {
-                        queue.push_back(dependent.clone());
-                    }
-                }
-            }
-        }
-
-        if sorted_modules_paths.len() != all_modules_paths.len() {
-            let cycle_nodes: HashSet<_> = all_modules_paths.iter()
-                .filter(|p| !sorted_modules_paths.contains(p))
-                .cloned()
-                .collect();
-            
-            let start_node = cycle_nodes.iter().next().unwrap();
-
-            fn find_cycle_dfs(current: &Path, dep_graph: &HashMap<PathBuf, Vec<PathBuf>>, visited: &mut HashSet<PathBuf>, recursion_stack: &mut HashSet<PathBuf>, path: &mut Vec<PathBuf>) -> Option<Vec<PathBuf>> {
-                visited.insert(current.to_path_buf());
-                recursion_stack.insert(current.to_path_buf());
-                path.push(current.to_path_buf());
-
-                if let Some(dependencies) = dep_graph.get(current) {
-                    for dep in dependencies {
-                        if recursion_stack.contains(dep) {
-                            let mut cycle_path = path.clone();
-                            cycle_path.push(dep.clone());
-                            let cycle_start_index = cycle_path.iter().position(|p| p == dep).unwrap();
-                            return Some(cycle_path[cycle_start_index..].to_vec());
-                        }
-
-                        if !visited.contains(dep) && let Some(cycle) = find_cycle_dfs(dep, dep_graph, visited, recursion_stack, path) {
-                            return Some(cycle);
-                        }
-                    }
-                }
-
-                path.pop();
-                recursion_stack.remove(current);
-                None
-            }
-
-            let mut visited = HashSet::new();
-            if let Some(cycle) = find_cycle_dfs(start_node, &dep_graph, &mut visited, &mut HashSet::new(), &mut Vec::new()) {
-                let cycle_str = cycle.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" -> ");
-                eprintln!("Error: Cyclic dependency detected between modules: {}", cycle_str);
-            } else {
-                 let remaining_nodes_str = cycle_nodes.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(", ");
-                eprintln!("Error: Cyclic dependency detected involving: {}", remaining_nodes_str);
-            }
-            
-            std::process::exit(1);
-        }
-        
-        let all_modules_paths = sorted_modules_paths;
 
         for path in &all_modules_paths {
             let module = self.modules.get_mut(path).unwrap();
