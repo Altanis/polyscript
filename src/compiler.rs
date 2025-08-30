@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,7 +10,7 @@ use inkwell::OptimizationLevel;
 
 use crate::backend::codegen::codegen::CodeGen;
 use crate::backend::optimizations::{capture_analysis, escape_analysis};
-use crate::frontend::semantics::analyzer::{ScopeId, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
+use crate::frontend::semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::frontend::syntax::parser::Parser;
@@ -70,10 +70,11 @@ impl Compiler {
         let entry_path = fs::canonicalize(&self.config.entry_file).expect("Failed to find entry file.");
         file_queue.push_back(entry_path.clone());
 
-        let mut all_modules_paths = vec![entry_path.clone()];
+        let mut dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        let mut visited_for_discovery: HashSet<PathBuf> = HashSet::new();
 
         while let Some(current_path) = file_queue.pop_front() {
-            if self.modules.contains_key(&current_path) {
+            if !visited_for_discovery.insert(current_path.clone()) {
                 continue;
             }
 
@@ -81,6 +82,7 @@ impl Compiler {
             let (lined_source, tokens) = self.generate_tokens(source_code);
             let mut ast = self.parse_tokens(lined_source.clone(), tokens.clone());
 
+            let mut dependencies = vec![];
             if let AstNodeKind::Program(stmts) = &ast.kind {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
@@ -89,16 +91,15 @@ impl Compiler {
                         let canonical_dep_path = fs::canonicalize(&dep_path)
                             .unwrap_or_else(|_| panic!("Failed to resolve import path: {:?}", dep_path));
                         
-                        if !all_modules_paths.contains(&canonical_dep_path) {
-                            file_queue.push_back(canonical_dep_path.clone());
-                            all_modules_paths.push(canonical_dep_path);
-                        }
+                        dependencies.push(canonical_dep_path.clone());
+                        file_queue.push_back(canonical_dep_path);
                     }
                 }
             }
+            dep_graph.insert(current_path.clone(), dependencies);
             
             self.analyzer.symbol_table.current_scope_id = self.analyzer.symbol_table.real_starting_scope;
-            let module_scope_id = self.analyzer.symbol_table.enter_scope(crate::frontend::semantics::analyzer::ScopeKind::Block);
+            let module_scope_id = self.analyzer.symbol_table.enter_scope(ScopeKind::Block);
             ast.scope_id = Some(module_scope_id);
 
             let module = Module {
@@ -111,8 +112,13 @@ impl Compiler {
 
             self.modules.insert(current_path, module);
         }
+        
+        let compilation_order = match self.topological_sort(&dep_graph) {
+            Ok(order) => order,
+            Err(_) => std::process::exit(1),
+        };
 
-        for path in &all_modules_paths {
+        for path in &compilation_order {
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
             
@@ -125,15 +131,15 @@ impl Compiler {
             }
         }
 
-        for path in &all_modules_paths {
+        for path in &compilation_order {
             self.resolve_exports_for_module(path).unwrap();
         }
 
-        for path in &all_modules_paths {
+        for path in &compilation_order {
             self.link_imports_for_module(path).unwrap();
         }
         
-        for path in &all_modules_paths {
+        for path in &compilation_order {
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
             self.analyzer.set_source(module.lined_source.clone());
@@ -167,6 +173,48 @@ impl Compiler {
         }
 
         self.compile_mir(mir_program);
+    }
+
+    fn topological_sort_util(
+        node: &PathBuf,
+        dep_graph: &HashMap<PathBuf, Vec<PathBuf>>,
+        visited: &mut HashSet<PathBuf>,
+        recursion_stack: &mut HashSet<PathBuf>,
+        sorted: &mut Vec<PathBuf>,
+    ) -> Result<(), ()> {
+        visited.insert(node.clone());
+        recursion_stack.insert(node.clone());
+
+        if let Some(dependencies) = dep_graph.get(node) {
+            for dependency in dependencies {
+                if !visited.contains(dependency) {
+                    if Self::topological_sort_util(dependency, dep_graph, visited, recursion_stack, sorted).is_err() {
+                        return Err(());
+                    }
+                } else if recursion_stack.contains(dependency) {
+                    eprintln!("Error: Circular dependency detected involving module {:?}", dependency);
+                    return Err(());
+                }
+            }
+        }
+        
+        recursion_stack.remove(node);
+        sorted.push(node.clone());
+        Ok(())
+    }
+
+    fn topological_sort(&self, dep_graph: &HashMap<PathBuf, Vec<PathBuf>>) -> Result<Vec<PathBuf>, ()> {
+        let mut visited = HashSet::new();
+        let mut recursion_stack = HashSet::new();
+        let mut sorted = Vec::new();
+
+        for node in dep_graph.keys() {
+            if !visited.contains(node) {
+                Self::topological_sort_util(node, dep_graph, &mut visited, &mut recursion_stack, &mut sorted)?;
+            }
+        }
+
+        Ok(sorted)
     }
 
     fn resolve_exports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
