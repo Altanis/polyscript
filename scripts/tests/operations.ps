@@ -8,22 +8,22 @@ struct Vector2D {
     y: int;
 }
 
-impl Add for Vector2D {
+impl Add<Vector2D> for Vector2D {
     type Output = Vector2D;
-    fn add(&self, other: &Self): Self.Output {
+    fn add(self, other: Self): [Self as Add<Vector2D>].Output {
         Vector2D {
-            x: this.x + other.x,
-            y: this.y + other.y
+            x: self.x + other.x,
+            y: self.y + other.y
         }
     }
 }
 
 impl Multiply<int> for Vector2D {
     type Output = Vector2D;
-    fn add(&self, other: int): Self.Output {
+    fn multiply(self, other: int): [Self as Multiply<int>].Output {
         Vector2D {
-            x: this.x * other,
-            y: this.y * other
+            x: self.x * other,
+            y: self.y * other
         }
     }
 }

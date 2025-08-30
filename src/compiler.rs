@@ -17,7 +17,7 @@ use crate::mir::builder::MIRBuilder;
 use crate::mir::ir_node::MIRNode;
 use crate::utils::kind::Token;
 
-pub const DEBUG: bool = false;
+pub const DEBUG: bool = true;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EmitType {

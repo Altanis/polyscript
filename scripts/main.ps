@@ -1,4 +1,3 @@
-// real compiler that takes file input
 // import/export system
 // default traits such as Drop, Clone, Default, ToString
 // stdlib
@@ -8,15 +7,3 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Pair {
-    x: &'heap mut int;
-    y: &'heap mut int;
-}
-
-{
-    let p1: &'heap mut Pair = heap Pair { x: heap 1, y: heap 2 };
-    let p2: &'heap mut Pair = p1;
-
-    let a: int = *p2.x; // copy to stack
-    let b: int = *p2.y; // copy to stack
-}

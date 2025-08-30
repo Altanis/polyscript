@@ -31,5 +31,7 @@ impl Vector2D {
     public fn do_nothing(&self) {}
 }
 
-let vector = Vector2D.new(3, 4).do_nothing();
+let vector = Vector2D.new(3, 4);
+vector.do_nothing();
 vector.x;
+// vector.y <- error
