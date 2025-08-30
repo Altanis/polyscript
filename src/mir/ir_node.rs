@@ -119,6 +119,7 @@ pub enum MIRNodeKind {
     },
 
     ExpressionStatement(Box<MIRNode>),
+    SizeofExpression(Type),
 
     Program(Vec<MIRNode>),
 }
@@ -223,6 +224,7 @@ impl MIRNode {
                 children
             }
             ExpressionStatement(expr) => vec![expr.as_mut()],
+            SizeofExpression(_) => vec![]
         }
     }
 
@@ -315,6 +317,7 @@ impl MIRNode {
                 children
             }
             ExpressionStatement(expr) => vec![expr.as_ref()],
+            SizeofExpression(_) => vec![]
         }
     }
 }
@@ -635,6 +638,14 @@ impl MIRNode {
             MIRNodeKind::ExpressionStatement(expr) => {
                 expr.fmt_with_indent(f, indent, table)?;
                 write!(f, ";")?;
+            },
+            MIRNodeKind::SizeofExpression(ty) => {
+                write!(f, "{}sizeof ", indent_str)?;
+                if let Some(t) = table {
+                    write!(f, "{}", t.display_type(ty).bright_blue())?;
+                } else {
+                    write!(f, "{}", ty.to_string().bright_blue())?;
+                }
             }
         }
 

@@ -52,6 +52,7 @@ pub const HEAP_KEYWORD: &str = "heap";
 pub const IMPORT_KEYWORD: &str = "import";
 pub const FROM_KEYWORD: &str = "from";
 pub const EXPORT_KEYWORD: &str = "export";
+pub const SIZEOF_KEYWORD: &str = "sizeof";
 
 pub const END_OF_LINE: char = ';';
 pub const OPEN_PARENTHESIS: char = '(';
@@ -482,7 +483,8 @@ pub enum KeywordKind {
     Heap,
     Import,
     From,
-    Export
+    Export,
+    Sizeof
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -706,6 +708,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::Import => "Keyword::Import".yellow(),
                 KeywordKind::From => "Keyword::From".yellow(),
                 KeywordKind::Export => "Keyword::Export".yellow(),
+                KeywordKind::Sizeof => "Keyword::Sizeof".purple()
             },
             TokenKind::Semicolon => "Semicolon".dimmed(),
             TokenKind::OpenParenthesis => "OpenParen".dimmed(),

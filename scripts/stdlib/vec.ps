@@ -1,1 +1,33 @@
 import { alloc, free } from "@intrinsics";
+
+const nullptr: int = 0x0;
+
+struct Vec<T> {
+    private size: int;
+    private capacity: int;
+    private element_size: int;
+    private data: int;
+}
+
+impl<T> Drop for Vec<T> {
+    fn drop(&mut self) {
+        if (self.capacity != 0) {
+            free(self.data);
+
+            self.size = 0;
+            self.capacity = 0;
+            self.data = nullptr;
+        }
+    }
+}
+
+impl<T> Vec<T> {
+    pub fn new(): Self {
+        Self {
+            size: 0,
+            capacity: 0,
+            element_size: sizeof T,
+            data: nullptr
+        }
+    }
+}

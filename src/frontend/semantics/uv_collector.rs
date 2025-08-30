@@ -1506,6 +1506,16 @@ impl SemanticAnalyzer {
                     info,
                 );
             },
+            SizeofExpression(ty_node) => {
+                self.collect_uvs(ty_node)?;
+                self.unification_context.register_constraint(
+                    Constraint::Equality(
+                        uv.clone(),
+                        Type::new_base(self.get_primitive_type(PrimitiveKind::Int)),
+                    ),
+                    info,
+                );
+            },
             ImportStatement { .. } | ExportStatement { .. } | Program(_) => unreachable!()
         }
 

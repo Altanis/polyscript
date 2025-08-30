@@ -6,22 +6,13 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar {
-    x: int;
-}
+let x: int = sizeof int;
 
-impl Drop for Scalar {
-    fn drop(&mut self) {
-        let x = 2 + 3;
+struct Scalar<T> {}
+impl<T> Scalar<T> {
+    fn get_sizeof(): int {
+        sizeof T
     }
 }
 
-impl Clone for Scalar {
-    fn clone(&self): Self {
-        Scalar { x: self.x + 1 }
-    }
-}
-
-{
-    let a: &'heap mut Scalar = heap Scalar { x: 2 };
-}
+let y = [Scalar<float>].get_sizeof();

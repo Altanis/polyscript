@@ -350,7 +350,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let call = self.builder.build_call(clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
                     call.try_as_basic_value().left().unwrap()
                 };
-                
+
                 self.builder.build_return(Some(&cloned_val)).unwrap();
                 
                 if let Some(block) = old_block { self.builder.position_at_end(block); }
@@ -1751,6 +1751,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             MIRNodeKind::FunctionCall { function, arguments } => self.compile_function_call(function, arguments),
             MIRNodeKind::FieldAccess { .. } => self.compile_field_access(stmt),
+            MIRNodeKind::SizeofExpression(ty) => {
+                let llvm_ty = self.map_semantic_type(ty).unwrap();
+                let size = llvm_ty.size_of().unwrap();
+                Some(size.as_basic_value_enum())
+            },
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
     }

@@ -198,6 +198,7 @@ pub enum AstNodeKind {
 
     /// An expression node with a semicolon.
     ExpressionStatement(BoxedAstNode),
+    SizeofExpression(Box<AstNode>),
 
     // PROGRAM //
     Program(Vec<AstNode>),
@@ -857,6 +858,10 @@ impl AstNode {
                 expr.fmt_with_indent(f, indent, table)?;
                 write!(f, ";")?;
             },
+            AstNodeKind::SizeofExpression(expr) => {
+                write!(f, "{}sizeof ", indent_str)?;
+                expr.fmt_with_indent(f, indent, table)?;
+            },
             AstNodeKind::ImportStatement { identifiers, file_path } => {
                 write!(f, "import {{")?;
                 for (i, ident) in identifiers.iter().enumerate() {
@@ -1211,6 +1216,7 @@ impl AstNode {
 
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_mut()],
+            SizeofExpression(expr) => vec![expr.as_mut()],
             ImportStatement { identifiers, .. } | ExportStatement { identifiers } => identifiers.iter_mut().collect()
         }
     }
@@ -1523,6 +1529,7 @@ impl AstNode {
 
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_ref()],
+            SizeofExpression(expr) => vec![expr.as_ref()],
             ImportStatement { identifiers, .. } | ExportStatement { identifiers } => identifiers.iter().collect()
         }
     }

@@ -620,6 +620,11 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Export),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            SIZEOF_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Sizeof),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,

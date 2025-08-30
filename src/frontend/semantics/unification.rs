@@ -2369,7 +2369,10 @@ impl SemanticAnalyzer {
                 self.check_node_is_not_generic_fn(expr)?;
                 self.generic_value_check_node(expr)?;
             },
-
+            SizeofExpression(expr) => {
+                self.check_node_is_not_generic_fn(expr)?;
+                self.generic_value_check_node(expr)?;
+            },
             VariableDeclaration { initializer, .. } => {
                 self.check_node_is_not_generic_fn(initializer)?;
                 self.generic_value_check_node(initializer)?;

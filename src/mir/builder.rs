@@ -825,6 +825,23 @@ impl<'a> MIRBuilder<'a> {
                     }
                 }
             },
+            AstNodeKind::SizeofExpression(ty_node) => {
+                let generic_ty = ty_node.type_id.as_ref().unwrap();
+
+                let concrete_ty = if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
+                    self.substitute_type(generic_ty, substitutions)
+                } else {
+                    generic_ty.clone()
+                };
+
+                let fully_concrete_ty = self.resolve_concrete_type_recursively(&concrete_ty);
+
+                if !self.type_is_fully_concrete(&fully_concrete_ty) {
+                    panic!("This shouldn't happen. [2]");
+                }
+
+                MIRNodeKind::SizeofExpression(fully_concrete_ty)
+            },
             AstNodeKind::FieldAccess { left, right } => {
                 let is_static_access = match &left.kind {
                     AstNodeKind::PathQualifier { .. } => true,

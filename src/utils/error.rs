@@ -67,7 +67,7 @@ pub enum ErrorKind {
     NeedsHeapAllocation(String),
     ClosureWithGenerics(String),
     NonConstantInitializer(String, String),
-    InvalidImport(String, String),
+    InvalidImport(String, String)
 }
 
 impl ErrorKind {

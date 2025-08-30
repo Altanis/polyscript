@@ -520,6 +520,18 @@ impl Parser {
                     id: self.get_next_node_id()
                 })
             },
+            TokenKind::Keyword(KeywordKind::Sizeof) => {
+                self.advance();
+                let ty = self.parse_type()?;
+                Ok(AstNode {
+                    kind: AstNodeKind::SizeofExpression(boxed!(ty)),
+                    span: span.set_end_from_span(self.previous().get_span()),
+                    type_id: None,
+                    value_id: None,
+                    scope_id: None,
+                    id: self.get_next_node_id()
+                })
+            },
             _ => {
                 return Err(self.generate_error(
                     ErrorKind::UnexpectedToken(
