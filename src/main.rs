@@ -126,6 +126,6 @@ fn main() {
         linker: cli.linker.unwrap_or_default(),
     };
 
-    let compiler = Compiler::new(config);
+    let mut compiler = Compiler::new(config);
     compiler.run();
 }

@@ -66,7 +66,8 @@ pub enum ErrorKind {
     GenericFunctionAsValue(String),
     NeedsHeapAllocation(String),
     ClosureWithGenerics(String),
-    NonConstantInitializer(String, String)
+    NonConstantInitializer(String, String),
+    InvalidImport(String, String)
 }
 
 impl ErrorKind {
@@ -192,7 +193,8 @@ impl ErrorKind {
             ErrorKind::GenericFunctionAsValue(name) => format!("generic function `{}` cannot be used as a value without being called", name),
             ErrorKind::NeedsHeapAllocation(value_symbol) => format!("{value_symbol} needs to be heap allocated"),
             ErrorKind::ClosureWithGenerics(name) => format!("closure \"{}\" defines generic parameters", if name.is_empty() { "[unnamed closure]" } else { name }),
-            ErrorKind::NonConstantInitializer(constant, reason) => format!("initializer for constant {} is not a constant expression: {}", constant, reason)
+            ErrorKind::NonConstantInitializer(constant, reason) => format!("initializer for constant {} is not a constant expression: {}", constant, reason),
+            ErrorKind::InvalidImport(file, ident) => format!("file {} does export {}", file, ident)
         }
     }
 }

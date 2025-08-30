@@ -1,5 +1,6 @@
+use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
@@ -9,12 +10,13 @@ use inkwell::OptimizationLevel;
 
 use crate::backend::codegen::codegen::CodeGen;
 use crate::backend::optimizations::{capture_analysis, escape_analysis};
-use crate::frontend::semantics::analyzer::SemanticAnalyzer;
-use crate::frontend::syntax::ast::AstNode;
+use crate::frontend::semantics::analyzer::{ScopeId, SemanticAnalyzer, TypeSymbolId, ValueSymbolId};
+use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::frontend::syntax::parser::Parser;
 use crate::mir::builder::MIRBuilder;
 use crate::mir::ir_node::MIRNode;
+use crate::utils::error::{BoxedError, ErrorKind};
 use crate::utils::kind::Token;
 
 pub const DEBUG: bool = true;
@@ -40,55 +42,183 @@ pub struct CompilerConfig {
     pub linker: String
 }
 
+pub struct Module {
+    pub path: PathBuf,
+    pub ast: AstNode,
+    pub lined_source: Rc<Vec<String>>,
+    pub scope_id: ScopeId,
+    pub exports: HashMap<String, (Option<ValueSymbolId>, Option<TypeSymbolId>)>,
+}
+
 pub struct Compiler {
     config: CompilerConfig,
+    analyzer: SemanticAnalyzer,
+    modules: HashMap<PathBuf, Module>,
 }
 
 impl Compiler {
     pub fn new(config: CompilerConfig) -> Compiler {
-        Compiler { config }
+        Compiler {
+            config,
+            analyzer: SemanticAnalyzer::new(Rc::new(vec![])),
+            modules: HashMap::new(),
+        }
     }
 
-    pub fn run(&self) {
-        let program = fs::read_to_string(&self.config.entry_file).expect("Invalid source file.");
+    pub fn run(&mut self) {
+        let mut file_queue: VecDeque<PathBuf> = VecDeque::new();
+        let entry_path = fs::canonicalize(&self.config.entry_file).expect("Failed to find entry file.");
+        file_queue.push_back(entry_path.clone());
 
-        let (lined_source, tokens) = self.generate_tokens(program);
-        let program = self.parse_tokens(lined_source.clone(), tokens.clone());
-        let (mut program, mut analyzer) = self.analyze_ast(lined_source, program);
+        let mut all_modules_paths = vec![entry_path.clone()];
 
-        let (ir_builder, mut mir_program) = self.lower_ast_to_mir(&mut program, &mut analyzer);
-        let ir_builder_fmt = if DEBUG { format!("{}", ir_builder) } else { String::new() };
-        std::mem::drop(ir_builder);
-
-        self.optimize(&mut mir_program, &mut analyzer);
-        
-        let mut mir_program_fmt = String::new();
-        if DEBUG {
-            let _ = mir_program.fmt_with_indent(&mut mir_program_fmt, 0, Some(&analyzer.symbol_table));
-        }
-
-        self.compile_mir(mir_program, &analyzer);
-
-        if DEBUG {
-            println!("--- TOKENS ---");
-            for token in tokens.iter() {
-                println!("{}", token);
+        while let Some(current_path) = file_queue.pop_front() {
+            if self.modules.contains_key(&current_path) {
+                continue;
             }
 
-            println!("--- AST ---");
-            let mut format_str = String::new();
-            let _ = program.fmt_with_indent(&mut format_str, 0, Some(&analyzer.symbol_table));
-            println!("{}", format_str);
+            let source_code = fs::read_to_string(&current_path).unwrap_or_else(|_| panic!("Could not read source file: {:?}", current_path));
+            let (lined_source, tokens) = self.generate_tokens(source_code);
+            let mut ast = self.parse_tokens(lined_source.clone(), tokens.clone());
 
-            println!("--- SEMANTIC ANALYZER ---");
-            println!("{}", analyzer);
+            if let AstNodeKind::Program(stmts) = &ast.kind {
+                for stmt in stmts {
+                    if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
+                        let mut dep_path = current_path.parent().unwrap().to_path_buf();
+                        dep_path.push(rel_path_str);
+                        let canonical_dep_path = fs::canonicalize(&dep_path)
+                            .unwrap_or_else(|_| panic!("Failed to resolve import path: {:?}", dep_path));
+                        
+                        if !all_modules_paths.contains(&canonical_dep_path) {
+                            file_queue.push_back(canonical_dep_path.clone());
+                            all_modules_paths.push(canonical_dep_path);
+                        }
+                    }
+                }
+            }
+            
+            self.analyzer.symbol_table.current_scope_id = 0;
+            let module_scope_id = self.analyzer.symbol_table.enter_scope(crate::frontend::semantics::analyzer::ScopeKind::Block);
+            ast.scope_id = Some(module_scope_id);
 
-            println!("--- MIR BUILDER ---");
-            println!("{}", ir_builder_fmt);
+            let module = Module {
+                path: current_path.clone(),
+                ast,
+                lined_source: Rc::new(lined_source),
+                scope_id: module_scope_id,
+                exports: HashMap::new(),
+            };
 
-            println!("--- MIR PROGRAM ---");
-            println!("{}", mir_program_fmt);
+            self.modules.insert(current_path, module);
         }
+
+        for path in &all_modules_paths {
+            let module = self.modules.get_mut(path).unwrap();
+            self.analyzer.symbol_table.current_scope_id = module.scope_id;
+            
+            let errors = self.analyzer.symbol_collector_pass(&mut module.ast);
+            if !errors.is_empty() {
+                println!("{} errors emitted... printing:", errors.len());
+                for err in errors {
+                    eprintln!("{}", err);
+                }
+            }
+        }
+
+        for path in &all_modules_paths {
+            self.resolve_exports_for_module(path).unwrap();
+        }
+
+        for path in &all_modules_paths {
+            self.link_imports_for_module(path).unwrap();
+        }
+        
+        for path in &all_modules_paths {
+            let module = self.modules.get_mut(path).unwrap();
+            self.analyzer.symbol_table.current_scope_id = module.scope_id;
+            self.analyzer.set_source(module.lined_source.clone());
+
+            if let Err(errs) = self.analyzer.analyze(&mut module.ast) {
+                println!("{} errors emitted in {:?}... printing:", errs.len(), path);
+                for err in errs { eprintln!("{}", err); }
+                std::process::exit(1);
+            }
+        }
+
+        let (_, mut mir_program) = self.lower_ast_to_mir(entry_path);
+        self.optimize(&mut mir_program);
+        self.compile_mir(mir_program);
+    }
+
+    fn resolve_exports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
+        let module = self.modules.get(path).unwrap();
+        self.analyzer.symbol_table.current_scope_id = module.scope_id;
+        
+        let mut exports = HashMap::new();
+        if let AstNodeKind::Program(stmts) = &module.ast.kind {
+            for stmt in stmts {
+                if let AstNodeKind::ExportStatement { identifiers } = &stmt.kind {
+                    for ident_node in identifiers {
+                        let name = ident_node.get_name().unwrap();
+                        let value_sym = self.analyzer.symbol_table.find_value_symbol_in_scope(&name, module.scope_id);
+                        let type_sym = self.analyzer.symbol_table.find_type_symbol_in_scope(&name, module.scope_id);
+
+                        if value_sym.is_none() && type_sym.is_none() {
+                             return Err(self.analyzer.create_error(ErrorKind::UnknownIdentifier(name), ident_node.span, &[ident_node.span]));
+                        }
+                        
+                        exports.insert(name, (value_sym.map(|s| s.id), type_sym.map(|s| s.id)));
+                    }
+                }
+            }
+        }
+        
+        self.modules.get_mut(path).unwrap().exports = exports;
+
+        Ok(())
+    }
+
+    fn link_imports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
+        let mut dependencies = Vec::new();
+        let module = self.modules.get(path).unwrap();
+        if let AstNodeKind::Program(stmts) = &module.ast.kind {
+            for stmt in stmts {
+                if let AstNodeKind::ImportStatement { file_path, identifiers, .. } = &stmt.kind {
+                    let mut dep_path = path.parent().unwrap().to_path_buf();
+                    dep_path.push(file_path);
+                    let canonical_dep_path = fs::canonicalize(&dep_path).unwrap();
+                    dependencies.push((canonical_dep_path, identifiers.clone()));
+                }
+            }
+        }
+
+        for (dep_path, identifiers) in dependencies {
+            let importing_module = self.modules.get(path).unwrap();
+            self.analyzer.symbol_table.current_scope_id = importing_module.scope_id;
+            
+            let imported_module = self.modules.get(&dep_path).unwrap();
+            
+            for ident_node in &identifiers {
+                let name = ident_node.get_name().unwrap();
+                let (exported_value_id, exported_type_id) = imported_module.exports.get(&name)
+                    .ok_or_else(|| self.analyzer.create_error(
+                        ErrorKind::MemberNotFound(name.clone(), format!("module {:?}", imported_module.path)), 
+                        ident_node.span, 
+                        &[ident_node.span])
+                    )?;
+                
+                if let Some(val_id) = exported_value_id {
+                    let name_id = self.analyzer.symbol_table.value_names.intern(&name);
+                    self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().values.insert(name_id, *val_id);
+                }
+
+                if let Some(type_id) = exported_type_id {
+                    let name_id = self.analyzer.symbol_table.type_names.intern(&name);
+                    self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().types.insert(name_id, *type_id);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn generate_tokens(&self, program: String) -> (Vec<String>, Vec<Token>) {
@@ -119,9 +249,9 @@ impl Compiler {
         }
     }
 
-    fn analyze_ast(&self, lined_source: Vec<String>, program: AstNode) -> (AstNode, SemanticAnalyzer) {
+    fn analyze_ast(&self, lined_source: Vec<String>, mut program: AstNode) -> (AstNode, SemanticAnalyzer) {
         let mut analyzer = SemanticAnalyzer::new(Rc::new(lined_source));
-        match analyzer.analyze(program) {
+        match analyzer.analyze(&mut program) {
             Err(errs) => {
                 println!("{} errors emitted... printing:", errs.len());
                 for err in errs {
@@ -130,21 +260,22 @@ impl Compiler {
 
                 std::process::exit(1);
             },
-            Ok(program) => (program, analyzer)
+            Ok(_) => (program, analyzer)
         }
     }
 
-    fn lower_ast_to_mir<'s>(&self, program: &mut AstNode, analyzer: &'s mut SemanticAnalyzer) -> (MIRBuilder<'s>, MIRNode) {
-        let mut builder = MIRBuilder::new(analyzer);
-        let program = builder.build(program);
+    fn lower_ast_to_mir<'s>(&'s mut self, canonical_entry_path: PathBuf) -> (MIRBuilder<'s>, MIRNode) {
+        let entry_module = self.modules.get_mut(&canonical_entry_path).unwrap();
+        let mut builder = MIRBuilder::new(&mut self.analyzer);
+        let program = builder.build(&mut entry_module.ast);
 
         (builder, program)
     }
 
-    fn optimize(&self, program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) {
+    fn optimize(&mut self, program: &mut MIRNode) {
         let mut errs = vec![];
-        errs.extend(escape_analysis::init(program, analyzer));
-        capture_analysis::init(program, analyzer);
+        errs.extend(escape_analysis::init(program, &mut self.analyzer));
+        capture_analysis::init(program, &self.analyzer);
 
         if !errs.is_empty() {
             println!("{} errors emitted... printing:", errs.len());
@@ -156,7 +287,7 @@ impl Compiler {
         }
     }
 
-    fn compile_mir(&self, program: MIRNode, analyzer: &SemanticAnalyzer) {
+    fn compile_mir(&self, program: MIRNode) {
         let context = Context::create();
         let module = context.create_module("main_module");
         let builder = context.create_builder();
@@ -185,7 +316,7 @@ impl Compiler {
             println!("[WARN] Debug symbols are not supported yet.");
         }
 
-        let mut codegen = CodeGen::new(&context, &builder, &module, analyzer);
+        let mut codegen = CodeGen::new(&context, &builder, &module, &self.analyzer);
         codegen.compile_program(&program);
 
         if let Some(parent) = self.config.output_file.parent() && !parent.as_os_str().is_empty() {

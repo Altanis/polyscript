@@ -1,12 +1,6 @@
-use crate::{
-    frontend::syntax::ast::AstNode,
-    utils::{error::*, kind::*},
-};
+use crate::{frontend::syntax::ast::AstNode, utils::{error::*, kind::*}};
 use colored::*;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    rc::Rc,
-};
+use std::{collections::{HashMap, HashSet, VecDeque}, rc::Rc};
 use strum::IntoEnumIterator;
 use rustc_hash::FxHashMap;
 
@@ -1070,31 +1064,41 @@ impl SemanticAnalyzer {
         Error::from_multiple_errors(kind, primary_span, lines)
     }
 
-    pub fn analyze(&mut self, mut program: AstNode) -> Result<AstNode, Vec<Error>> {
+    pub fn set_source(&mut self, lines: Rc<Vec<String>>) {
+        self.lines = lines.clone();
+        self.symbol_table.lines = lines;
+    }
+
+    pub fn analyze(&mut self, program: &mut AstNode) -> Result<(), Vec<Error>> {
+        let mut errors = vec![];
+
         macro_rules! pass {
             ($self:ident, $method:ident, $program:expr) => {{
-                let errors = $self.$method(&mut $program);
-                if !errors.is_empty() {
-                    return Err(errors);
+                let pass_errors = $self.$method($program);
+                if !pass_errors.is_empty() {
+                    errors.extend(pass_errors);
                 }
             }};
         }
+        
+        pass!(self, generic_constraints_pass, program);
+        pass!(self, struct_field_type_collector_pass, program);
+        pass!(self, impl_collector_pass, program);
+        pass!(self, impl_deduplication_pass, program);
+        pass!(self, uv_collector_pass, program);
+        pass!(self, unification_pass, program);
+        pass!(self, substitution_pass, program);
+        pass!(self, const_check_pass, program);
+        pass!(self, generic_value_check_pass, program);
+        pass!(self, member_resolution_pass, program);
+        pass!(self, mutability_check_pass, program);
+        pass!(self, trait_conformance_pass, program);
 
-        pass!(self, symbol_collector_pass, &mut program);
-        pass!(self, generic_constraints_pass, &mut program);
-        pass!(self, struct_field_type_collector_pass, &mut program);
-        pass!(self, impl_collector_pass, &mut program);
-        pass!(self, impl_deduplication_pass, &mut program);
-        pass!(self, uv_collector_pass, &mut program);
-        pass!(self, unification_pass, &mut program);
-        pass!(self, substitution_pass, &mut program);
-        pass!(self, const_check_pass, &mut program);
-        pass!(self, generic_value_check_pass, &mut program);
-        pass!(self, member_resolution_pass, &mut program);
-        pass!(self, mutability_check_pass, &mut program);
-        pass!(self, trait_conformance_pass, &mut program);
-
-        Ok(program)
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
