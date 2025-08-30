@@ -15,9 +15,9 @@ use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::frontend::syntax::parser::Parser;
 use crate::mir::builder::MIRBuilder;
-use crate::mir::ir_node::MIRNode;
+use crate::mir::ir_node::{MIRNode, MIRNodeKind};
 use crate::utils::error::{BoxedError, ErrorKind};
-use crate::utils::kind::Token;
+use crate::utils::kind::{Span, Token};
 
 pub const DEBUG: bool = true;
 
@@ -151,7 +151,7 @@ impl Compiler {
             }
         }
 
-        let (mir_builder, mut mir_program) = self.lower_ast_to_mir(entry_path);
+        let (mir_builder, mut mir_program) = self.lower_ast_to_mir(&compilation_order);
 
         let mir_builder_fmt = if DEBUG { format!("{}", mir_builder) } else { String::new() };
         std::mem::drop(mir_builder);
@@ -174,7 +174,6 @@ impl Compiler {
 
         self.compile_mir(mir_program);
     }
-
     fn topological_sort_util(
         node: &PathBuf,
         dep_graph: &HashMap<PathBuf, Vec<PathBuf>>,
@@ -331,12 +330,33 @@ impl Compiler {
         }
     }
 
-    fn lower_ast_to_mir<'s>(&'s mut self, canonical_entry_path: PathBuf) -> (MIRBuilder<'s>, MIRNode) {
-        let entry_module = self.modules.get_mut(&canonical_entry_path).unwrap();
+    fn lower_ast_to_mir<'s>(&'s mut self, compilation_order: &[PathBuf]) -> (MIRBuilder<'s>, MIRNode) {
         let mut builder = MIRBuilder::new(&mut self.analyzer);
-        let program = builder.build(&mut entry_module.ast);
+        let mut all_mir_stmts = vec![];
 
-        (builder, program)
+        for path in compilation_order {
+            let module = self.modules.get_mut(path).unwrap();
+            let mut module_mir = builder.build(&mut module.ast);
+            if let MIRNodeKind::Program(stmts) = &mut module_mir.kind {
+                all_mir_stmts.append(stmts);
+            }
+        }
+
+        let program_span = if let Some(last_path) = compilation_order.last() {
+            self.modules.get(last_path).unwrap().ast.span
+        } else {
+            Span::default()
+        };
+        
+        let mir_program = MIRNode {
+            kind: MIRNodeKind::Program(all_mir_stmts),
+            span: program_span,
+            value_id: None,
+            type_id: None,
+            scope_id: 0,
+        };
+
+        (builder, mir_program)
     }
 
     fn optimize(&mut self, program: &mut MIRNode) {
