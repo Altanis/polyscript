@@ -617,6 +617,8 @@ impl Parser {
             KeywordKind::Enum => self.parse_enum_statement(),
             KeywordKind::Trait => self.parse_trait_declaration(),
             KeywordKind::Type => self.parse_type_declaration(),
+            KeywordKind::Import => self.parse_import_statement(),
+            KeywordKind::Export => self.parse_export_statement(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -1117,6 +1119,29 @@ impl Parser {
         Ok(types)
     }
 
+    fn parse_set(&mut self) -> Result<Vec<AstNode>, BoxedError> {
+        let mut items = vec![];
+
+        self.consume(TokenKind::OpenBrace)?;
+
+        loop {
+            items.push(self.spanned_node(|parser| {
+                let identifier = parser.consume(TokenKind::Identifier)?.get_value().to_string();
+                Ok(AstNodeKind::Identifier(identifier))
+            })?);
+
+            if self.peek().get_token_kind() == TokenKind::Comma {
+                self.consume(TokenKind::Comma)?;
+            } else {
+                break;
+            }
+        }
+
+        self.consume_generic_greater()?;
+
+        Ok(items)   
+    }
+
     fn parse_if_expression(&mut self) -> Result<AstNode, BoxedError> {
         self.spanned_node(|parser| {
             parser.consume(TokenKind::Keyword(KeywordKind::If))?;
@@ -1564,6 +1589,29 @@ impl Parser {
                 generic_parameters,
                 value,
             })
+        })
+    }
+
+    fn parse_import_statement(&mut self) -> Result<AstNode, BoxedError> {
+        self.spanned_node(|parser| {
+            parser.advance();
+            let identifiers = parser.parse_set()?;
+            parser.consume(TokenKind::Keyword(KeywordKind::From))?;
+            let file_path_node = parser.parse_expression()?;
+            let AstNodeKind::StringLiteral(file_path) = file_path_node.kind else {
+                return Err(parser.generate_error(ErrorKind::ExpectedString, parser.create_span_from_current_token()));
+            };
+
+            Ok(AstNodeKind::ImportStatement { identifiers, file_path })
+        })
+    }
+
+    fn parse_export_statement(&mut self) -> Result<AstNode, BoxedError> {
+        self.spanned_node(|parser| {
+            parser.advance();
+            let identifiers = parser.parse_set()?;
+
+            Ok(AstNodeKind::ExportStatement { identifiers })
         })
     }
 }

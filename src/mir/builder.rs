@@ -1021,7 +1021,9 @@ impl<'a> MIRBuilder<'a> {
             | AstNodeKind::TypeReference { .. }
             | AstNodeKind::FunctionPointer { .. }
             | AstNodeKind::SelfType(_)
-            | AstNodeKind::GenericParameter { .. } => return None,
+            | AstNodeKind::GenericParameter { .. } 
+            | AstNodeKind::ImportStatement { .. }
+            | AstNodeKind::ExportStatement { .. } => return None,
         };
 
         Some(MIRNode {

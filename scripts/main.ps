@@ -7,32 +7,9 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar {
-    private x: int;
+import { DEBUG, is_div_by_2, Scalar } from "./main2.ps";
+
+if !DEBUG && is_div_by_2(4) {
+    let scalar = Scalar.new(4);
+    let x = scalar.get_x();
 }
-
-impl Scalar {
-    fn new(x: int): Scalar {
-        Scalar { x }
-    }
-
-    fn get_x(&self): int {
-        self.x
-    }
-}
-
-let scalar = Scalar.new(4);
-let x = scalar.get_x();
-
-print(scalar);
-print(x);
-
-enum Level {
-    Easy,
-    Medium,
-    Hard = 4 * 3 + 2
-}
-
-let difficulty: Level = Level.Hard;
-
-print(difficulty);

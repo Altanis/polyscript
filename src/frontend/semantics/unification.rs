@@ -2465,7 +2465,8 @@ impl SemanticAnalyzer {
             Identifier(_) | EnumVariant(_) | Break | Continue | SelfExpr | FunctionParameter {..} |
             StructField {..} | TraitDeclaration {..} | TraitConstant {..} |
             TraitType(_) | GenericParameter {..} | ReferenceType {..} | TypeReference {..} |
-            TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} | EnumDeclaration {..} => {}
+            TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} | EnumDeclaration {..} |
+            ImportStatement { .. } | ExportStatement { .. } => {}
         }
         Ok(())
     }

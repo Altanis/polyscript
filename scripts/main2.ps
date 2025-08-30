@@ -1,9 +1,9 @@
-export const DEBUG: bool = false;
-export fn is_div_by_2(x: int): bool {
+const DEBUG: bool = false;
+fn is_div_by_2(x: int): bool {
     x % 2 == 0
 }
 
-export struct Scalar {
+struct Scalar {
     private x: int;
 }
 
@@ -16,3 +16,5 @@ impl Scalar {
         self.x
     }
 }
+
+export { DEBUG, is_div_by_2, Scalar };

@@ -605,6 +605,21 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Heap),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            IMPORT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Import),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            FROM_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::From),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
+            EXPORT_KEYWORD => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Export),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             _ => Ok(Token::new(
                 word,
                 TokenKind::Identifier,

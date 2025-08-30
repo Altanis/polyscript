@@ -1502,6 +1502,7 @@ impl SemanticAnalyzer {
                     info,
                 );
             },
+            ImportStatement { .. } | ExportStatement { .. } => {},
             Program(_) => unreachable!()
         }
 

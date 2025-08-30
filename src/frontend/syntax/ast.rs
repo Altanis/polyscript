@@ -188,6 +188,14 @@ pub enum AstNodeKind {
         value: BoxedAstNode,
     },
 
+    ImportStatement {
+        identifiers: Vec<AstNode>,
+        file_path: String
+    },
+    ExportStatement {
+        identifiers: Vec<AstNode>
+    },
+
     /// An expression node with a semicolon.
     ExpressionStatement(BoxedAstNode),
 
@@ -844,10 +852,30 @@ impl AstNode {
                     write!(f, ": ")?;
                     return_type.fmt_with_indent(f, 0, table)?;
                 }
-            }
+            },
             AstNodeKind::ExpressionStatement(expr) => {
                 expr.fmt_with_indent(f, indent, table)?;
                 write!(f, ";")?;
+            },
+            AstNodeKind::ImportStatement { identifiers, file_path } => {
+                write!(f, "import {{")?;
+                for (i, ident) in identifiers.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    ident.fmt_with_indent(f, 0, table)?;
+                }
+                write!(f, "}} from {}", file_path)?;
+            },
+            AstNodeKind::ExportStatement { identifiers } => {
+                write!(f, "export {{")?;
+                for (i, ident) in identifiers.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    ident.fmt_with_indent(f, 0, table)?;
+                }
+                write!(f, "}}")?;
             }
         }
 
@@ -1183,6 +1211,7 @@ impl AstNode {
 
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_mut()],
+            ImportStatement { identifiers, .. } | ExportStatement { identifiers } => identifiers.iter_mut().collect()
         }
     }
 
@@ -1494,6 +1523,7 @@ impl AstNode {
 
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_ref()],
+            ImportStatement { identifiers, .. } | ExportStatement { identifiers } => identifiers.iter().collect()
         }
     }
 }

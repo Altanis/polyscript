@@ -41,6 +41,7 @@ pub enum ErrorKind {
     InvalidSelf(&'static str),
     ExpectedIdentifier,
     ExpectedInteger,
+    ExpectedString,
     TypeMismatch(String, String, Option<String>),
     NotCallable(String),
     ArityMismatch(usize, usize),
@@ -142,6 +143,7 @@ impl ErrorKind {
             ErrorKind::InvalidSelf(place) => format!("found \"self\" {place}"),
             ErrorKind::ExpectedIdentifier => "expected an identifier for the rhs of a field access operation".to_string(),
             ErrorKind::ExpectedInteger => "expected an integer literal in this position".to_string(),
+            ErrorKind::ExpectedString => "expected a string literal in this position".to_string(),
             ErrorKind::TypeMismatch(t1, t2, str) => {
                 format!("types {t1} and {t2} are incompatible{}", match str {
                     Some(s) => format!(" [{s}]"),
