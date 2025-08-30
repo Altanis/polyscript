@@ -105,7 +105,6 @@ fn is_copy_type(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
     }
 }
 
-
 fn get_base_variable(node: &MIRNode) -> Option<usize> {
     match &node.kind {
         MIRNodeKind::Identifier(_) => node.value_id,
