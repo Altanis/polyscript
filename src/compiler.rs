@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -151,7 +151,48 @@ impl Compiler {
         }
 
         if sorted_modules_paths.len() != all_modules_paths.len() {
-            panic!("Cyclic dependency detected in modules.");
+            let cycle_nodes: HashSet<_> = all_modules_paths.iter()
+                .filter(|p| !sorted_modules_paths.contains(p))
+                .cloned()
+                .collect();
+            
+            let start_node = cycle_nodes.iter().next().unwrap();
+
+            fn find_cycle_dfs(current: &Path, dep_graph: &HashMap<PathBuf, Vec<PathBuf>>, visited: &mut HashSet<PathBuf>, recursion_stack: &mut HashSet<PathBuf>, path: &mut Vec<PathBuf>) -> Option<Vec<PathBuf>> {
+                visited.insert(current.to_path_buf());
+                recursion_stack.insert(current.to_path_buf());
+                path.push(current.to_path_buf());
+
+                if let Some(dependencies) = dep_graph.get(current) {
+                    for dep in dependencies {
+                        if recursion_stack.contains(dep) {
+                            let mut cycle_path = path.clone();
+                            cycle_path.push(dep.clone());
+                            let cycle_start_index = cycle_path.iter().position(|p| p == dep).unwrap();
+                            return Some(cycle_path[cycle_start_index..].to_vec());
+                        }
+
+                        if !visited.contains(dep) && let Some(cycle) = find_cycle_dfs(dep, dep_graph, visited, recursion_stack, path) {
+                            return Some(cycle);
+                        }
+                    }
+                }
+
+                path.pop();
+                recursion_stack.remove(current);
+                None
+            }
+
+            let mut visited = HashSet::new();
+            if let Some(cycle) = find_cycle_dfs(start_node, &dep_graph, &mut visited, &mut HashSet::new(), &mut Vec::new()) {
+                let cycle_str = cycle.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(" -> ");
+                eprintln!("Error: Cyclic dependency detected between modules: {}", cycle_str);
+            } else {
+                 let remaining_nodes_str = cycle_nodes.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join(", ");
+                eprintln!("Error: Cyclic dependency detected involving: {}", remaining_nodes_str);
+            }
+            
+            std::process::exit(1);
         }
         
         let all_modules_paths = sorted_modules_paths;
