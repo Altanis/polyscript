@@ -1088,6 +1088,7 @@ impl SemanticAnalyzer {
         pass!(self, uv_collector_pass, &mut program);
         pass!(self, unification_pass, &mut program);
         pass!(self, substitution_pass, &mut program);
+        pass!(self, const_check_pass, &mut program);
         pass!(self, generic_value_check_pass, &mut program);
         pass!(self, member_resolution_pass, &mut program);
         pass!(self, mutability_check_pass, &mut program);

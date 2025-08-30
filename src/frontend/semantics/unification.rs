@@ -2254,6 +2254,100 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    pub fn const_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+        if let AstNodeKind::Program(stmts) = &mut program.kind {
+            for stmt in stmts {
+                if let Err(e) = self.const_check_node(stmt) {
+                    errors.push(*e);
+                }
+            }
+        }
+        errors
+    }
+
+    fn const_check_node(&self, node: &AstNode) -> Result<(), BoxedError> {
+        match &node.kind {
+            AstNodeKind::VariableDeclaration { mutable, initializer, name, .. } => {
+                if !*mutable {
+                    self.is_const_expr(initializer, name.clone())?;
+                }
+
+                self.const_check_node(initializer)?;
+            }
+            _ => {
+                for child in node.children() {
+                    self.const_check_node(child)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_const_expr(&self, node: &AstNode, name: String) -> Result<(), BoxedError> {
+        use AstNodeKind::*;
+        match &node.kind {
+            IntegerLiteral(_)
+            | FloatLiteral(_)
+            | BooleanLiteral(_)
+            | StringLiteral(_)
+            | CharLiteral(_) => Ok(()),
+
+            Identifier(_) => {
+                let symbol = self.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+                if symbol.mutable {
+                    Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, "variable is not const".to_string()),
+                        node.span,
+                        &[node.span],
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+
+            UnaryOperation { operand, .. } => self.is_const_expr(operand, name),
+            BinaryOperation { left, right, .. } => {
+                self.is_const_expr(left, name.clone())?;
+                self.is_const_expr(right, name)
+            }
+
+            StructLiteral { fields, .. } => {
+                for field_expr in fields.values() {
+                    self.is_const_expr(field_expr, name.clone())?;
+                }
+
+                Ok(())
+            }
+
+            TypeCast { expr, .. } => self.is_const_expr(expr, name),
+
+            FieldAccess { left, .. } => {
+                let left_type = left.type_id.as_ref().unwrap();
+                let left_base_sym_id = left_type.get_base_symbol();
+
+                let left_base_sym = self.symbol_table.get_type_symbol(left_base_sym_id).unwrap();
+                match left_base_sym.kind {
+                    TypeSymbolKind::Enum(_) => Ok(()),
+                    TypeSymbolKind::Struct(_) => self.is_const_expr(left, name),
+                    _ => Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, "field access on non-struct/enum type".to_string()),
+                        node.span,
+                        &[node.span],
+                    )),
+                }
+            }
+
+            _ => Err(self.create_error(
+                ErrorKind::NonConstantInitializer(name, "expression cannot be evaluated at compile time".to_string(),),
+                node.span,
+                &[node.span],
+            )),
+        }
+    }
+}
+
+impl SemanticAnalyzer {
     fn type_is_generic(&self, ty: &Type) -> bool {
         match ty {
             Type::Base { symbol, args } => {

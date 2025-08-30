@@ -1,6 +1,5 @@
 use std::fmt::Write;
 
-// frontend/ast.rs
 use crate::{
     frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
     utils::kind::*,
