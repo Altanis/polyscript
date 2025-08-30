@@ -23,7 +23,7 @@ pub const DEBUG: bool = true;
 pub enum EmitType {
     Asm,
     Obj,
-    LLVMIR,
+    LLIR,
     Executable,
 }
 
@@ -193,7 +193,7 @@ impl Compiler {
         }
 
         match self.config.emit_type {
-            EmitType::LLVMIR => {
+            EmitType::LLIR => {
                 module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file");
             },
             EmitType::Asm => {
