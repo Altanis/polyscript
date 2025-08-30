@@ -27,7 +27,7 @@ struct CliArgs {
     entry_file: String,
 
     /// Set the optimization level
-    #[arg(short = 'O', value_enum, default_value_t = OptLevelArg::O0, verbatim_doc_comment)]
+    #[arg(short = 'O', value_enum, default_value_t = OptLevelArg::O0, verbatim_doc_comment, ignore_case(true))]
     opt_level: OptLevelArg,
 
     /// Generate debug symbols
