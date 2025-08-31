@@ -8,7 +8,7 @@ use crate::{
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{CaptureStrategy, MIRNode, MIRNodeKind},
-    utils::kind::QualifierKind,
+    utils::kind::{QualifierKind, Span},
 };
 
 #[derive(Default)]
@@ -30,6 +30,19 @@ pub struct MIRBuilder<'a> {
     
     hoisted_iifes: Vec<MIRNode>
 }
+
+fn find_node_by_span(node: &AstNode, target_span: Span) -> Option<&AstNode> {
+    if node.span == target_span { return Some(node); }
+
+    for child in node.children() {
+        if let Some(found) = find_node_by_span(child, target_span) {
+            return Some(found);
+        }
+    }
+    
+    None
+}
+
 
 impl<'a> MIRBuilder<'a> {
     pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
@@ -107,6 +120,107 @@ impl<'a> MIRBuilder<'a> {
             },
             Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 self.type_is_fully_concrete(inner)
+            }
+        }
+    }
+
+    fn get_type_from_ast(&self, node: &AstNode, scope_id: ScopeId) -> Result<Type, ()> {
+        match &node.kind {
+            AstNodeKind::TypeReference { type_name, generic_types, .. } => {
+                let symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(scope_id, type_name).ok_or(())?;
+                let args = generic_types.iter().map(|arg| self.get_type_from_ast(arg, scope_id)).collect::<Result<Vec<_>, _>>()?;
+
+                Ok(Type::Base { symbol: symbol.id, args })
+            },
+            AstNodeKind::ReferenceType { mutable, inner, is_heap } => {
+                let inner_type = self.get_type_from_ast(inner, scope_id)?;
+                
+                if *mutable {
+                    Ok(Type::MutableReference { inner: Box::new(inner_type), is_heap: *is_heap })
+                } else {
+                    Ok(Type::Reference { inner: Box::new(inner_type), is_heap: *is_heap })
+                }
+            },
+            _ => Err(())
+        }
+    }
+
+    fn propagate_monomorphizations(&mut self, program: &AstNode) {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            
+            let instantiations_clone = self.monomorphization_ctx.instantiations.clone();
+            
+            for (template_symbol_id, specializations) in instantiations_clone.iter() {
+                let template_symbol = self.analyzer.symbol_table.get_type_symbol(*template_symbol_id).unwrap();
+
+                if let TypeSymbolKind::Struct((_, inherent_impls)) = &template_symbol.kind {
+                    let inherent_impls_clone = inherent_impls.clone();
+
+                    for specialization_map in specializations.iter() {
+                        for imp in &inherent_impls_clone {
+                            if imp.generic_params.is_empty() {
+                                continue;
+                            }
+                            
+                            let impl_node = find_node_by_span(program, imp.span).unwrap();
+                            let (impl_type_ref, associated_functions) = if let AstNodeKind::ImplDeclaration { type_reference, associated_functions, .. } = &impl_node.kind {
+                                (type_reference, associated_functions)
+                            } else {
+                                unreachable!();
+                            };
+                            
+                            let mut impl_substitutions = BTreeMap::new();
+                            let generic_struct_params = &template_symbol.generic_parameters;
+                            
+                            let AstNodeKind::TypeReference { generic_types: impl_ref_generic_args, .. } = &impl_type_ref.kind else {
+                                continue;
+                            };
+                            
+                            let mut consistent = true;
+                            for (i, struct_generic_id) in generic_struct_params.iter().enumerate() {
+                                let impl_generic_arg_node = impl_ref_generic_args.get(i).unwrap();
+                                let concrete_type_for_struct_generic = specialization_map.get(struct_generic_id).unwrap();
+                                let impl_generic_type = self.get_type_from_ast(impl_generic_arg_node, imp.scope_id).unwrap();
+                                
+                                if let Type::Base { symbol: impl_generic_symbol_id, .. } = impl_generic_type {
+                                    if imp.generic_params.contains(&impl_generic_symbol_id) {
+                                        if let Some(existing) = impl_substitutions.get(&impl_generic_symbol_id) {
+                                            if existing != concrete_type_for_struct_generic {
+                                                consistent = false;
+                                                break;
+                                            }
+                                        } else {
+                                            impl_substitutions.insert(impl_generic_symbol_id, concrete_type_for_struct_generic.clone());
+                                        }
+                                    } else if &impl_generic_type != concrete_type_for_struct_generic {
+                                        consistent = false;
+                                        break;
+                                    }
+                                } else if &impl_generic_type != concrete_type_for_struct_generic {
+                                    consistent = false;
+                                    break;
+                                }
+                            }
+
+                            if !consistent || impl_substitutions.is_empty() {
+                                continue;
+                            }
+
+                            for func_node in associated_functions {
+                                let func_value_id = func_node.value_id.unwrap();
+                                let func_symbol = self.analyzer.symbol_table.get_value_symbol(func_value_id).unwrap();
+                                let func_type_id = func_symbol.type_id.as_ref().unwrap().get_base_symbol();
+                                
+                                let instantiations_for_func = self.monomorphization_ctx.instantiations.entry(func_type_id).or_default();
+                                if instantiations_for_func.insert(impl_substitutions.clone()) {
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -205,7 +319,6 @@ impl<'a> MIRBuilder<'a> {
                     let name = self.analyzer.symbol_table.get_type_name(sym.name_id);
                     name == "Self"
                 }) || (!template_params.is_empty() && arguments.len() < template_params.len());
-
 
                 if has_receiver
                     && let AstNodeKind::FieldAccess { left, .. } = &function.kind
@@ -1306,6 +1419,7 @@ impl<'a> MIRBuilder<'a> {
 impl<'a> MIRBuilder<'a> {
     pub fn build(&mut self, program: &mut AstNode) -> MIRNode {
         self.discover_monomorphic_sites(program);
+        self.propagate_monomorphizations(program);
         let mut mir_program = self.monomorphize(program);
 
         let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };

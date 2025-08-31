@@ -6,7 +6,18 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-let x: int = sizeof int;
+/*struct Vec<T> { size: int; }
+impl<T> Vec<T> {
+    fn new(): Vec<T> {
+        Vec {
+            size: sizeof T
+        }
+    }
+}
+
+let v = [Vec<int>].new();*/
+
+// this doesnt compile:
 
 struct Scalar<T> {}
 impl<T> Scalar<T> {
