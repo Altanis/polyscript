@@ -212,6 +212,15 @@ impl Compiler {
         }
 
         if DEBUG {
+            println!("-- AST --");
+            
+            let mut ast = String::new();
+            for module in self.modules.values() {
+                let _ = module.ast.fmt_with_indent(&mut ast, 0, Some(&self.analyzer.symbol_table));
+            }
+
+            println!("{}", ast);
+
             println!("-- SEMANTIC ANALYZER --");
             println!("{}", &self.analyzer);
 

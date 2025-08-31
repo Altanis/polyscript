@@ -860,7 +860,7 @@ impl AstNode {
             },
             AstNodeKind::SizeofExpression(expr) => {
                 write!(f, "{}sizeof ", indent_str)?;
-                expr.fmt_with_indent(f, indent, table)?;
+                expr.fmt_with_indent(f, 0, table)?;
             },
             AstNodeKind::ImportStatement { identifiers, file_path } => {
                 write!(f, "import {{")?;
@@ -890,7 +890,7 @@ impl AstNode {
             }
             
             let type_str = table.display_type(ty);
-            write!(f, " {}", format!("<{}>", type_str).cyan())?;
+            write!(f, " {}", format!("<{} [{}]>", type_str, ty.get_base_symbol()).cyan())?;
         } else if let Some(ty) = &self.type_id {
             if ty.get_base_symbol() == PrimitiveKind::Void as usize {
                 return Ok(());

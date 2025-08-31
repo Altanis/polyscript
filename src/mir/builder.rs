@@ -861,8 +861,24 @@ impl<'a> MIRBuilder<'a> {
 
                     let is_method_call = instance.is_some() && matches!(&function.kind, AstNodeKind::FieldAccess { .. });
 
-                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if !generic_arguments.is_empty() {
-                        let mangled_name = self.mangle_name(*fn_sig_id, generic_arguments);
+                    let mut needs_monomorphization = !generic_arguments.is_empty();
+                    if !needs_monomorphization
+                        && let AstNodeKind::FieldAccess { left, .. } = &function.kind
+                        && let Some(Type::Base { args, .. }) = &left.type_id
+                    {
+                        needs_monomorphization = !args.is_empty();
+                    }
+                    
+                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization {
+                        let concrete_types_for_mangling = if !generic_arguments.is_empty() {
+                            generic_arguments.clone()
+                        } else {
+                            let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
+                            let Type::Base { args, .. } = left.type_id.as_ref().unwrap() else { unreachable!() };
+                            args.clone()
+                        };
+
+                        let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
                         let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().id;
                         let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
                         (mangled_name, monomorphized_fn_value_symbol.id, monomorphized_fn_value_symbol.type_id.unwrap())
