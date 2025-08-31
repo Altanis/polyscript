@@ -67,7 +67,8 @@ pub enum ErrorKind {
     NeedsHeapAllocation(String),
     ClosureWithGenerics(String),
     NonConstantInitializer(String, String),
-    InvalidImport(String, String)
+    InvalidImport(String, String),
+    InvalidCall(String, String)
 }
 
 impl ErrorKind {
@@ -194,7 +195,8 @@ impl ErrorKind {
             ErrorKind::NeedsHeapAllocation(value_symbol) => format!("{value_symbol} needs to be heap allocated"),
             ErrorKind::ClosureWithGenerics(name) => format!("closure \"{}\" defines generic parameters", if name.is_empty() { "[unnamed closure]" } else { name }),
             ErrorKind::NonConstantInitializer(constant, reason) => format!("initializer for constant {} is not a constant expression: {}", constant, reason),
-            ErrorKind::InvalidImport(path, reason) => format!("invalid import of \"{}\": {}", path, reason)
+            ErrorKind::InvalidImport(path, reason) => format!("invalid import of \"{}\": {}", path, reason),
+            ErrorKind::InvalidCall(method, ty) => format!("method `{}` is an instance method, not a static method, and cannot be called on type `{}` directly", method, ty)
         }
     }
 }

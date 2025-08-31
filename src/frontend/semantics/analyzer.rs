@@ -1170,13 +1170,11 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, program: &mut AstNode) -> Result<(), Vec<Error>> {
-        let mut errors = vec![];
-
         macro_rules! pass {
             ($self:ident, $method:ident, $program:expr) => {{
                 let pass_errors = $self.$method($program);
                 if !pass_errors.is_empty() {
-                    errors.extend(pass_errors);
+                    return Err(pass_errors);
                 }
             }};
         }
@@ -1194,11 +1192,7 @@ impl SemanticAnalyzer {
         pass!(self, mutability_check_pass, program);
         pass!(self, trait_conformance_pass, program);
 
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        Ok(())
     }
 }
 

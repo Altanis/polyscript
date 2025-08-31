@@ -1221,6 +1221,10 @@ impl SemanticAnalyzer {
             }
         }
 
+        if !errors.is_empty() {
+            return errors;
+        }
+
         let keys: Vec<TypeSymbolId> = self.unification_context.substitutions.keys().cloned().collect();
         for uv_id in keys {
             if let Some(ty) = self.unification_context.substitutions.get(&uv_id).cloned() {
@@ -1230,7 +1234,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        errors
+        vec![]
     }
 
     fn process_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) -> Result<bool, BoxedError> {
@@ -1444,6 +1448,8 @@ impl SemanticAnalyzer {
                 if self.is_uv(symbol) {
                     return Ok(false);
                 }
+
+                println!("*moans*");
 
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
 

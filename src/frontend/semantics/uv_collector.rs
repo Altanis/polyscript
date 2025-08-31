@@ -1194,7 +1194,8 @@ impl SemanticAnalyzer {
                     info,
                 );
             }
-         }
+        }
+        
         if !is_method_call {
             self.unification_context.register_constraint(
                 Constraint::FunctionSignature(function_type, argument_types, return_uv_type.clone()),
