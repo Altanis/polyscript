@@ -19,7 +19,16 @@ let v = [Vec<int>].new();*/
 
 // this doesnt compile:
 
-import { Scalar } from "scalar.ps";
+struct Scalar {}
+impl Drop for Scalar {
+    fn drop(&mut self) {
+        let x = 5;
+    }
+}
 
+impl Scalar {
+    fn drop(&mut self) {}
+}
 
-let y = [Scalar<float>].get_sizeof();
+let x = (Scalar {});
+[Scalar as Drop].drop(&mut x);

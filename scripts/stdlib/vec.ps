@@ -1,27 +1,37 @@
-import { alloc, free } from "@intrinsics";
+import { calloc, realloc, memcpy, free } from "@intrinsics";
 
+// Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
 
+// A struct representing a vector, a contiguous, resizable array that holds elements of the same type.
 struct Vec<T> {
+    // The current size of the vector.
     private size: int;
+    // How many elements the vector has reserved for storage.
     private capacity: int;
+    // The size of 1 element.
     private element_size: int;
+    // A pointer to the actual data in the vector.
     private data: int;
 }
 
+// Custom drop implementation to free the held data from the vector.
 impl<T> Drop for Vec<T> {
     fn drop(&mut self) {
         if (self.capacity != 0) {
             free(self.data);
-
-            self.size = 0;
-            self.capacity = 0;
-            self.data = nullptr;
         }
+
+        self.size = 0;
+        self.capacity = 0;
+        self.data = nullptr;
     }
 }
 
+// Custom clone implementation to 
+
 impl<T> Vec<T> {
+    // Constructs a new vector. This function does not reserve any memory for the vector.
     pub fn new(): Self {
         Self {
             size: 0,
@@ -29,5 +39,63 @@ impl<T> Vec<T> {
             element_size: sizeof T,
             data: nullptr
         }
+    }
+
+    // Constructs a new vector with space for `n` elements.
+    pub fn from_size(n: int): Self {
+        Self {
+            size: n,
+            capacity: n,
+            element_size: sizeof T,
+            data: calloc(n, sizeof T)
+        }
+    }
+
+    // Adjusts the capacity of the vector. 
+    // * Returns `true` if successful, `false` otherwise.
+    // * This function returns false if `new_capacity` is less than the current capacity.
+    pub fn reserve(&mut self, new_capacity: int): bool {
+        if (self.capacity > new_capacity) {
+            return false;
+        }
+
+        let new_data = realloc(self.data, self.element_size * new_capacity);
+        if (new_data == nullptr) return false;
+
+        self.data = new_data;
+        self.capacity = new_capacity;
+
+        true
+    }
+
+    // Pushes an element to the end of a vector.
+    pub fn push(&mut self, element: &T) {
+        if (self.size + 1 > self.capacity) {
+            self.resize(self.capacity * 2);
+        }
+
+        let dst = self.data + self.capacity * self.element_size;
+        memcpy(dst, element, self.element_size);
+        vec.size += 1;
+    }
+
+    // Replaces the element at index `idx` with `element`.
+    // * Returns true if successful, false otherwise.
+    // * This function returns false if `idx` is out of the bounds of the allocated vector.
+    pub fn replace(&mut self, idx: int, element: &T): bool {
+        if (idx < 0 || idx + 1 > self.size) {
+            return false;
+        }
+
+        let dst = self.data + idx * self.element_size;
+        memcpy(dst, element, self.element_size);
+
+        true
+    }
+
+    // Gets the element at index `idx`.
+    // * Panics if `idx` is out of bounds.
+    pub fn get(&mut self): &T {
+
     }
 }

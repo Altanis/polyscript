@@ -1449,8 +1449,6 @@ impl SemanticAnalyzer {
                     return Ok(false);
                 }
 
-                println!("*moans*");
-
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
 
                 if let TypeSymbolKind::FunctionSignature {

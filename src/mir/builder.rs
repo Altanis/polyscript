@@ -1,3 +1,4 @@
+// mir/builder.rs
 use std::{borrow::Borrow, collections::{BTreeMap, HashMap, HashSet}, fmt::Write, rc::Rc};
 
 use colored::Colorize;
@@ -859,7 +860,17 @@ impl<'a> MIRBuilder<'a> {
                     let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
                     let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind else { unreachable!() };
 
-                    let is_method_call = instance.is_some() && matches!(&function.kind, AstNodeKind::FieldAccess { .. });
+                    let is_method_call = if let AstNodeKind::FieldAccess { left, .. } = &function.kind {
+                        let is_static_path = match &left.kind {
+                            AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some(),
+                            AstNodeKind::PathQualifier { .. } => true,
+                            _ => false,
+                        };
+                        
+                        instance.is_some() && !is_static_path
+                    } else {
+                        false
+                    };
 
                     let mut needs_monomorphization = !generic_arguments.is_empty();
                     if !needs_monomorphization
