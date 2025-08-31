@@ -13,7 +13,8 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     errors: Vec<Error>,
-    current_id: usize
+    current_id: usize,
+    file_path: Option<String>
 }
 
 impl Parser {
@@ -65,6 +66,7 @@ impl Parser {
             kind,
             span,
             (self.lines[span.end_pos.line - 1].clone(), span.start_pos.line),
+            self.file_path.clone()
         )
     }
 
@@ -555,13 +557,14 @@ impl Parser {
 }
 
 impl Parser {
-    pub fn new(lined_source: Vec<String>, tokens: Vec<Token>) -> Parser {
+    pub fn new(lined_source: Vec<String>, tokens: Vec<Token>, file_path: Option<String>) -> Parser {
         Parser {
             lines: lined_source,
             tokens,
             current: 0,
             errors: vec![],
-            current_id: 0
+            current_id: 0,
+            file_path
         }
     }
 

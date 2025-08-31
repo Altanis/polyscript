@@ -44,6 +44,8 @@ pub struct Lexer {
     index: usize,
     /// The tokens collected from the source.
     tokens: Vec<Token>,
+    /// The path to the file the lexer is lexing.
+    file_path: Option<String>
 }
 
 impl Lexer {
@@ -83,7 +85,7 @@ impl Lexer {
             }
         };
 
-        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line))
+        Error::from_one_error(kind, span, (self.lines[span.end_pos.line - 1].clone(), self.line), self.file_path.clone())
     }
 
     /// Peeks forward `n` characters.
@@ -887,7 +889,7 @@ impl Lexer {
 }
 
 impl Lexer {
-    pub fn new(program: String) -> Lexer {
+    pub fn new(program: String, file_path: Option<String>) -> Lexer {
         Lexer {
             lines: program.split("\n").map(|x| x.to_string()).collect(),
             source: program.chars().collect(),
@@ -895,6 +897,7 @@ impl Lexer {
             column: 1,
             index: 0,
             tokens: vec![],
+            file_path
         }
     }
 

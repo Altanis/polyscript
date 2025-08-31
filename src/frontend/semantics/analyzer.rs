@@ -267,11 +267,13 @@ pub struct SymbolTable {
     next_value_symbol_id: ValueSymbolId,
     next_type_symbol_id: TypeSymbolId,
 
+    file_path: Option<String>,
+
     pub real_starting_scope: ScopeId,
 }
 
 impl SymbolTable {
-    pub fn new(lines: Rc<Vec<String>>) -> Self {
+    pub fn new(lines: Rc<Vec<String>>, file_path: Option<String>) -> Self {
         let mut table = SymbolTable {
             registry: SymbolRegistry::default(),
             value_names: NameInterner::new(),
@@ -283,6 +285,7 @@ impl SymbolTable {
             next_scope_id: 0,
             next_value_symbol_id: 0,
             next_type_symbol_id: 0,
+            file_path,
             real_starting_scope: 0,
         };
 
@@ -967,13 +970,15 @@ impl SymbolTable {
                 ErrorKind::AlreadyDeclared(name),
                 s2,
                 Span::get_all_lines(self.lines.clone(), &[s1, s2]),
+                self.file_path.clone()
             ),
             (Some(s), None) | (None, Some(s)) => Error::from_one_error(
                 ErrorKind::AlreadyDeclared(name),
                 s,
                 (self.lines[s.start_pos.line - 1].clone(), s.start_pos.line),
+                self.file_path.clone()
             ),
-            (None, None) => Error::new(ErrorKind::AlreadyDeclared(name)),
+            (None, None) => Error::new(ErrorKind::AlreadyDeclared(name), self.file_path.clone()),
         }
     }
 }
@@ -1085,11 +1090,12 @@ pub struct SemanticAnalyzer {
     pub uv_collection_ctx: UVCollectionContext,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
+    file_path: Option<String>
 }
 
 impl SemanticAnalyzer {
-    pub fn new(lines: Rc<Vec<String>>) -> SemanticAnalyzer {
-        let mut symbol_table = SymbolTable::new(lines.clone());
+    pub fn new(lines: Rc<Vec<String>>, file_path: Option<String>) -> SemanticAnalyzer {
+        let mut symbol_table = SymbolTable::new(lines.clone(), file_path.clone());
         let mut trait_registry = TraitRegistry::new();
 
         symbol_table.populate_with_defaults(&mut trait_registry);
@@ -1106,6 +1112,7 @@ impl SemanticAnalyzer {
             uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false, current_function_stack: vec![] },
             errors: vec![],
             lines,
+            file_path
         }
     }
 
@@ -1161,12 +1168,14 @@ impl SemanticAnalyzer {
 
     pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
         let lines = Span::get_all_lines(self.lines.clone(), spans);
-        Error::from_multiple_errors(kind, primary_span, lines)
+        Error::from_multiple_errors(kind, primary_span, lines, self.file_path.clone())
     }
 
-    pub fn set_source(&mut self, lines: Rc<Vec<String>>) {
+    pub fn set_source(&mut self, lines: Rc<Vec<String>>, file_path: Option<String>) {
         self.lines = lines.clone();
         self.symbol_table.lines = lines;
+        self.file_path = file_path.clone();
+        self.symbol_table.file_path = file_path;
     }
 
     pub fn analyze(&mut self, program: &mut AstNode) -> Result<(), Vec<Error>> {

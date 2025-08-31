@@ -19,11 +19,7 @@ let v = [Vec<int>].new();*/
 
 // this doesnt compile:
 
-struct Scalar<T> {}
-impl<T> Scalar<T> {
-    fn get_sizeof(&self): int {
-        sizeof T
-    }
-}
+import { Scalar } from "scalar.ps";
+
 
 let y = [Scalar<float>].get_sizeof();

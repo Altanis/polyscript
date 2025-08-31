@@ -64,7 +64,7 @@ impl Compiler {
     pub fn new(config: CompilerConfig) -> Compiler {
         Compiler {
             config,
-            analyzer: SemanticAnalyzer::new(Rc::new(vec![])),
+            analyzer: SemanticAnalyzer::new(Rc::new(vec![]), None),
             modules: HashMap::new(),
         }
     }
@@ -83,16 +83,18 @@ impl Compiler {
         let mut visited_for_discovery: HashSet<PathBuf> = HashSet::new();
 
         while let Some(current_path) = file_queue.pop_front() {
+            let file_path = current_path.as_os_str().to_str().map(|f| f.to_string());
+
             if !visited_for_discovery.insert(current_path.clone()) {
                 continue;
             }
 
             let source_code = fs::read_to_string(&current_path).unwrap_or_else(|_| panic!("Could not read source file: {:?}", current_path));
-            let (lined_source, tokens) = self.generate_tokens(source_code);
+            let (lined_source, tokens) = self.generate_tokens(source_code, file_path.clone());
             let lined_source_rc = Rc::new(lined_source);
-            self.analyzer.set_source(lined_source_rc.clone());
+            self.analyzer.set_source(lined_source_rc.clone(), file_path.clone());
 
-            let mut ast = self.parse_tokens((*lined_source_rc).clone(), tokens.clone());
+            let mut ast = self.parse_tokens((*lined_source_rc).clone(), tokens.clone(), file_path);
 
             let mut dependencies = vec![];
             if let AstNodeKind::Program(stmts) = &ast.kind {
@@ -177,7 +179,7 @@ impl Compiler {
 
             let errors = self.analyzer.symbol_collector_pass(&mut module.ast);
             if !errors.is_empty() {
-                println!("{} errors emitted... printing:", errors.len());
+                eprintln!("{} errors emitted in {:?}... printing:", errors.len(), path);
                 for err in errors {
                     eprintln!("{}", err);
                 }
@@ -193,12 +195,14 @@ impl Compiler {
         }
 
         for path in &compilation_order {
+            let file_path = path.as_os_str().to_str().map(|f| f.to_string());
+            
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
-            self.analyzer.set_source(module.lined_source.clone());
+            self.analyzer.set_source(module.lined_source.clone(), file_path);
 
             if let Err(errs) = self.analyzer.analyze(&mut module.ast) {
-                println!("{} errors emitted in {:?}... printing:", errs.len(), path);
+                eprintln!("{} errors emitted in {:?}... printing:", errs.len(), path);
                 for err in errs {
                     eprintln!("{}", err);
                 }
@@ -364,11 +368,12 @@ impl Compiler {
         Ok(())
     }
 
-    fn generate_tokens(&self, program: String) -> (Vec<String>, Vec<Token>) {
-        let mut lexer = Lexer::new(program);
+    fn generate_tokens(&self, program: String, file_path: Option<String>) -> (Vec<String>, Vec<Token>) {
+        let mut lexer = Lexer::new(program, file_path.clone());
         let tokens = lexer.tokenize();
 
         if let Err(e) = tokens {
+            eprintln!("1 error emitted in {:?}... printing:", file_path);
             eprintln!("{}", e);
             std::process::exit(1);
         }
@@ -376,12 +381,12 @@ impl Compiler {
         lexer.extract()
     }
 
-    fn parse_tokens(&self, lined_source: Vec<String>, tokens: Vec<Token>) -> AstNode {
-        let mut parser = Parser::new(lined_source, tokens);
+    fn parse_tokens(&self, lined_source: Vec<String>, tokens: Vec<Token>, file_path: Option<String>) -> AstNode {
+        let mut parser = Parser::new(lined_source, tokens, file_path.clone());
 
         match parser.parse() {
             Err(errs) => {
-                println!("{} errors emitted... printing:", errs.len());
+                eprintln!("{} errors emitted in {:?}... printing:", errs.len(), file_path);
                 for err in errs {
                     eprintln!("{}", err);
                 }
@@ -427,7 +432,7 @@ impl Compiler {
         capture_analysis::init(program, &self.analyzer);
 
         if !errs.is_empty() {
-            println!("{} errors emitted... printing:", errs.len());
+            eprintln!("{} errors emitted... printing:", errs.len());
             for err in errs {
                 eprintln!("{}", err);
             }

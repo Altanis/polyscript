@@ -206,24 +206,32 @@ pub struct Error {
     kind: ErrorKind,
     span: Span,
     source_lines: Vec<(String, usize)>,
+    file_path: Option<String>,
 }
 
 pub type BoxedError = Box<Error>;
 
 impl Error {
-    pub fn new(kind: ErrorKind) -> BoxedError {
+    pub fn new(kind: ErrorKind, file_path: Option<String>) -> BoxedError {
         boxed!(Error {
             kind,
             span: Span::default(),
-            source_lines: vec![]
+            source_lines: vec![],
+            file_path
         })
     }
 
-    pub fn from_one_error(kind: ErrorKind, span: Span, source_line: (String, usize)) -> BoxedError {
+    pub fn from_one_error(
+        kind: ErrorKind,
+        span: Span,
+        source_line: (String, usize),
+        file_path: Option<String>,
+    ) -> BoxedError {
         boxed!(Error {
             kind,
             span,
-            source_lines: vec![source_line]
+            source_lines: vec![source_line],
+            file_path,
         })
     }
 
@@ -231,11 +239,13 @@ impl Error {
         kind: ErrorKind,
         span: Span,
         source_lines: Vec<(String, usize)>,
+        file_path: Option<String>,
     ) -> BoxedError {
         boxed!(Error {
             kind,
             span,
-            source_lines
+            source_lines,
+            file_path,
         })
     }
 }
@@ -243,11 +253,8 @@ impl Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "[{}] {}", "error".red().bold(), self.kind.as_str())?;
-        writeln!(
-            f,
-            "as found in [insert_file_here]:{}:{}",
-            self.span.start_pos.line, self.span.start_pos.column
-        )?;
+        let file_name = self.file_path.as_ref().map(|path| path.split('/').next_back().unwrap_or(path)).unwrap_or("[insert_file_here]");
+        writeln!(f, "as found in {}:{}:{}", file_name, self.span.start_pos.line, self.span.start_pos.column)?;
 
         let mut used_numbers = vec![];
         for (content, number) in self.source_lines.iter() {
