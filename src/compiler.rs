@@ -22,6 +22,7 @@ use crate::utils::error::{BoxedError, ErrorKind};
 use crate::utils::kind::{Span, Token};
 
 pub const DEBUG: bool = true;
+const FILE_EXTENSION: &str = "ps";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EmitType {
@@ -71,6 +72,11 @@ impl Compiler {
     pub fn run(&mut self) {
         let mut file_queue: VecDeque<PathBuf> = VecDeque::new();
         let entry_path = fs::canonicalize(&self.config.entry_file).expect("Failed to find entry file.");
+
+        if !self.config.entry_file.to_lowercase().ends_with(&format!(".{FILE_EXTENSION}")) {
+            panic!("The entry file given does not end in extension {FILE_EXTENSION}, please give the compiler a supported file type.");
+        }
+
         file_queue.push_back(entry_path.clone());
 
         let mut dep_graph: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
@@ -131,6 +137,11 @@ impl Compiler {
                                 panic!("Failed to resolve import path: {:?}", dep_path)
                             })
                         };
+
+                        let file_path = canonical_dep_path.as_os_str().to_str().expect("A file was imported in the source with a name that does not have a valid UTF-8 representation.");
+                        if !file_path.to_lowercase().ends_with(&format!(".{FILE_EXTENSION}")) {
+                            panic!("A file was imported, {file_path}, that does not end in extension {FILE_EXTENSION}; please give the compiler a supported file type.");
+                        }
 
                         dependencies.push(canonical_dep_path.clone());
                         file_queue.push_back(canonical_dep_path);
