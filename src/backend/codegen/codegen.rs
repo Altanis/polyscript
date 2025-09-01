@@ -15,11 +15,10 @@ pub type StringLiteralId = usize;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RcRepr<'ctx> {
-    /// { ref_count: i64, drop_fn: void (*)(i8*), data: T }
     pub rc_struct_type: StructType<'ctx>,
     pub llvm_data_type: BasicTypeEnum<'ctx>,
     pub clone_data_fn: FunctionValue<'ctx>,
-    pub drop_data_fn: FunctionValue<'ctx>,
+    pub deallocate_data_fn: FunctionValue<'ctx>,
 }
 
 fn get_base_variable(node: &MIRNode) -> Option<usize> {
@@ -104,9 +103,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
         for &value_id in scope.values.values() {
             let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+            let ty = symbol.type_id.as_ref().unwrap();
             let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
 
-            if symbol.type_id.as_ref().unwrap().is_heap_ref() && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
+            let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
+            let type_id = ty.get_base_symbol();
+            
+            if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
+                && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+            {
+                let applicable_impl = impls_for_type.iter().find(|imp| {
+                    self.check_trait_impl_applicability_mir(ty, imp)
+                });
+
+                if let Some(imp) = applicable_impl
+                    && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
+                    && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
+                {
+                    let var_ptr = self.variables.get(&value_id).unwrap();
+
+                    if ty.is_heap_ref() {
+                        let rc_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), *var_ptr, "rc_ptr_for_drop").unwrap().into_pointer_value();
+
+                        let inner_type = match ty {
+                            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
+                            _ => unreachable!(),
+                        };
+                        let rc_repr = self.wrap_in_rc(inner_type);
+                        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "data_ptr_for_drop").unwrap();
+                        self.builder.build_call(drop_fn_val, &[data_ptr.into()], "user_drop_call").unwrap();
+                    } else {
+                        self.builder.build_call(drop_fn_val, &[BasicMetadataValueEnum::from(*var_ptr)], "user_drop_call").unwrap();
+                    }
+                }
+            }
+
+            if ty.is_heap_ref() && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
                 let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
                 let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, &format!("{}_rc_ptr", name)).unwrap();
 
@@ -126,10 +158,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let ref_count_type = self.context.i64_type();
-        let drop_fn_ptr_type = self.context.ptr_type(AddressSpace::default());
+        let deallocate_fn_ptr_type = self.context.ptr_type(AddressSpace::default());
 
         let header_type = self.context.opaque_struct_type("RcHeader");
-        header_type.set_body(&[ref_count_type.into(), drop_fn_ptr_type.into()], false);
+        header_type.set_body(&[ref_count_type.into(), deallocate_fn_ptr_type.into()], false);
         header_type
     }
     
@@ -204,16 +236,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         let is_zero = self.builder.build_int_compare(IntPredicate::EQ, new_count, self.context.i64_type().const_int(0, false), "is_zero").unwrap();
         
-        let drop_block = self.context.append_basic_block(function, "drop");
-        self.builder.build_conditional_branch(is_zero, drop_block, end_block).unwrap();
+        let deallocate_block = self.context.append_basic_block(function, "deallocate");
+        self.builder.build_conditional_branch(is_zero, deallocate_block, end_block).unwrap();
         
-        self.builder.position_at_end(drop_block);
+        self.builder.position_at_end(deallocate_block);
     
-        let drop_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 1, "drop_fn_ptr_ptr").unwrap();
-        let drop_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), drop_fn_ptr_ptr, "drop_fn_ptr").unwrap().into_pointer_value();
+        let deallocate_fn_ptr_ptr = self.builder.build_struct_gep(rc_header_type, rc_ptr_generic, 1, "deallocate_fn_ptr_ptr").unwrap();
+        let deallocate_fn_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), deallocate_fn_ptr_ptr, "deallocate_fn_ptr").unwrap().into_pointer_value();
         
-        let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        self.builder.build_indirect_call(drop_fn_type, drop_fn_ptr, &[rc_ptr_generic.into()], "drop_call").unwrap();
+        let dealloc_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        self.builder.build_indirect_call(dealloc_fn_type, deallocate_fn_ptr, &[rc_ptr_generic.into()], "deallocate_call").unwrap();
         
         self.build_free(rc_ptr_generic);
     
@@ -238,48 +270,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         rc_struct_type.set_body(&[rc_header_type.into(), llvm_data_type], false);
 
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let drop_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        let drop_data_fn = self.module.add_function(&format!("drop_data_{}", type_name_mangled), drop_fn_type, Some(Linkage::Internal));
+        let deallocate_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        let deallocate_data_fn = self.module.add_function(&format!("deallocate_data_{}", type_name_mangled), deallocate_fn_type, Some(Linkage::Internal));
 
         let clone_fn_type = llvm_data_type.fn_type(&[ptr_type.into()], false);
         let clone_data_fn = self.module.add_function(&format!("clone_data_{}", type_name_mangled), clone_fn_type, Some(Linkage::Internal));
         
-        let repr = RcRepr { rc_struct_type, llvm_data_type, clone_data_fn, drop_data_fn };
+        let repr = RcRepr { rc_struct_type, llvm_data_type, clone_data_fn, deallocate_data_fn };
         self.rc_map.insert(ty.clone(), repr);
 
-        self.build_drop_data_fn_body(ty, drop_data_fn);
+        self.build_deallocate_data_fn_body(ty, deallocate_data_fn);
         self.build_clone_data_fn_body(ty, clone_data_fn);
 
         repr
     }
 
-    fn build_drop_data_fn_body(&mut self, ty: &Type, function: FunctionValue<'ctx>) {
+    fn build_deallocate_data_fn_body(&mut self, ty: &Type, function: FunctionValue<'ctx>) {
         let old_block = self.builder.get_insert_block();
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
         let rc_ptr_generic = function.get_first_param().unwrap().into_pointer_value();
         rc_ptr_generic.set_name("rc_ptr_generic");
-
-        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
-        let type_id = ty.get_base_symbol();
-        
-        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
-            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
-        {
-            let applicable_impl = impls_for_type.iter().find(|imp| {
-                self.check_trait_impl_applicability_mir(ty, imp)
-            });
-
-            if let Some(imp) = applicable_impl
-                && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
-                && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
-            {
-                let rc_repr = self.wrap_in_rc(ty);
-                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr_for_drop").unwrap();
-                self.builder.build_call(drop_fn_val, &[data_ptr.into()], "user_drop_call").unwrap();
-            }
-        }
 
         if let Type::Base { symbol, .. } = ty {
             let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
@@ -999,8 +1011,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "rc.ref_count_ptr").unwrap();
         self.builder.build_store(ref_count_ptr, self.context.i64_type().const_int(1, false)).unwrap();
         
-        let drop_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "rc.drop_fn_ptr").unwrap();
-        self.builder.build_store(drop_fn_ptr_ptr, rc_repr.drop_data_fn.as_global_value().as_pointer_value()).unwrap();
+        let deallocate_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "rc.deallocate_fn_ptr").unwrap();
+        self.builder.build_store(deallocate_fn_ptr_ptr, rc_repr.deallocate_data_fn.as_global_value().as_pointer_value()).unwrap();
 
         let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 1, "rc.data_ptr").unwrap();
         let inner_value = self.compile_node(inner_expr).unwrap();
