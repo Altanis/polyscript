@@ -19,16 +19,6 @@ let v = [Vec<int>].new();*/
 
 // this doesnt compile:
 
-struct Scalar {}
-impl Drop for Scalar {
-    fn drop(&mut self) {
-        let x = 5;
-    }
+fn never_ret(): never {
+    1;
 }
-
-impl Scalar {
-    fn drop(&mut self) {}
-}
-
-let x = (Scalar {});
-[Scalar as Drop].drop(&mut x);

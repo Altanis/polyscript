@@ -497,6 +497,11 @@ impl Lexer {
                 TokenKind::Keyword(KeywordKind::Char),
                 span.set_end_from_values(self.index, self.line, self.column),
             )),
+            NEVER_TYPE => Ok(Token::new(
+                word,
+                TokenKind::Keyword(KeywordKind::Never),
+                span.set_end_from_values(self.index, self.line, self.column),
+            )),
             LET_KEYWORD => Ok(Token::new(
                 word,
                 TokenKind::Keyword(KeywordKind::Let),

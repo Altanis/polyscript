@@ -24,7 +24,7 @@ pub const BOOL_TYPE: &str = "bool";
 pub const STATIC_STRING_TYPE: &str = "str";
 pub const CHAR_TYPE: &str = "char";
 pub const VOID_TYPE: &str = "void"; // NOTE: Programs may not use this type.
-pub const NEVER_TYPE: &str = "never"; // NOTE: Programs may not use this type.
+pub const NEVER_TYPE: &str = "never";
 
 pub const LET_KEYWORD: &str = "let";
 pub const CONST_KEYWORD: &str = "const";
@@ -460,6 +460,7 @@ pub enum KeywordKind {
     String,
     Bool,
     Char,
+    Never,
     If,
     Else,
     While,
@@ -684,6 +685,7 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::String => "Keyword::String".cyan(),
                 KeywordKind::Bool => "Keyword::Bool".cyan(),
                 KeywordKind::Char => "Keyword::Char".cyan(),
+                KeywordKind::Never => "Keyword::Never".cyan(),
                 KeywordKind::If => "Keyword::If".yellow(),
                 KeywordKind::Else => "Keyword::Else".yellow(),
                 KeywordKind::While => "Keyword::While".yellow(),
