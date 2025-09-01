@@ -20,10 +20,15 @@ impl Drop for Scalar {
 
 impl Clone for Scalar {
     fn clone(&self): Self {
+        let z = 6;
         Scalar {}
     }
 }
 
 {
-    let scalar = Scalar {};
+    let scalar: &'heap mut Scalar = heap (Scalar {});
+    let scalar2: &'heap mut Scalar = scalar; // incref
+    let scalar3: Scalar = *scalar; // clone
 }
+
+// drop here

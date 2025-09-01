@@ -1480,10 +1480,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
 
                 if fn_name == "clone" && trait_id == clone_trait_id {
-                    let rc_ptr = self.compile_node(instance_node).unwrap();
-                    let incref = self.get_incref();
-                    self.builder.build_call(incref, &[rc_ptr.into()], "rc.clone_incref").unwrap();
-                    return Some(rc_ptr);
+                    let original_rc_ptr = self.compile_node(instance_node).unwrap().into_pointer_value();
+                    let inner_type = match instance_type {
+                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
+                        _ => unreachable!(),
+                    };
+                    let rc_repr = self.wrap_in_rc(inner_type);
+                    let original_data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, original_rc_ptr, 1, "original_data_ptr_for_clone").unwrap();
+
+                    let user_clone_fn_val = self.functions.get(&fn_symbol.id).copied().unwrap();
+
+                    let cloned_data_val = if self.is_rvo_candidate(inner_type) {
+                        let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
+                        let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "clone_rvo_ret_ptr").unwrap();
+                        let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), original_data_ptr.into()];
+                        self.builder.build_call(user_clone_fn_val, &args, "").unwrap();
+                        self.builder.build_load(return_llvm_type, rvo_return_ptr, "cloned_val").unwrap()
+                    } else {
+                        let call = self.builder.build_call(user_clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
+                        call.try_as_basic_value().left().unwrap()
+                    };
+
+                    let mangled_name = self.mangle_name(inner_type);
+                    let size = rc_repr.rc_struct_type.size_of().unwrap();
+                    let new_rc_ptr = self.build_malloc(size, &format!("heap_alloc.{}", mangled_name));
+                    
+                    let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, new_rc_ptr, 0, "rc.header_ptr").unwrap();
+                    let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "rc.ref_count_ptr").unwrap();
+                    self.builder.build_store(ref_count_ptr, self.context.i64_type().const_int(1, false)).unwrap();
+                    
+                    let deallocate_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "rc.deallocate_fn_ptr").unwrap();
+                    self.builder.build_store(deallocate_fn_ptr_ptr, rc_repr.deallocate_data_fn.as_global_value().as_pointer_value()).unwrap();
+
+                    let new_data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, new_rc_ptr, 1, "rc.data_ptr").unwrap();
+                    self.builder.build_store(new_data_ptr, cloned_data_val).unwrap();
+                    
+                    return Some(new_rc_ptr.as_basic_value_enum());
                 }
 
                 if fn_name == "drop" && trait_id == drop_trait_id {
