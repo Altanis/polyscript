@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, eprint, print, exit } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, eprint, exit } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -16,6 +16,7 @@ struct Vec<T> {
 }
 
 impl<T> Drop for Vec<T> {
+    // Drops the vector
     fn drop(&mut self) {
         if (self.capacity != 0) {
             self.clear();
@@ -28,9 +29,36 @@ impl<T> Drop for Vec<T> {
     }
 }
 
+impl<T> Clone for Vec<T> {
+    fn clone(&self): Self {
+        if (self.capacity == 0) {
+            return Vec { size: 0, capacity: 0, element_size: self.element_size, data: nullptr };
+        }
+
+        let data = calloc(self.capacity, self.element_size);
+        
+        let idx = 0;
+        while (idx < self.size) {
+            let old_element_ptr = data + idx * self.element_size;
+            let old_element = old_element_ptr as &T;
+            let new_element = old_element.clone();
+
+            memcpy(old_element_ptr, new_element, self.element_size);
+            idx += 1;
+        }
+
+        Vec {
+            size: self.size,
+            capacity: self.capacity,
+            element_size: self.element_size,
+            data
+        }
+    }
+}
+
 impl<T> Vec<T> {
     // Constructs a new vector. This function does not reserve any memory for the vector.
-    pub fn new(): Self {
+    public fn new(): Self {
         Self {
             size: 0,
             capacity: 0,
@@ -40,7 +68,7 @@ impl<T> Vec<T> {
     }
 
     // Constructs a new vector with space for `n` elements.
-    pub fn from_size(n: int): Self {
+    public fn from_size(n: int): Self {
         Self {
             size: n,
             capacity: n,
@@ -52,7 +80,7 @@ impl<T> Vec<T> {
     // Adjusts the capacity of the vector. 
     // * Returns `true` if successful, `false` otherwise.
     // * This function returns false if `new_capacity` is less than or equal to the current capacity.
-    pub fn reserve(&mut self, new_capacity: int): bool {
+    public fn reserve(&mut self, new_capacity: int): bool {
         if (new_capacity <= self.capacity) return false;
 
         let bytes = self.element_size * new_capacity;
@@ -66,7 +94,7 @@ impl<T> Vec<T> {
     }
 
     // Pushes an element to the end of a vector.
-    pub fn push(&mut self, element: &T) {
+    public fn push(&mut self, element: &T) {
         if (self.size + 1 > self.capacity) {
             self.reserve(if self.capacity == 0 { 1 } else { self.capacity * 2 });
         }
@@ -80,16 +108,13 @@ impl<T> Vec<T> {
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
-    pub fn replace(&self, idx: int, element: &T): bool {
+    public fn replace(&self, idx: int, element: &T): bool {
         if (idx < 0 || idx + 1 > self.size) {
             return false;
         }
 
         let dst = self.data + idx * self.element_size;
-
         [T as Drop].drop(dst as &mut T);
-        if #IS_REFCOUNTED#{T} { drop(dst); }
-
         memcpy(dst, element, self.element_size);
 
         true
@@ -97,7 +122,7 @@ impl<T> Vec<T> {
 
     // Gets the element at index `idx`.
     // * Panics if `idx` is out of bounds.
-    pub fn get(&self, idx: int): &T {
+    public fn get(&self, idx: int): &T {
         if (idx < 0 || idx + 1 > self.size) {
             eprint("oob access in vector\n");
             exit(1);
@@ -110,16 +135,13 @@ impl<T> Vec<T> {
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
-    pub fn remove(&mut self, idx: int): bool {
+    public fn remove(&mut self, idx: int): bool {
         if (idx < 0 || idx + 1 > self.size) {
             return false;
         }
 
         let dst = self.data + idx * self.element_size;
-
         [T as Drop].drop(dst as &mut T);
-        if #IS_REFCOUNTED#{T} { drop(dst); }
-
         let src = self.data + idx * (self.element_size + 1);
         let size = self.element_size * (self.size - idx - 1);
 
@@ -131,7 +153,7 @@ impl<T> Vec<T> {
 
     // Clears the vector.
     // * All elements in the vector are dropped.
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         while (self.size > 0) {
             self.remove(0);
         }
