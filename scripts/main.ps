@@ -1,6 +1,7 @@
 // compiler directive in trusted mode
 // allow int <=> &T in trusted mode
 // opaque exit with never type, typecheck functions that return never
+// `drop(x)` => dont allow x to be accessed
 
 // arrays + Indexable trait
 // stdlib
@@ -14,6 +15,12 @@ struct Scalar {}
 impl Drop for Scalar {
     fn drop(&mut self) {
         let x = 5;
+    }
+}
+
+impl Clone for Scalar {
+    fn clone(&self): Self {
+        Scalar {}
     }
 }
 
