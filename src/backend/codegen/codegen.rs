@@ -8,7 +8,7 @@ use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
 use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
-use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRNode, MIRNodeKind};
+use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
@@ -1531,6 +1531,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let llvm_field_type = self.map_semantic_type(field_type).unwrap();
         Some(self.builder.build_load(llvm_field_type, field_ptr, name).unwrap())
     }
+
+    fn compile_compiler_directive(&mut self, directive: &MIRDirectiveKind) -> Option<BasicValueEnum<'ctx>> {
+        match directive {
+            MIRDirectiveKind::IsRefcounted(ty) => Some(self.context.bool_type().const_int(ty.is_heap_ref() as u64, false).as_basic_value_enum())
+        }
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1756,6 +1762,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let size = llvm_ty.size_of().unwrap();
                 Some(size.as_basic_value_enum())
             },
+            MIRNodeKind::CompilerDirective(directive) => self.compile_compiler_directive(directive),
             kind => unimplemented!("cannot compile node of kind {:?}", kind)
         }
     }

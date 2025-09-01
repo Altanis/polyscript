@@ -288,8 +288,8 @@ impl Parser {
             TokenKind::CompilerDirective(directive) => {
                 self.spanned_node(|parser| {
                     parser.advance();
-                    let identifiers = parser.parse_set()?;
-                    Ok(AstNodeKind::CompilerDirective { directive, identifiers })
+                    let nodes = parser.parse_directive_set(directive)?;
+                    Ok(AstNodeKind::CompilerDirective { directive, nodes })
                 })
             },
             TokenKind::OpenBracket => {
@@ -1158,6 +1158,20 @@ impl Parser {
                 break;
             }
         }
+        self.consume(TokenKind::CloseBrace)?;
+
+        Ok(items)   
+    }
+
+    fn parse_directive_set(&mut self, directive: DirectiveKind) -> Result<Vec<AstNode>, BoxedError> {
+        let mut items = vec![];
+
+        self.consume(TokenKind::OpenBrace)?;
+
+        match directive {
+            DirectiveKind::IsRefcounted => items.push(self.parse_type()?)
+        };
+
         self.consume(TokenKind::CloseBrace)?;
 
         Ok(items)   

@@ -197,7 +197,7 @@ pub enum AstNodeKind {
     },
     CompilerDirective {
         directive: DirectiveKind,
-        identifiers: Vec<AstNode>
+        nodes: Vec<AstNode>
     },
 
     /// An expression node with a semicolon.
@@ -886,9 +886,9 @@ impl AstNode {
                 }
                 write!(f, "}}")?;
             },
-            AstNodeKind::CompilerDirective { directive, identifiers } => {
+            AstNodeKind::CompilerDirective { directive, nodes } => {
                 write!(f, "{}#{:?}#{{", indent_str, directive)?;
-                for (i, ident) in identifiers.iter().enumerate() {
+                for (i, ident) in nodes.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -1231,8 +1231,8 @@ impl AstNode {
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_mut()],
             SizeofExpression(expr) => vec![expr.as_mut()],
-            ImportStatement { identifiers, .. } | ExportStatement { identifiers } | CompilerDirective { identifiers, .. }
-                => identifiers.iter_mut().collect()
+            ImportStatement { identifiers: nodes, .. } | ExportStatement { identifiers: nodes } | CompilerDirective { nodes, .. }
+                => nodes.iter_mut().collect()
         }
     }
 
@@ -1545,8 +1545,8 @@ impl AstNode {
             GenericParameter { .. } => vec![],
             ExpressionStatement(expr) => vec![expr.as_ref()],
             SizeofExpression(expr) => vec![expr.as_ref()],
-            ImportStatement { identifiers, .. } | ExportStatement { identifiers } | CompilerDirective { identifiers, .. }
-                => identifiers.iter().collect()
+            ImportStatement { identifiers: nodes, .. } | ExportStatement { identifiers: nodes } | CompilerDirective { nodes, .. }
+                => nodes.iter().collect()
         }
     }
 }

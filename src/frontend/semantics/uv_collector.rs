@@ -1268,16 +1268,10 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn collect_uv_compiler_directive(&mut self, uv_id: TypeSymbolId, directive: DirectiveKind, identifiers: &[AstNode], info: ConstraintInfo) -> Result<(), BoxedError> {
+    fn collect_uv_compiler_directive(&mut self, uv_id: TypeSymbolId, directive: DirectiveKind, nodes: &mut [AstNode], info: ConstraintInfo) -> Result<(), BoxedError> {
         let ty = match directive {
             DirectiveKind::IsRefcounted => {
-                for ident in identifiers.iter() {
-                    let AstNodeKind::Identifier(name) = &ident.kind else { unreachable!(); };
-                    if self.symbol_table.find_type_symbol_from_scope(info.scope_id, name).is_none() {
-                        return Err(self.create_error(ErrorKind::ExpectedType, ident.span, &[ident.span]));
-                    }
-                }
-
+                self.collect_uvs(&mut nodes[0])?;
                 Type::new_base(self.get_primitive_type(PrimitiveKind::Bool))
             },
         };
@@ -1536,7 +1530,7 @@ impl SemanticAnalyzer {
                     info,
                 );
             },
-            CompilerDirective { directive, identifiers } => self.collect_uv_compiler_directive(uv_id, *directive, identifiers, info)?,
+            CompilerDirective { directive, nodes } => self.collect_uv_compiler_directive(uv_id, *directive, nodes, info)?,
             ImportStatement { .. } | ExportStatement { .. } | Program(_) => unreachable!()
         }
 

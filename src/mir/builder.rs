@@ -8,8 +8,8 @@ use crate::{
         semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind},
         syntax::ast::{AstNode, AstNodeKind},
     },
-    mir::ir_node::{CaptureStrategy, MIRNode, MIRNodeKind},
-    utils::kind::{QualifierKind, Span},
+    mir::ir_node::{CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind},
+    utils::kind::{DirectiveKind, QualifierKind, Span},
 };
 
 #[derive(Default)]
@@ -1167,9 +1167,12 @@ impl<'a> MIRBuilder<'a> {
                 MIRNodeKind::Program(ir_nodes)
             },
             
-            AstNodeKind::CompilerDirective { directive, identifiers } => MIRNodeKind::CompilerDirective {
-                directive: *directive,
-                identifiers: identifiers.iter_mut().map(|ident| self.lower_node(ident).unwrap()).collect()
+            AstNodeKind::CompilerDirective { directive, nodes } => {
+                let rich_directive = match directive { 
+                    DirectiveKind::IsRefcounted => MIRDirectiveKind::IsRefcounted(nodes[0].type_id.clone().unwrap())
+                };
+
+                MIRNodeKind::CompilerDirective(rich_directive)
             },
 
             AstNodeKind::ImplDeclaration { .. }

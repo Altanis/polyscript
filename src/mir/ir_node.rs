@@ -17,6 +17,11 @@ pub enum CaptureStrategy {
 }
 
 #[derive(Debug, Clone)]
+pub enum MIRDirectiveKind {
+    IsRefcounted(Type)
+}
+
+#[derive(Debug, Clone)]
 pub enum MIRNodeKind {
     IntegerLiteral(i64),
     FloatLiteral(f64),
@@ -120,10 +125,7 @@ pub enum MIRNodeKind {
 
     ExpressionStatement(Box<MIRNode>),
     SizeofExpression(Type),
-    CompilerDirective {
-        directive: DirectiveKind,
-        identifiers: Vec<MIRNode>
-    },
+    CompilerDirective(MIRDirectiveKind),
 
     Program(Vec<MIRNode>),
 }
@@ -229,7 +231,7 @@ impl MIRNode {
             }
             ExpressionStatement(expr) => vec![expr.as_mut()],
             SizeofExpression(_) => vec![],
-            CompilerDirective { identifiers, .. } => identifiers.iter_mut().collect()
+            CompilerDirective { .. } => vec![]
         }
     }
 
@@ -323,7 +325,7 @@ impl MIRNode {
             }
             ExpressionStatement(expr) => vec![expr.as_ref()],
             SizeofExpression(_) => vec![],
-            CompilerDirective { identifiers, .. } => identifiers.iter().collect()
+            CompilerDirective { .. } => vec![]
         }
     }
 }
@@ -653,15 +655,14 @@ impl MIRNode {
                     write!(f, "{}", ty.to_string().bright_blue())?;
                 }
             },
-            MIRNodeKind::CompilerDirective { directive, identifiers } => {
-                write!(f, "{}#{:?}#{{", indent_str, directive)?;
-                for (i, ident) in identifiers.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    ident.fmt_with_indent(f, 0, table)?;
+            MIRNodeKind::CompilerDirective(directive) => {
+                match directive {
+                    MIRDirectiveKind::IsRefcounted(ty) => write!(f, "{}#IS_REFCOUNTED#{{ {} }}", indent_str, if let Some(t) = table {
+                        t.display_type(ty).bright_blue()
+                    } else {
+                        ty.to_string().bright_blue()
+                    })?
                 }
-                write!(f, "}}")?;
             }
         }
 
