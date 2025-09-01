@@ -285,8 +285,14 @@ impl Parser {
         let span = self.create_span_from_current_token();
         
         match token.get_token_kind() {
+            TokenKind::CompilerDirective(directive) => {
+                self.spanned_node(|parser| {
+                    let identifiers = parser.parse_set()?;
+                    Ok(AstNodeKind::CompilerDirective { directive, identifiers })
+                })
+            },
             TokenKind::OpenBracket => {
-                return self.spanned_node(|parser| {
+                self.spanned_node(|parser| {
                     parser.consume(TokenKind::OpenBracket)?;
 
                     let ty = boxed!(parser.parse_type()?);

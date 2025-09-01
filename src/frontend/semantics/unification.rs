@@ -2473,7 +2473,7 @@ impl SemanticAnalyzer {
             StructField {..} | TraitDeclaration {..} | TraitConstant {..} |
             TraitType(_) | GenericParameter {..} | ReferenceType {..} | TypeReference {..} |
             TypeDeclaration {..} | FunctionPointer {..} | SelfType(_) | PathQualifier {..} | AssociatedType {..} | EnumDeclaration {..} |
-            ImportStatement { .. } | ExportStatement { .. } => {}
+            ImportStatement { .. } | ExportStatement { .. } | CompilerDirective { .. } => {}
         }
         Ok(())
     }

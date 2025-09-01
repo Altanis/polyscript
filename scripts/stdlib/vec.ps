@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, free } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, eprint, print, exit } from "@intrinsics";
 import { panic, ToString } from "stdlib/io.ps";
 
 // Constant pointing to 0x0 for NULL.
@@ -81,13 +81,15 @@ impl<T> Vec<T> {
     // Replaces the element at index `idx` with `element`.
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
-    // * The replaced element is dropped and freed from memory.
+    // * The replaced element has its reference count decremented if it is heap allocated.
     pub fn replace(&mut self, idx: int, element: &T): bool {
         if (idx < 0 || idx + 1 > self.size) {
             return false;
         }
 
         let dst = self.data + idx * self.element_size;
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+
         memcpy(dst, element, self.element_size);
 
         true
@@ -97,9 +99,31 @@ impl<T> Vec<T> {
     // * Panics if `idx` is out of bounds.
     pub fn get(&mut self, idx: int): &T {
         if (idx < 0 || idx + 1 > self.size) {
-            panic("Attempted to index a vector of size " + [int as ToString].to_string(&self.size) + " at index " + [int as ToString].to_string(&idx) + ".");
+            eprint("oob access in vector\n");
+            exit(1);
         }
 
-        let data = self.data + idx * self.element_size;
+        (self.data + idx * self.element_size) as &T;
+    }
+
+    // Removes the element at index `idx`.
+    // * Returns true if successful, false otherwise.
+    // * This function returns false if `idx` is out of the bounds of the allocated vector.
+    // * The replaced element has its reference count decremented if it is heap allocated.
+    pub fn remove(&mut self, idx: int): bool {
+        if (idx < 0 || idx + 1 > self.size) {
+            return false;
+        }
+
+        let dst = self.data + idx * self.element_size;
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+
+        let src = self.data + idx * (self.element_size + 1);
+        let size = self.element_size * (self.size - idx - 1);
+
+        memmove(dst, src, size);
+        self.size -= 1;
+
+        true
     }
 }

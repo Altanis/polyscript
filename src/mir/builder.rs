@@ -1165,7 +1165,12 @@ impl<'a> MIRBuilder<'a> {
                 }
 
                 MIRNodeKind::Program(ir_nodes)
-            }
+            },
+            
+            AstNodeKind::CompilerDirective { directive, identifiers } => MIRNodeKind::CompilerDirective {
+                directive: *directive,
+                identifiers: identifiers.iter_mut().map(|ident| self.lower_node(ident).unwrap()).collect()
+            },
 
             AstNodeKind::ImplDeclaration { .. }
             | AstNodeKind::TraitDeclaration { .. }

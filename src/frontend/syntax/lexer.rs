@@ -45,7 +45,9 @@ pub struct Lexer {
     /// The tokens collected from the source.
     tokens: Vec<Token>,
     /// The path to the file the lexer is lexing.
-    file_path: Option<String>
+    file_path: Option<String>,
+    /// Whether or not the lexer is lexing a trusted file.
+    trusted: bool
 }
 
 impl Lexer {
@@ -841,7 +843,7 @@ impl Lexer {
                 }
 
                 return Err(self.generate_error(ErrorKind::UnterminatedString, Some(span)));
-            }
+            },
             CHAR_DELIMITER => {
                 let c = self.consume()?;
 
@@ -885,6 +887,29 @@ impl Lexer {
                 } else {
                     return Err(self.generate_error(ErrorKind::UnterminatedChar, Some(span)));
                 }
+            },
+            DIRECTIVE_DELIMITER => {
+                while let Ok(c) = self.peek() {
+                    if c == DIRECTIVE_DELIMITER {
+                        self.consume()?;
+                        symbol_buffer.push(c);
+
+                        let directive_kind = match symbol_buffer.as_str() {
+                            "#IS_REFCOUNTED#" => DirectiveKind::IsRefcounted,
+                            _ => return Err(self.generate_error(ErrorKind::InvalidDirective(symbol_buffer), Some(span)))
+                        };
+
+                        return Ok(Token::new(
+                            symbol_buffer,
+                            TokenKind::CompilerDirective(directive_kind),
+                            span.set_end_from_values(self.index, self.line, self.column),
+                        ));
+                    }
+
+                    symbol_buffer.push(self.consume()?);
+                }
+
+                return Err(self.generate_error(ErrorKind::UnterminatedDirective, Some(span)));
             }
             _ => {
                 return Err(self.generate_error(ErrorKind::UnrecognizedSymbol(symbol.to_string()), Some(span)))
@@ -894,7 +919,7 @@ impl Lexer {
 }
 
 impl Lexer {
-    pub fn new(program: String, file_path: Option<String>) -> Lexer {
+    pub fn new(program: String, file_path: Option<String>, trusted: bool) -> Lexer {
         Lexer {
             lines: program.split("\n").map(|x| x.to_string()).collect(),
             source: program.chars().collect(),
@@ -902,7 +927,8 @@ impl Lexer {
             column: 1,
             index: 0,
             tokens: vec![],
-            file_path
+            file_path,
+            trusted
         }
     }
 

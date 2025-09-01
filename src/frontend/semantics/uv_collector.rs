@@ -7,7 +7,7 @@ use crate::{
     frontend::{semantics::analyzer::{Constraint, ConstraintInfo, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, syntax::ast::{AstNode, AstNodeKind, BoxedAstNode}},
     utils::{
         error::{BoxedError, Error, ErrorKind},
-        kind::{Operation, QualifierKind, ReferenceKind, Span},
+        kind::{DirectiveKind, Operation, QualifierKind, ReferenceKind, Span},
     },
 };
 
@@ -1267,6 +1267,25 @@ impl SemanticAnalyzer {
 
         Ok(())
     }
+
+    fn collect_uv_compiler_directive(&mut self, uv_id: TypeSymbolId, directive: DirectiveKind, identifiers: &[AstNode], info: ConstraintInfo) -> Result<(), BoxedError> {
+        let ty = match directive {
+            DirectiveKind::IsRefcounted => {
+                for ident in identifiers.iter() {
+                    let AstNodeKind::Identifier(name) = &ident.kind else { unreachable!(); };
+                    if self.symbol_table.find_type_symbol(name).is_none() {
+                        return Err(self.create_error(ErrorKind::ExpectedType, info.span, &[info.span]));
+                    }
+                }
+
+                Type::new_base(self.get_primitive_type(PrimitiveKind::Bool))
+            },
+        };
+
+        self.unification_context.register_constraint(Constraint::Equality(Type::new_base(uv_id), ty), info);
+
+        Ok(())
+    }
 }
 
 impl SemanticAnalyzer {
@@ -1517,6 +1536,7 @@ impl SemanticAnalyzer {
                     info,
                 );
             },
+            CompilerDirective { directive, identifiers } => self.collect_uv_compiler_directive(uv_id, *directive, identifiers, info)?,
             ImportStatement { .. } | ExportStatement { .. } | Program(_) => unreachable!()
         }
 

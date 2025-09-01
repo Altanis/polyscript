@@ -11,6 +11,8 @@ pub enum ErrorKind {
     InvalidDigit(String),
     InvalidEscapeSequence(String),
     UnterminatedString,
+    UnterminatedDirective,
+    InvalidDirective(String),
     InvalidChar(String),
     UnterminatedChar,
     UnexpectedToken(String, String, String),
@@ -68,7 +70,8 @@ pub enum ErrorKind {
     ClosureWithGenerics(String),
     NonConstantInitializer(String, String),
     InvalidImport(String, String),
-    InvalidCall(String, String)
+    InvalidCall(String, String),
+    UntrustedContext(String)
 }
 
 impl ErrorKind {
@@ -77,10 +80,10 @@ impl ErrorKind {
             ErrorKind::UnrecognizedSymbol(symbol) => format!("unrecognized symbol {symbol}"),
             ErrorKind::UnexpectedEOF => "unexpected <eof> while parsing".to_string(),
             ErrorKind::InvalidDigit(digit) => format!("invalid digit {digit}"),
-            ErrorKind::InvalidEscapeSequence(sequence) => {
-                format!("invalid escape sequence {sequence}")
-            }
+            ErrorKind::InvalidEscapeSequence(sequence) => format!("invalid escape sequence {sequence}"),
             ErrorKind::UnterminatedString => "string left unterminated".to_string(),
+            ErrorKind::UnterminatedDirective => "compiler directive left unterminated".to_string(),
+            ErrorKind::InvalidDirective(directive) => format!("unknown compiler directive {directive}"),
             ErrorKind::InvalidChar(char) => format!("invalid char {char}"),
             ErrorKind::UnterminatedChar => "unterminated or degenerate char".to_string(),
             ErrorKind::UnexpectedToken(symbol, found, expected) => format!(
@@ -196,7 +199,8 @@ impl ErrorKind {
             ErrorKind::ClosureWithGenerics(name) => format!("closure \"{}\" defines generic parameters", if name.is_empty() { "[unnamed closure]" } else { name }),
             ErrorKind::NonConstantInitializer(constant, reason) => format!("initializer for constant {} is not a constant expression: {}", constant, reason),
             ErrorKind::InvalidImport(path, reason) => format!("invalid import of \"{}\": {}", path, reason),
-            ErrorKind::InvalidCall(method, ty) => format!("method `{}` is an instance method, not a static method, and cannot be called on type `{}` directly", method, ty)
+            ErrorKind::InvalidCall(method, ty) => format!("method `{}` is an instance method, not a static method, and cannot be called on type `{}` directly", method, ty),
+            ErrorKind::UntrustedContext(reason) => format!("attempted to use trusted feature in untrusted context: {reason}"),
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::{
-    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, TypeSymbolKind, ValueSymbolId},
+    frontend::{semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, TypeSymbolKind, ValueSymbolId}},
     utils::kind::*,
 };
 use colored::Colorize;
@@ -120,6 +120,10 @@ pub enum MIRNodeKind {
 
     ExpressionStatement(Box<MIRNode>),
     SizeofExpression(Type),
+    CompilerDirective {
+        directive: DirectiveKind,
+        identifiers: Vec<MIRNode>
+    },
 
     Program(Vec<MIRNode>),
 }
@@ -224,7 +228,8 @@ impl MIRNode {
                 children
             }
             ExpressionStatement(expr) => vec![expr.as_mut()],
-            SizeofExpression(_) => vec![]
+            SizeofExpression(_) => vec![],
+            CompilerDirective { identifiers, .. } => identifiers.iter_mut().collect()
         }
     }
 
@@ -317,7 +322,8 @@ impl MIRNode {
                 children
             }
             ExpressionStatement(expr) => vec![expr.as_ref()],
-            SizeofExpression(_) => vec![]
+            SizeofExpression(_) => vec![],
+            CompilerDirective { identifiers, .. } => identifiers.iter().collect()
         }
     }
 }
@@ -646,6 +652,16 @@ impl MIRNode {
                 } else {
                     write!(f, "{}", ty.to_string().bright_blue())?;
                 }
+            },
+            MIRNodeKind::CompilerDirective { directive, identifiers } => {
+                write!(f, "#{:?}#{{", directive)?;
+                for (i, ident) in identifiers.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    ident.fmt_with_indent(f, 0, table)?;
+                }
+                write!(f, "}}")?;
             }
         }
 

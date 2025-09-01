@@ -84,13 +84,14 @@ impl Compiler {
 
         while let Some(current_path) = file_queue.pop_front() {
             let file_path = current_path.as_os_str().to_str().map(|f| f.to_string());
+            let trusted = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
 
             if !visited_for_discovery.insert(current_path.clone()) {
                 continue;
             }
 
             let source_code = fs::read_to_string(&current_path).unwrap_or_else(|_| panic!("Could not read source file: {:?}", current_path));
-            let (lined_source, tokens) = self.generate_tokens(source_code, file_path.clone());
+            let (lined_source, tokens) = self.generate_tokens(source_code, file_path.clone(), trusted);
             let lined_source_rc = Rc::new(lined_source);
             self.analyzer.set_source(lined_source_rc.clone(), file_path.clone());
 
@@ -101,9 +102,7 @@ impl Compiler {
                 for stmt in stmts {
                     if let AstNodeKind::ImportStatement { file_path: rel_path_str, .. } = &stmt.kind {
                         let canonical_dep_path = if rel_path_str == "@intrinsics" {
-                            let is_part_of_stdlib = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
-
-                            if !is_part_of_stdlib {
+                            if !trusted {
                                 let err = self.analyzer.create_error(
                                     ErrorKind::InvalidImport(" intrinsics".to_string(), "Only standard library modules can import it.".to_string()),
                                     stmt.span,
@@ -368,8 +367,8 @@ impl Compiler {
         Ok(())
     }
 
-    fn generate_tokens(&self, program: String, file_path: Option<String>) -> (Vec<String>, Vec<Token>) {
-        let mut lexer = Lexer::new(program, file_path.clone());
+    fn generate_tokens(&self, program: String, file_path: Option<String>, trusted: bool) -> (Vec<String>, Vec<Token>) {
+        let mut lexer = Lexer::new(program, file_path.clone(), trusted);
         let tokens = lexer.tokenize();
 
         if let Err(e) = tokens {

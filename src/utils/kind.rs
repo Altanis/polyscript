@@ -66,6 +66,7 @@ pub const COLON: char = ':';
 
 pub const STRING_DELIMITER: char = '"';
 pub const CHAR_DELIMITER: char = '\'';
+pub const DIRECTIVE_DELIMITER: char = '#';
 
 #[derive(Debug, Hash, Eq, Clone, Copy, PartialEq, strum_macros::EnumIter)]
 pub enum Operation {
@@ -504,6 +505,11 @@ impl std::fmt::Display for QualifierKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DirectiveKind {
+    IsRefcounted
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Identifier,
     HeapRegion,
@@ -523,6 +529,7 @@ pub enum TokenKind {
     Comma,
     Colon,
     EndOfFile,
+    CompilerDirective(DirectiveKind)
 }
 
 pub const SYNC_TOKENS: [TokenKind; 16] = [
@@ -722,6 +729,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Comma => "Comma".dimmed(),
             TokenKind::Colon => "Colon".dimmed(),
             TokenKind::EndOfFile => "<EOF>".into(),
+            TokenKind::CompilerDirective(directive) => format!("CompilerDirective({:?})", directive).dimmed()
         };
 
         write!(f, "{}", token_type_str)
