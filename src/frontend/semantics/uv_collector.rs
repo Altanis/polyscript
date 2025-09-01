@@ -1273,8 +1273,8 @@ impl SemanticAnalyzer {
             DirectiveKind::IsRefcounted => {
                 for ident in identifiers.iter() {
                     let AstNodeKind::Identifier(name) = &ident.kind else { unreachable!(); };
-                    if self.symbol_table.find_type_symbol(name).is_none() {
-                        return Err(self.create_error(ErrorKind::ExpectedType, info.span, &[info.span]));
+                    if self.symbol_table.find_type_symbol_from_scope(info.scope_id, name).is_none() {
+                        return Err(self.create_error(ErrorKind::ExpectedType, ident.span, &[ident.span]));
                     }
                 }
 

@@ -1,6 +1,7 @@
-// raw ptr types
-    // T* (so like int*, char*)
-    // allowed to be typecasted to &T (int* -> &int, char* -> &char)
+// compiler directive in trusted mode
+// allow int <=> &T in trusted mode
+// opaque exit with never type, typecheck functions that return never
+
 // arrays + Indexable trait
 // stdlib
     // math + vec + string + io + hashmap
@@ -9,6 +10,9 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-fn never_ret(): never {
-    1;
+fn is_rc<T>(x: T): bool {
+    #IS_REFCOUNTED#{T}
 }
+
+let x = is_rc(true);
+let y = is_rc(heap 5);

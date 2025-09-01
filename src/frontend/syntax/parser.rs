@@ -287,6 +287,7 @@ impl Parser {
         match token.get_token_kind() {
             TokenKind::CompilerDirective(directive) => {
                 self.spanned_node(|parser| {
+                    parser.advance();
                     let identifiers = parser.parse_set()?;
                     Ok(AstNodeKind::CompilerDirective { directive, identifiers })
                 })

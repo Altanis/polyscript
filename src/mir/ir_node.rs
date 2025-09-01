@@ -654,7 +654,7 @@ impl MIRNode {
                 }
             },
             MIRNodeKind::CompilerDirective { directive, identifiers } => {
-                write!(f, "#{:?}#{{", directive)?;
+                write!(f, "{}#{:?}#{{", indent_str, directive)?;
                 for (i, ident) in identifiers.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
