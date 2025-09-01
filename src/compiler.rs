@@ -84,8 +84,7 @@ impl Compiler {
 
         while let Some(current_path) = file_queue.pop_front() {
             let file_path = current_path.as_os_str().to_str().map(|f| f.to_string());
-            // let trusted = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
-            let trusted = true;
+            let trusted = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
 
             if !visited_for_discovery.insert(current_path.clone()) {
                 continue;

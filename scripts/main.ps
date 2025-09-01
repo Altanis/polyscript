@@ -9,10 +9,3 @@
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
     // impl Add<str> for str {} inside file
 // maybe add prelude system
-
-fn is_rc<T>(x: T): bool {
-    #IS_REFCOUNTED#{T}
-}
-
-let x = is_rc(true);
-let y = is_rc(heap 5);

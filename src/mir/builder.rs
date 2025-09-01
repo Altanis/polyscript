@@ -1169,7 +1169,22 @@ impl<'a> MIRBuilder<'a> {
             
             AstNodeKind::CompilerDirective { directive, nodes } => {
                 let rich_directive = match directive { 
-                    DirectiveKind::IsRefcounted => MIRDirectiveKind::IsRefcounted(nodes[0].type_id.clone().unwrap())
+                    DirectiveKind::IsRefcounted => {
+                        let generic_ty = nodes[0].type_id.as_ref().unwrap();
+
+                        let concrete_ty = if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
+                            self.substitute_type(generic_ty, substitutions)
+                        } else {
+                            generic_ty.clone()
+                        };
+
+                        let fully_concrete_ty = self.resolve_concrete_type_recursively(&concrete_ty);
+                        if !self.type_is_fully_concrete(&fully_concrete_ty) {
+                            panic!("MIR Builder: Type for #IS_REFCOUNTED# is not fully concrete: {}", self.analyzer.symbol_table.display_type(&fully_concrete_ty));
+                        }
+                        
+                        MIRDirectiveKind::IsRefcounted(fully_concrete_ty)
+                    }
                 };
 
                 MIRNodeKind::CompilerDirective(rich_directive)
