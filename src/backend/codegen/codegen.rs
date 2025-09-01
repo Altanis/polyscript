@@ -414,7 +414,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &&TraitImpl) -> bool {
+    fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &TraitImpl) -> bool {
         let instance_args = match instance_type {
             Type::Base { args, .. } => args,
             _ => return imp.type_specialization.is_empty(),

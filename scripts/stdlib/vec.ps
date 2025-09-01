@@ -81,6 +81,7 @@ impl<T> Vec<T> {
     // Replaces the element at index `idx` with `element`.
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
+    // * The replaced element is dropped and freed from memory.
     pub fn replace(&mut self, idx: int, element: &T): bool {
         if (idx < 0 || idx + 1 > self.size) {
             return false;
@@ -96,9 +97,9 @@ impl<T> Vec<T> {
     // * Panics if `idx` is out of bounds.
     pub fn get(&mut self, idx: int): &T {
         if (idx < 0 || idx + 1 > self.size) {
-            return panic("Attempted to index a vector of size " + [int as ToString].to_string(&self.size) + " at index " + [int as ToString].to_string(&idx) + ".");
+            panic("Attempted to index a vector of size " + [int as ToString].to_string(&self.size) + " at index " + [int as ToString].to_string(&idx) + ".");
         }
 
-        
+        let data = self.data + idx * self.element_size;
     }
 }

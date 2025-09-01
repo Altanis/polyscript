@@ -1,3 +1,6 @@
+// raw ptr types
+    // T* (so like int*, char*)
+    // allowed to be typecasted to &T (int* -> &int, char* -> &char)
 // arrays + Indexable trait
 // stdlib
     // math + vec + string + io + hashmap
@@ -5,19 +8,6 @@
 // create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
     // impl Add<str> for str {} inside file
 // maybe add prelude system
-
-/*struct Vec<T> { size: int; }
-impl<T> Vec<T> {
-    fn new(): Vec<T> {
-        Vec {
-            size: sizeof T
-        }
-    }
-}
-
-let v = [Vec<int>].new();*/
-
-// this doesnt compile:
 
 fn never_ret(): never {
     1;
