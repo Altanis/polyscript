@@ -86,6 +86,8 @@ impl<T> Vec<T> {
         }
 
         let dst = self.data + idx * self.element_size;
+
+        [T as Drop].drop(dst as &mut T);
         if #IS_REFCOUNTED#{T} { drop(dst); }
 
         memcpy(dst, element, self.element_size);
@@ -114,6 +116,8 @@ impl<T> Vec<T> {
         }
 
         let dst = self.data + idx * self.element_size;
+
+        [T as Drop].drop(dst as &mut T);
         if #IS_REFCOUNTED#{T} { drop(dst); }
 
         let src = self.data + idx * (self.element_size + 1);
