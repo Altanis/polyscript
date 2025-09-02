@@ -721,18 +721,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let fn_name = "deref_mut".to_string();
 
                         let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
-                        let operand_val = self.compile_node(operand).unwrap();
-                        let operand_ptr = self.builder.build_alloca(operand_val.get_type(), "deref_mut_operand_ptr").unwrap();
-                        self.builder.build_store(operand_ptr, operand_val).unwrap();
-
+                        let operand_ptr = self.compile_place_expression(operand).unwrap();
+                        
                         let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_mut_call").unwrap();
                         call.try_as_basic_value().left().map(|v| v.into_pointer_value())
                     }
                 }
             },
             MIRNodeKind::FieldAccess { left, .. } => {
-                let struct_ptr = self.compile_place_expression(left)?;
+                 let mut struct_ptr = self.compile_place_expression(left)?;
     
+                let left_type = left.type_id.as_ref().unwrap();
+                let base_type = if let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = left_type {
+                    let loaded_ptr_type = self.map_semantic_type(left_type).unwrap();
+                    struct_ptr = self.builder.build_load(loaded_ptr_type, struct_ptr, "gep.base.load").unwrap().into_pointer_value();
+                    &**inner
+                } else {
+                    left_type
+                };
+                
                 let member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
                 let member_name = self.analyzer.symbol_table.get_value_name(member_symbol.name_id);
                 if !matches!(member_symbol.kind, ValueSymbolKind::StructField) {
@@ -750,13 +757,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .position(|s| s.id == member_symbol.id)
                     .unwrap() as u32;
     
-                let left_type = left.type_id.as_ref().unwrap();
-                let base_type = if let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = left_type {
-                    &**inner
-                } else {
-                    left_type
-                };
-                
                 let struct_llvm_type = self.map_semantic_type(base_type).unwrap().into_struct_type();
                 Some(self.builder.build_struct_gep(struct_llvm_type, struct_ptr, field_index, &format!("{}.addr", member_name)).unwrap())
             },
@@ -780,7 +780,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_unary_operation(&mut self, operator: Operation, operand_node: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_unary_operation(&mut self, operator: Operation, operand_node: &BoxedMIRNode, parent_node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
         if operator == Operation::ImmutableAddressOf || operator == Operation::MutableAddressOf {
             let ptr = self.compile_place_expression(operand_node).unwrap();
             return Some(ptr.as_basic_value_enum());
@@ -821,27 +821,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let fn_name = "deref".to_string();
 
                     let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
-                    let operand = self.compile_node(operand_node).unwrap();
-                    let ptr = self.builder.build_alloca(operand.get_type(), "deref_operand_ptr").unwrap();
-                    self.builder.build_store(ptr, operand).unwrap();
+                    let operand_ptr = self.compile_place_expression(operand_node).unwrap();
+                    
+                    let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_call").unwrap();
+                    let result_ptr = call.try_as_basic_value().left().unwrap().into_pointer_value();
 
-                    let call = self.builder.build_call(callee, &[ptr.into()], "deref_call").unwrap();
-                    return call.try_as_basic_value().left();
+                    let pointee_type = self.map_semantic_type(parent_node.type_id.as_ref().unwrap()).unwrap();
+                    let loaded_val = self.builder.build_load(pointee_type, result_ptr, "deref.load").unwrap();
+
+                    return Some(loaded_val);
                 }
             }
         }
     
-        let operand_type = operand_node.type_id.as_ref().unwrap();
-        if !self.is_primitive(operand_type) && let Some((trait_name, _)) = operator.to_trait_data() {
-            let fn_name = self.trait_name_to_fn_name(&trait_name);
-            let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
-            
-            let operand = self.compile_node(operand_node).unwrap();
-            let call = self.builder.build_call(callee, &[operand.into()], &format!("{}_call", fn_name)).unwrap();
-            
-            return call.try_as_basic_value().left();
-        }
-        
         let operand = self.compile_node(operand_node).unwrap();
         let is_float = operand.is_float_value();
     
@@ -1760,7 +1752,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::VariableDeclaration { name, initializer, mutable: true, .. }
                 => self.compile_variable_declaration(name, initializer, stmt.value_id.unwrap()),
             MIRNodeKind::UnaryOperation { operator, operand }
-                => self.compile_unary_operation(*operator, operand),
+                => self.compile_unary_operation(*operator, operand, stmt),
             MIRNodeKind::BinaryOperation { operator, left, right }
                 => self.compile_binary_operation(*operator, left, right),
             MIRNodeKind::ConditionalOperation { operator, left, right }

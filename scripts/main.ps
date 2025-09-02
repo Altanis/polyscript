@@ -30,5 +30,5 @@ impl DerefMut for Scalar {
 }
 
 let x = Scalar { x: 4 };
-let y = *x;
+let y: int = *x;
 *x = 7;
