@@ -11,24 +11,19 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar {}
-impl Drop for Scalar {
-    fn drop(&mut self) {
-        let x = 5;
+struct X {
+    x: int;
+}
+
+struct Y {
+    x: &'heap mut X;
+}
+
+impl X {
+    fn test(&self) {
+        let y = heap (Y { x: self });
     }
 }
 
-impl Clone for Scalar {
-    fn clone(&self): Self {
-        let z = 6;
-        Scalar {}
-    }
-}
-
-{
-    let scalar: &'heap mut Scalar = heap (Scalar {});
-    let scalar2: &'heap mut Scalar = scalar; // incref
-    let scalar3: Scalar = *scalar; // clone
-}
-
-// drop here
+let x = heap (X { x: 4 });
+x.test();

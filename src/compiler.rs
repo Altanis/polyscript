@@ -182,6 +182,7 @@ impl Compiler {
                 for err in errors {
                     eprintln!("{}", err);
                 }
+                std::process::exit(1);
             }
         }
 

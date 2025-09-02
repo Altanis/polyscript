@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, eprint, exit } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, incref, eprint, exit } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -25,33 +25,6 @@ impl<T> Drop for Vec<T> {
             self.size = 0;
             self.capacity = 0;
             self.data = nullptr;
-        }
-    }
-}
-
-impl<T> Clone for Vec<T> {
-    fn clone(&self): Self {
-        if (self.capacity == 0) {
-            return Vec { size: 0, capacity: 0, element_size: self.element_size, data: nullptr };
-        }
-
-        let data = calloc(self.capacity, self.element_size);
-        
-        let idx = 0;
-        while (idx < self.size) {
-            let old_element_ptr = data + idx * self.element_size;
-            let old_element = old_element_ptr as &T;
-            let new_element = old_element.clone();
-
-            memcpy(old_element_ptr, new_element, self.element_size);
-            idx += 1;
-        }
-
-        Vec {
-            size: self.size,
-            capacity: self.capacity,
-            element_size: self.element_size,
-            data
         }
     }
 }
