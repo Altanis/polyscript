@@ -15,22 +15,6 @@ struct X {
     x: int;
 }
 
-impl Drop for X {
-    fn drop(&mut self) {
-        let x = 3;
-    }
-}
-
-impl Clone for X {
-    fn clone(&self): Self {
-        X { x: self.x }
-    }
-}
-
-{
-    let x = X { x: 4 };
-}
-
 {
     let x = heap (X { x: 4 });
     let x2 = x.clone();
