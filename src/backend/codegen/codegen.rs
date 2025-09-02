@@ -699,18 +699,35 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let operand_type = operand.type_id.as_ref().unwrap();
-                let is_heap = self.analyzer.is_heap_type(operand_type);
-                let ptr = self.compile_node(operand).unwrap().into_pointer_value();
 
-                if is_heap {
-                    let inner_type = match operand_type {
-                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
-                        _ => unreachable!(),
-                    };
-                    let rc_repr = self.wrap_in_rc(inner_type);
-                    Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap())
-                } else {
-                    Some(ptr)
+                match operand_type {
+                    Type::Reference { .. } | Type::MutableReference { .. } => {
+                        let is_heap = self.analyzer.is_heap_type(operand_type);
+                        let ptr = self.compile_node(operand).unwrap().into_pointer_value();
+
+                        if is_heap {
+                            let inner_type = match operand_type {
+                                Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
+                                _ => unreachable!(),
+                            };
+                            let rc_repr = self.wrap_in_rc(inner_type);
+                            Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap())
+                        } else {
+                            Some(ptr)
+                        }
+                    },
+                    _ => {
+                        let trait_name = "DerefMut".to_string();
+                        let fn_name = "deref_mut".to_string();
+
+                        let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
+                        let operand_val = self.compile_node(operand).unwrap();
+                        let operand_ptr = self.builder.build_alloca(operand_val.get_type(), "deref_mut_operand_ptr").unwrap();
+                        self.builder.build_store(operand_ptr, operand_val).unwrap();
+
+                        let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_mut_call").unwrap();
+                        call.try_as_basic_value().left().map(|v| v.into_pointer_value())
+                    }
                 }
             },
             MIRNodeKind::FieldAccess { left, .. } => {
@@ -770,30 +787,47 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         if operator == Operation::Dereference {
-            let operand = self.compile_node(operand_node).unwrap();
-            let ptr = operand.into_pointer_value();
             let operand_type = operand_node.type_id.as_ref().unwrap();
 
-            let inner_type = match operand_type {
-                Type::Reference { inner } => &**inner,
-                Type::MutableReference { inner } => &**inner,
-                _ => panic!("CodeGen: cannot dereference non-pointer type"),
-            };
+            match operand_type {
+                Type::Reference { .. } | Type::MutableReference { .. } => {
+                    let operand = self.compile_node(operand_node).unwrap();
+                    let ptr = operand.into_pointer_value();
 
-            if self.analyzer.is_heap_type(operand_type) {
-                let rc_repr = self.wrap_in_rc(inner_type);
-                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap();
-                
-                if self.is_copy_type(inner_type) {
-                    let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
-                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "deref.copy").unwrap());
-                } else {
-                    let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "deref.clone").unwrap();
-                    return cloned_val.try_as_basic_value().left();
+                    let inner_type = match operand_type {
+                        Type::Reference { inner } => &**inner,
+                        Type::MutableReference { inner } => &**inner,
+                        _ => unreachable!(),
+                    };
+
+                    if self.analyzer.is_heap_type(operand_type) {
+                        let rc_repr = self.wrap_in_rc(inner_type);
+                        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap();
+                        
+                        if self.is_copy_type(inner_type) {
+                            let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
+                            return Some(self.builder.build_load(llvm_inner_type, data_ptr, "deref.copy").unwrap());
+                        } else {
+                            let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "deref.clone").unwrap();
+                            return cloned_val.try_as_basic_value().left();
+                        }
+                    } else {
+                        let pointee_type = self.map_semantic_type(inner_type).unwrap();
+                        return Some(self.builder.build_load(pointee_type, ptr, "deref").unwrap());
+                    }
+                },
+                _ => {
+                    let trait_name = "Deref".to_string();
+                    let fn_name = "deref".to_string();
+
+                    let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
+                    let operand = self.compile_node(operand_node).unwrap();
+                    let ptr = self.builder.build_alloca(operand.get_type(), "deref_operand_ptr").unwrap();
+                    self.builder.build_store(ptr, operand).unwrap();
+
+                    let call = self.builder.build_call(callee, &[ptr.into()], "deref_call").unwrap();
+                    return call.try_as_basic_value().left();
                 }
-            } else {
-                let pointee_type = self.map_semantic_type(inner_type).unwrap();
-                return Some(self.builder.build_load(pointee_type, ptr, "deref").unwrap());
             }
         }
     

@@ -549,6 +549,7 @@ impl SymbolTable {
             }
         }
 
+        // -- Drop Trait -- //
         let trait_scope_id = self.enter_scope(ScopeKind::Trait);
         let self_type_id = self.add_type_symbol(
             "Self",
@@ -598,6 +599,7 @@ impl SymbolTable {
 
         trait_registry.default_traits.insert("Drop".to_string(), trait_id);
         
+        // -- Clone Trait -- //
         let trait_scope_id = self.enter_scope(ScopeKind::Trait);
         let self_type_id = self.add_type_symbol(
             "Self",
@@ -646,6 +648,123 @@ impl SymbolTable {
         ).unwrap();
 
         trait_registry.default_traits.insert("Clone".to_string(), trait_id);
+
+        // --- Deref Trait ---
+        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
+        let self_type_id = self.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        let target_type_id = self.add_type_symbol(
+            "Target",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None
+        ).unwrap();
+
+        let func_scope_id = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+
+        let params = vec![Type::Reference {
+            inner: Box::new(Type::new_base(self_type_id)),
+        }];
+        let return_type = Type::Reference {
+            inner: Box::new(Type::new_base(target_type_id)),
+        };
+
+        let fn_sig_type_id = self.add_type_symbol(
+            "deref",
+            TypeSymbolKind::FunctionSignature {
+                params,
+                return_type,
+                instance: Some(ReferenceKind::Reference),
+            },
+            vec![],
+            QualifierKind::Private,
+            None,
+        ).unwrap();
+
+        self.add_value_symbol(
+            "deref",
+            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::new_base(fn_sig_type_id)),
+            None,
+        ).unwrap();
+        self.exit_scope();
+
+        let trait_id = self.add_type_symbol(
+            "Deref",
+            TypeSymbolKind::Trait(trait_scope_id),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        trait_registry.default_traits.insert("Deref".to_string(), trait_id);
+
+
+        // --- DerefMut Trait ---
+        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
+        let self_type_id = self.add_type_symbol(
+            "Self",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        let target_type_id = self.add_type_symbol(
+            "Target",
+            TypeSymbolKind::TypeAlias((None, None)),
+            vec![],
+            QualifierKind::Public,
+            None
+        ).unwrap();
+
+        let func_scope_id = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+
+        let params = vec![Type::MutableReference {
+            inner: Box::new(Type::new_base(self_type_id)),
+        }];
+        let return_type = Type::MutableReference {
+            inner: Box::new(Type::new_base(target_type_id)),
+        };
+
+        let fn_sig_type_id = self.add_type_symbol(
+            "deref_mut",
+            TypeSymbolKind::FunctionSignature {
+                params,
+                return_type,
+                instance: Some(ReferenceKind::MutableReference),
+            },
+            vec![],
+            QualifierKind::Private,
+            None,
+        ).unwrap();
+
+        self.add_value_symbol(
+            "deref_mut",
+            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::new_base(fn_sig_type_id)),
+            None,
+        ).unwrap();
+        self.exit_scope();
+
+        let trait_id = self.add_type_symbol(
+            "DerefMut",
+            TypeSymbolKind::Trait(trait_scope_id),
+            vec![],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        trait_registry.default_traits.insert("DerefMut".to_string(), trait_id);
 
         self.current_scope_id = old_scope;
     }

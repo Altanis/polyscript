@@ -1977,15 +1977,25 @@ impl SemanticAnalyzer {
             Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 self.unify(*inner.clone(), result_ty, info)?;
                 Ok(true)
-            }
+            },
             Type::Base { symbol, .. } if self.is_uv(*symbol) => {
                 Ok(false)
+            },
+            _ => {
+                let deref_trait_id = self.trait_registry.get_default_trait(&"Deref".to_string());
+                let deref_trait_type = Type::new_base(deref_trait_id);
+
+                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_trait_type, "Target", info) {
+                    self.unify(result_ty, target_type, info)?;
+                    return Ok(true);
+                }
+
+                Err(self.create_error(
+                    ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
+                    info.span,
+                    &[info.span],
+                ))
             }
-            _ => Err(self.create_error(
-                ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
-                info.span,
-                &[info.span],
-            )),
         }
     }
 }
@@ -2541,7 +2551,17 @@ impl SemanticAnalyzer {
             },
             AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let operand_type = self.resolve_type(operand.type_id.as_ref().unwrap());
-                Ok(matches!(operand_type, Type::MutableReference { .. }))
+                
+                if matches!(operand_type, Type::MutableReference { .. }) {
+                    return Ok(true);
+                }
+
+                if matches!(operand_type, Type::Reference { .. }) {
+                    return Ok(false);
+                }
+
+                let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
+                self.does_type_implement_trait(&operand_type, deref_mut_trait_id)
             },
             AstNodeKind::SelfExpr => {
                 let ty = self.resolve_type(place.type_id.as_ref().unwrap());

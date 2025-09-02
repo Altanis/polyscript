@@ -11,12 +11,24 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct X {
+struct Scalar {
     x: int;
 }
 
-{
-    let x = heap (X { x: 4 });
-    let x2 = x.clone();
-    let x3 = *x;
+impl Deref for Scalar {
+    type Target = int;
+    fn deref(&self): &int {
+        &self.x
+    }
 }
+
+impl DerefMut for Scalar {
+    type Target = int;
+    fn deref_mut(&mut self): &mut int {
+        &mut self.x
+    }
+}
+
+let x = Scalar { x: 4 };
+let y = *x;
+*x = 7;
