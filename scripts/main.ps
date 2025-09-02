@@ -15,15 +15,24 @@ struct X {
     x: int;
 }
 
-struct Y {
-    x: &'heap mut X;
-}
-
-impl X {
-    fn test(&self) {
-        let y = heap (Y { x: self });
+impl Drop for X {
+    fn drop(&mut self) {
+        let x = 3;
     }
 }
 
-let x = heap (X { x: 4 });
-x.test();
+impl Clone for X {
+    fn clone(&self): Self {
+        X { x: self.x }
+    }
+}
+
+{
+    let x = X { x: 4 };
+}
+
+{
+    let x = heap (X { x: 4 });
+    let x2 = x.clone();
+    let x3 = *x;
+}

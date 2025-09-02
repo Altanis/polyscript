@@ -1,135 +1,65 @@
-## 1. Allocation
+1. Allocation
 
-Heap allocation must occur explicitly, via the `heap` keyword (i.e., `let x = heap 3;`). Escape analysis emits errors when it detects an escaping reference that points to stack data. Heap allocations take on type `&'heap mut T`, for `T` being the type of the expression being heap allocated.
+Heap allocation must occur explicitly, via the `heap` keyword (i.e., `let x = heap 3;`). Escape analysis emits errors
+when it detects an escaping reference that points to stack data. Heap allocations take on type `&'heap mut T`, for `T` being the 
+type of the expression being heap allocated.
 
 Internally, the data is represented by a struct `Rc<T>` that roughly contains the following attributes:
+- `t: T;`: The data the container is holding.
+- `ref_count: int;`: The number of existing references to the data.
+- `drop: fn(Self);`: The function that runs before the data is freed. In the future, this may be overriden by implementing `Drop` on `T`.
+- `clone: fn(Self): Self;`: The function that performs a "shallow copy" of the data. In the future, this may be overriden by implementing `Clone` on `T`.
 
-* `t: T;`: The data the container is holding.
-* `ref_count: int;`: The number of existing references to the data.
-* `deallocate: fn(Self);`: The function that runs when the `Rc` has a reference count of zero.
-* `clone: fn(Self): Self;`: The function that performs a "shallow copy" of the data.
+When a heap allocation occurs, the `Rc` container is allocated and populated with the appropriate data. This marks the
+start of the lifetime of the created data.
 
-When a heap allocation occurs, the `Rc` container is allocated and populated with the appropriate data. This marks the start of the lifetime of the created data.
+2. Sharing vs. Cloning
 
----
+Consider a container `y`, which stores (heap) references to `a_1, a_2, a_3, ... a_n` (for example, `y` could be a struct storing
+a heap reference to another struct). Both a "shallow" and "deep" copy of `y` entails  a duplication of the value of `y` in memory. 
+However, the shallow copy does not duplicate the values of underlying references in memory, it simply increments their reference
+counter. A deep copy entails the underlying references having their values duplicated and stored in the copied container `y`. 
+The language does not provide semantics for a deep copy, and this procedure must be implemented manually.
 
-## 2. Sharing vs. Cloning
+Data that resides in the stack and the heap follow the same semantics when being moved around.
+    1. Using data by value, i.e. data with no explicit reference (of type `T`), results in a shallow copy of the data. The data is copied 
+    into memory, and escape analysis determines if the copied data will reside in stack or heap memory. The only exception is if the
+    value is on the left hand side of an Assignment operation, in which case a mutation occurs on the data.
 
-Consider a container `y`, which stores (heap) references to `a_1, a_2, a_3, ... a_n` (for example, `y` could be a struct storing a heap reference to another struct). Both a "shallow" and "deep" copy of `y` entails a duplication of the value of `y` in memory.
+    2. Using data by reference, i.e. data with an explicit reference (`&T`, `&mut T`, `&'heap T`, `&'heap mut T`), results in a pointer to the data 
+    being passed around. If the data resides on the stack, the stack pointer is free to move around, and no reference counting occurs (escape analysis 
+    verifies that dangling references to `x` do not escape). If the data resides on the heap, the reference counter is incremented.
 
-* **Shallow copy** does not duplicate the values of underlying references in memory; it simply increments their reference counter.
-* **Deep copy** entails the underlying references having their values duplicated and stored in the copied container `y`.
+    3. Dereferencing a reference to data results in a shallow copy. The only exception is if the dereference is on the left hand of an Assignment 
+    operation, in which case a mutation occurs on the data.
 
-The language does not provide semantics for a deep copy. This procedure must be implemented manually.
+    4. Returning data from a function without an explicit reference is not a traditional "use by value." Move semantics are invoked, and no shallow
+    copy occurs. If the data is heap allocated, the reference counter is not decremented, as the data is moved.
 
----
-
-## 2.1. BitCopy and Clone
-
-To unify stack and heap duplication semantics, two traits exist:
-
-* **BitCopy**: A marker trait meaning the type may be duplicated by raw bitwise copy.
-
-  * Examples: integers, booleans, plain stack structs, stack references (`&T`, `&mut T`).
-  * No destructor is allowed on `BitCopy` types.
-  * Standard library containers may `memcpy` elements when `U: BitCopy`.
-
-* **Clone**: A trait for semantic duplication when raw memcpy is not sufficient.
-
-  * Examples: heap references (`&'heap T`, `&'heap mut T`), resource-owning types.
-  * `Clone` may run arbitrary code, including reference count increments.
-  * Containers like `Vec<T>` call `Clone::clone` element-wise when `U: Clone`.
-
-**Rules:**
-
-* `BitCopy` types are duplicated with no runtime cost.
-* Non-`BitCopy` types that need duplication semantics must implement `Clone`.
-* Types that must not be duplicated (e.g., unique heap handles) should implement neither `BitCopy` nor `Clone`.
-
----
-
-## 2.2. Moving and Copying
-
-Data that resides in the stack and the heap follow the same semantics when being moved around:
-
-1. **Use by value** (`T`): Results in a shallow copy. The data is copied into memory, and escape analysis determines if the copied data resides on stack or heap.
-
-   * If `T: BitCopy`, this is a raw memcpy.
-   * If `T: Clone`, libraries that need duplication must explicitly call `clone()`.
-
-2. **Use by reference** (`&T`, `&mut T`, `&'heap T`, `&'heap mut T`): Results in a pointer being passed.
-
-   * Stack references: no reference counting.
-   * Heap references: reference counter is incremented automatically.
-
-3. **Dereference** (`*r`): Produces a shallow copy of the value.
-
-   * If the dereference is on the left-hand side of an assignment, mutation occurs.
-
-4. **Return by move**: Returning data without an explicit reference invokes move semantics.
-
-   * No shallow copy occurs.
-   * Heap references are moved without decrementing the refcount.
-
----
-
-### Example
-
+Consult the following code for reference:
 ```rs
 {
     let a: int = 4;
-    let b: int = a;      // Shallow copy of `a` occurs (BitCopy).
-    let c: &int = &a;    // Pointer to `a` taken. No copy.
-    let d: int = *c;     // Shallow copy of `a` occurs.
+    let b: int = a; // Shallow copy of `a` occurs.
+    let c: &int = &a; // A pointer to `a` is taken. No copy occurs.
+    let d: int = *c; // Shallow copy of `a` occurs.
 }
+
+// All variables dropped by here.
 
 {
     let a: &'heap mut int = heap 4;
-    let b: &'heap mut int = a; // Heap pointer moved, refcount incremented.
-    let c: int = *b;           // Shallow copy of `a` occurs (stack).
+    let b: &'heap mut int = a; // A heap pointer is moved, the refcount increases and no copy occurs.
+    let c: int = *b; // Shallow copy of `a` occurs on the stack.
 }
+
+// `a` and `b` are dropped, the refcount of the heap allocated `4` goes to 0 and is thus dropped.
 ```
 
----
+3. Reference Counting
 
-## 3. Dropping
+When a reference is acquired to heap allocated data, the reference counter is incremented. Data follows lexical lifetimes, and
+so when a scope is exited, all references inside of it have their reference counter decremented. For reference counters equal
+to `0`, the `drop` function pointer is called, and the data is freed from memory, completing the life cycle of the data.
 
-* **Stack data**: Dropped trivially; no action occurs by default.
-* **Heap data**: Reference count is decremented.
-
-Both behaviors always occur. Extra behavior may be programmed before refcount changes by implementing the `Drop` trait:
-
-```rs
-trait Drop {
-    fn drop(&mut self);
-}
-```
-
-Once `drop` completes, the reference count is decremented. When the reference count reaches zero, `deallocate` is invoked.
-
----
-
-## 4. Reference Counting
-
-When a reference to heap data is acquired, the reference counter is incremented. Data follows lexical lifetimes. When a scope exits:
-
-* All variables are dropped.
-* All heap references have their refcounts decremented.
-* If a refcount reaches zero, the `deallocate` function is called.
-
-When `deallocate` is called for a struct:
-
-* Its fields are traversed.
-* Heap references inside are decremented recursively.
-
----
-
-## 5. Containers and Clone
-
-Containers such as `Vec<T>` use these rules to determine cloning:
-
-* If `T: BitCopy`: the buffer is duplicated with a raw `memcpy`.
-* If `T: Clone`: elements are duplicated with `T::clone`, which for heap handles increments the reference counter.
-* If `T` implements neither: `Vec<T>: Clone` is disallowed.
-
-This ensures containers handle both stack and heap data correctly, with compile-time enforcement.
+When `drop` is called for a struct, its fields are traversed and heap references have their reference counts decremented.

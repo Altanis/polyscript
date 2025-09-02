@@ -29,6 +29,19 @@ impl<T> Drop for Vec<T> {
     }
 }
 
+impl<T: Clone> Clone for Vec<T> {
+    fn clone(&self): Self {
+        let vec: Vec<T> = [Vec<T>].from_size(self.capacity);
+
+        for (let i = 0; i < self.size; i += 1) {
+            let element: &T = self.get(i);
+            vec.push([T as Clone].clone(element));
+        }
+
+        vec
+    }
+}
+
 impl<T> Vec<T> {
     // Constructs a new vector. This function does not reserve any memory for the vector.
     public fn new(): Self {
