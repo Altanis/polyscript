@@ -400,7 +400,7 @@ impl SemanticAnalyzer {
                         };
                         
                         let specialized_sig_id = if let Some(symbol) =
-                            self.symbol_table.find_type_symbol_in_scope(&signature_name, base_symbol.scope_id)
+                            self.symbol_table.find_type_symbol_in_scope(&signature_name, self.symbol_table.current_scope_id)
                         {
                             symbol.id
                         } else {
