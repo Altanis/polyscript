@@ -145,8 +145,8 @@ pub enum ScopeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Base { symbol: TypeSymbolId, args: Vec<Type> },
-    Reference { inner: Box<Type>, is_heap: bool },
-    MutableReference { inner: Box<Type>, is_heap: bool },
+    Reference { inner: Box<Type> },
+    MutableReference { inner: Box<Type> },
 }
 
 impl Type {
@@ -156,10 +156,6 @@ impl Type {
 
     pub fn is_base(&self) -> bool {
         matches!(self, Type::Base { .. })
-    }
-
-    pub fn is_heap_ref(&self) -> bool {
-        matches!(self, Type::Reference { is_heap: true, .. } | Type::MutableReference { is_heap: true, .. })
     }
 
     pub fn get_base_symbol(&self) -> TypeSymbolId {
@@ -312,6 +308,17 @@ impl SymbolTable {
                 )
                 .unwrap();
         }
+
+        let heap_scope_id = table.enter_scope(ScopeKind::Struct);
+        let t_generic_id = table.add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
+        table.exit_scope();
+        table.add_type_symbol(
+            "Heap",
+            TypeSymbolKind::Struct((heap_scope_id, vec![])),
+            vec![t_generic_id],
+            QualifierKind::Public,
+            None
+        ).unwrap();
 
         let init_scope_id = table.get_next_scope_id();
         let init_scope = Scope {
@@ -556,7 +563,6 @@ impl SymbolTable {
 
         let params = vec![Type::MutableReference {
             inner: Box::new(Type::new_base(self_type_id)),
-            is_heap: false,
         }];
 
         let fn_sig_type_id = self.add_type_symbol(
@@ -606,7 +612,6 @@ impl SymbolTable {
 
         let params = vec![Type::Reference {
             inner: Box::new(Type::new_base(self_type_id)),
-            is_heap: false,
         }];
 
         let fn_sig_type_id = self.add_type_symbol(
@@ -1082,9 +1087,14 @@ pub struct UVCollectionContext {
     pub in_loop: bool
 }
 
+pub struct BuiltinTypes {
+    primitives: Vec<TypeSymbolId>,
+    heap_struct: TypeSymbolId
+}
+
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    pub builtin_types: Vec<TypeSymbolId>,
+    builtin_types: BuiltinTypes,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     pub uv_collection_ctx: UVCollectionContext,
@@ -1100,9 +1110,12 @@ impl SemanticAnalyzer {
 
         symbol_table.populate_with_defaults(&mut trait_registry);
 
-        let builtin_types: Vec<TypeSymbolId> = PrimitiveKind::iter()
-            .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
-            .collect();
+        let builtin_types = BuiltinTypes {
+            primitives: PrimitiveKind::iter()
+                .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
+                .collect(),
+            heap_struct: symbol_table.find_type_symbol("Heap").unwrap().id
+        };
 
         SemanticAnalyzer {
             trait_registry,
@@ -1126,6 +1139,18 @@ impl SemanticAnalyzer {
             } else {
                 break;
             }
+        }
+
+        false
+    }
+
+    pub fn get_heap_type(&self) -> TypeSymbolId {
+        self.builtin_types.heap_struct
+    }
+
+    pub fn is_heap_type(&self, ty: &Type) -> bool {
+        if let Type::Base { symbol, .. } = ty {
+            return *symbol == self.builtin_types.heap_struct;
         }
 
         false
@@ -1163,7 +1188,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn get_primitive_type(&self, primitive: PrimitiveKind) -> TypeSymbolId {
-        self.builtin_types[primitive as usize]
+        self.builtin_types.primitives[primitive as usize]
     }
 
     pub fn create_error(&self, kind: ErrorKind, primary_span: Span, spans: &[Span]) -> BoxedError {
@@ -1378,8 +1403,8 @@ impl SymbolTable {
                     }
                 }
             }
-            Type::Reference { inner, is_heap } => format!("&{}{}", if *is_heap { "'heap " } else { "" }, self.display_type(inner)),
-            Type::MutableReference { inner, is_heap } => format!("&{}mut {}", if *is_heap { "'heap " } else { "" }, self.display_type(inner)),
+            Type::Reference { inner } => format!("&{}", self.display_type(inner)),
+            Type::MutableReference { inner } => format!("&mut {}", self.display_type(inner)),
         }
     }
 
@@ -1691,8 +1716,8 @@ impl std::fmt::Display for Type {
                     write!(f, "{}<{}>", base_name, arg_str)
                 }
             }
-            Type::Reference { inner, is_heap } => write!(f, "&{}{}", if *is_heap { "'heap " } else { "" }, inner),
-            Type::MutableReference { inner, is_heap } => write!(f, "&{}mut {}", if *is_heap { "'heap " } else { "" }, inner),
+            Type::Reference { inner } => write!(f, "&{}", inner),
+            Type::MutableReference { inner } => write!(f, "&mut {}", inner),
         }
     }
 }

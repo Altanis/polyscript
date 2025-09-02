@@ -122,7 +122,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 {
                     let var_ptr = self.variables.get(&value_id).unwrap();
 
-                    if ty.is_heap_ref() {
+                    if self.analyzer.is_heap_type(ty) {
                         let rc_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), *var_ptr, "rc_ptr_for_drop").unwrap().into_pointer_value();
 
                         let inner_type = match ty {
@@ -138,7 +138,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
-            if ty.is_heap_ref() && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
+            if self.analyzer.is_heap_type(ty) && let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
                 let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
                 let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, &format!("{}_rc_ptr", name)).unwrap();
 
@@ -311,7 +311,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
                     let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
 
-                    if field_semantic_type.is_heap_ref() {
+                    if self.analyzer.is_heap_type(field_semantic_type) {
                         let field_rc_ptr = self.builder.build_extract_value(
                             data_struct_val,
                             i as u32,
@@ -384,7 +384,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 for (i, field_symbol) in field_symbols.iter().enumerate() {
                     let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
-                    if field_semantic_type.is_heap_ref() {
+                    if self.analyzer.is_heap_type(field_semantic_type) {
                         let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
                         let field_val = self.builder.build_extract_value(
                             original_data.into_struct_value(),
@@ -681,7 +681,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let init_val = self.compile_node(initializer).unwrap();
 
-        if ty.is_heap_ref() && !matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) {
+        if self.analyzer.is_heap_type(ty) && !matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) {
             let incref = self.get_incref();
             self.builder.build_call(incref, &[init_val.into()], &format!("incref_{}", name)).unwrap();
         }
@@ -699,7 +699,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let operand_type = operand.type_id.as_ref().unwrap();
-                let is_heap = operand_type.is_heap_ref();
+                let is_heap = self.analyzer.is_heap_type(operand_type);
                 let ptr = self.compile_node(operand).unwrap().into_pointer_value();
 
                 if is_heap {
@@ -774,13 +774,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let ptr = operand.into_pointer_value();
             let operand_type = operand_node.type_id.as_ref().unwrap();
 
-            let (inner_type, is_heap) = match operand_type {
-                Type::Reference { inner, is_heap } => (&**inner, *is_heap),
-                Type::MutableReference { inner, is_heap } => (&**inner, *is_heap),
+            let inner_type = match operand_type {
+                Type::Reference { inner } => &**inner,
+                Type::MutableReference { inner } => &**inner,
                 _ => panic!("CodeGen: cannot dereference non-pointer type"),
             };
 
-            if is_heap {
+            if self.analyzer.is_heap_type(operand_type) {
                 let rc_repr = self.wrap_in_rc(inner_type);
                 let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap();
                 
@@ -862,7 +862,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let target_ptr = self.compile_place_expression(left_node).unwrap();
             
             let left_type = left_node.type_id.as_ref().unwrap();
-            if left_type.is_heap_ref() {
+            if self.analyzer.is_heap_type(left_type) {
                 let old_val = self.builder.build_load(self.map_semantic_type(left_type).unwrap(), target_ptr, "assign.old_val").unwrap();
                 let decref = self.get_decref();
                 self.builder.build_call(decref, &[old_val.into()], "assign.decref").unwrap();
@@ -871,7 +871,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let value_to_store = self.compile_node(right_node).unwrap();
             
             let right_type = right_node.type_id.as_ref().unwrap();
-            if right_type.is_heap_ref() && !matches!(right_node.kind, MIRNodeKind::HeapExpression(_)) {
+            if self.analyzer.is_heap_type(right_type) && !matches!(right_node.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[value_to_store.into()], "assign.incref").unwrap();
             }
@@ -1036,7 +1036,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 && let Some(base_var_id) = get_base_variable(last_expr)
             {
                 let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                if symbol.type_id.as_ref().unwrap().is_heap_ref() && !last_stmt_is_heap_expr {
+                if self.analyzer.is_heap_type(symbol.type_id.as_ref().unwrap()) && !last_stmt_is_heap_expr {
                     let val = last_val.unwrap();
                     let incref = self.get_incref();
                     self.builder.build_call(incref, &[val.into()], "block_expr.incref").unwrap();
@@ -1450,7 +1450,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let field_index = *field_name_to_index.get(field_name).unwrap();
 
             let field_type = field_expr.type_id.as_ref().unwrap();
-            if field_type.is_heap_ref() && !matches!(field_expr.kind, MIRNodeKind::HeapExpression(_)) {
+            if self.analyzer.is_heap_type(field_type) && !matches!(field_expr.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
             }
@@ -1474,7 +1474,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 && let Some(trait_id) = impl_scope.trait_id
                 && let MIRNodeKind::FieldAccess { left: instance_node, .. } = &function.kind
                 && let Some(instance_type) = &instance_node.type_id
-                && instance_type.is_heap_ref()
+                && self.analyzer.is_heap_type(instance_type)
             {
                 let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
                 let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
@@ -1542,7 +1542,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let arg_val = self.compile_node(arg).unwrap();
             let arg_type = arg.type_id.as_ref().unwrap();
             
-            if arg_type.is_heap_ref() && !matches!(arg.kind, MIRNodeKind::HeapExpression(_)) {
+            if self.analyzer.is_heap_type(arg_type) && !matches!(arg.kind, MIRNodeKind::HeapExpression(_)) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[arg_val.into()], &format!("incref.arg{}", i)).unwrap();
             }
@@ -1619,7 +1619,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_compiler_directive(&mut self, directive: &MIRDirectiveKind) -> Option<BasicValueEnum<'ctx>> {
         match directive {
-            MIRDirectiveKind::IsRefcounted(ty) => Some(self.context.bool_type().const_int(ty.is_heap_ref() as u64, false).as_basic_value_enum())
+            MIRDirectiveKind::IsRefcounted(ty) => Some(self.context.bool_type().const_int(self.analyzer.is_heap_type(ty) as u64, false).as_basic_value_enum())
         }
     }
 }
@@ -1742,14 +1742,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let value = self.compile_node(expr).unwrap();
 
                     let expr_type = expr.type_id.as_ref().unwrap();
-                    if expr_type.is_heap_ref() && !matches!(expr.kind, MIRNodeKind::HeapExpression(_)) {
+                    if self.analyzer.is_heap_type(expr_type) && !matches!(expr.kind, MIRNodeKind::HeapExpression(_)) {
                         let incref = self.get_incref();
                         self.builder.build_call(incref, &[value.into()], "ret.incref").unwrap();
                     }
 
                     if let Some(base_var_id) = get_base_variable(expr) {
                         let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                        if symbol.type_id.as_ref().unwrap().is_heap_ref() {
+                        if self.analyzer.is_heap_type(symbol.type_id.as_ref().unwrap()) {
                             let incref = self.get_incref();
                             self.builder.build_call(incref, &[value.into()], "ret.incref_base").unwrap();
                         }

@@ -1,5 +1,5 @@
 use crate::{
-    boxed, frontend::semantics::analyzer::{PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, mir::ir_node::{MIRNode, MIRNodeKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeKind, SemanticAnalyzer, Type, TypeSymbolKind, ValueSymbolId, ValueSymbolKind}, mir::ir_node::{MIRNode, MIRNodeKind}, utils::{error::{BoxedError, Error, ErrorKind}, kind::Operation}
 };
 
 fn is_primitive(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
@@ -208,6 +208,12 @@ fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
 }
 
 fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Result<bool, BoxedError> {
+    let heap_type = analyzer.get_heap_type();
+    let is_heap_type = {
+        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+        analyzer.is_heap_type(symbol.type_id.as_ref().unwrap())
+    };
+
     let (kind, ty, name_id, span) = {
         let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
         (
@@ -218,8 +224,8 @@ fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Resul
         )
     };
 
-    if kind == ValueSymbolKind::Variable && !ty.is_heap_ref() {
-        *ty = Type::MutableReference { inner: boxed!(ty.clone()), is_heap: true };
+    if kind == ValueSymbolKind::Variable && !is_heap_type {
+        *ty = Type::Base { symbol: heap_type, args: vec![] };
 
         let name = analyzer.symbol_table.get_value_name(name_id).to_string();
         let span = span.unwrap_or_default();

@@ -174,8 +174,7 @@ pub enum AstNodeKind {
 
     ReferenceType {
         mutable: bool,
-        is_heap: bool,
-        inner: BoxedAstNode,
+        inner: BoxedAstNode
     },
     TypeReference {
         type_name: String,
@@ -709,13 +708,9 @@ impl AstNode {
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
-            AstNodeKind::ReferenceType { mutable, inner, is_heap } => {
+            AstNodeKind::ReferenceType { mutable, inner } => {
                 write!(f, "{}", indent_str)?;
-                if *mutable {
-                    write!(f, "&{}mut ", if *is_heap { "'heap " } else { "" })?;
-                } else {
-                    write!(f, "&{} ", if *is_heap { "'heap " } else { "" })?;
-                }
+                if *mutable { write!(f, "&mut ")?; } else { write!(f, "& ")?; }
                 inner.fmt_with_indent(f, 0, table)?;
             },
             AstNodeKind::TypeReference {

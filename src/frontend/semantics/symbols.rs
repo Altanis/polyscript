@@ -332,7 +332,7 @@ impl SemanticAnalyzer {
                     name,
                     TypeSymbolKind::FunctionSignature {
                         params: vec![],
-                        return_type: Type::new_base(self.builtin_types[PrimitiveKind::Void as usize]),
+                        return_type: Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
                         instance: *instance,
                     },
                     sig_generic_param_ids,
@@ -605,12 +605,12 @@ impl SemanticAnalyzer {
 
     fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
         match &mut node.kind {
-            AstNodeKind::ReferenceType { mutable, inner, is_heap } => {
+            AstNodeKind::ReferenceType { mutable, inner } => {
                 let inner_type = self.get_type_from_ast(inner)?;
                 Ok(if *mutable {
-                    Type::MutableReference { inner: Box::new(inner_type), is_heap: *is_heap }
+                    Type::MutableReference { inner: Box::new(inner_type) }
                 } else {
-                    Type::Reference { inner: Box::new(inner_type), is_heap: *is_heap }
+                    Type::Reference { inner: Box::new(inner_type) }
                 })
             },
             AstNodeKind::TypeReference {
@@ -650,7 +650,7 @@ impl SemanticAnalyzer {
                 let return_type_val = if let Some(rt_node) = return_type {
                     self.get_type_from_ast(rt_node)?
                 } else {
-                    Type::new_base(self.builtin_types[PrimitiveKind::Void as usize])
+                    Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
                 };
 
                 let fn_ptr_id = self.symbol_table.add_type_symbol(

@@ -133,13 +133,13 @@ impl<'a> MIRBuilder<'a> {
 
                 Ok(Type::Base { symbol: symbol.id, args })
             },
-            AstNodeKind::ReferenceType { mutable, inner, is_heap } => {
+            AstNodeKind::ReferenceType { mutable, inner } => {
                 let inner_type = self.get_type_from_ast(inner, scope_id)?;
                 
                 if *mutable {
-                    Ok(Type::MutableReference { inner: Box::new(inner_type), is_heap: *is_heap })
+                    Ok(Type::MutableReference { inner: Box::new(inner_type) })
                 } else {
-                    Ok(Type::Reference { inner: Box::new(inner_type), is_heap: *is_heap })
+                    Ok(Type::Reference { inner: Box::new(inner_type) })
                 }
             },
             _ => Err(())
@@ -554,8 +554,8 @@ impl<'a> MIRBuilder<'a> {
                     args: new_args,
                 }
             },
-            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.substitute_type(inner, substitutions)), is_heap: *is_heap },
-            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.substitute_type(inner, substitutions)), is_heap: *is_heap }
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.substitute_type(inner, substitutions)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.substitute_type(inner, substitutions)) }
         }
     }
 
@@ -1293,8 +1293,8 @@ impl<'a> MIRBuilder<'a> {
                 
                 Type::Base { symbol: *symbol, args: new_args }
             },
-            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_concrete_type_recursively(inner)), is_heap: *is_heap },
-            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_concrete_type_recursively(inner)), is_heap: *is_heap },
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.resolve_concrete_type_recursively(inner)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.resolve_concrete_type_recursively(inner)) },
         }
     }
 

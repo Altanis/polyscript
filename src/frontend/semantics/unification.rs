@@ -432,12 +432,8 @@ impl SemanticAnalyzer {
                     }
                 }
             },
-            Type::Reference { inner, is_heap } => {
-                Type::Reference { inner: Box::new(self.apply_substitution(inner, substitutions)), is_heap: *is_heap }
-            },
-            Type::MutableReference { inner, is_heap } => {
-                Type::MutableReference { inner: Box::new(self.apply_substitution(inner, substitutions)), is_heap: *is_heap }
-            }
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.apply_substitution(inner, substitutions)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.apply_substitution(inner, substitutions)) }
         }
     }
 
@@ -1175,8 +1171,8 @@ impl SemanticAnalyzer {
                 
                 Type::Base { symbol: *symbol, args: resolved_args }
             },
-            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)), is_heap: *is_heap },
-            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)), is_heap: *is_heap },
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.resolve_all_uvs_in_type(inner, visited)) },
         }
     }
 
@@ -1405,29 +1401,17 @@ impl SemanticAnalyzer {
                 Err(self.type_mismatch_error(t1, t2, info, None))
             },
 
-            (Type::Reference { inner: inner1, is_heap: h1 }, Type::Reference { inner: inner2, is_heap: h2 }) => {
-                if h1 != h2 {
-                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
-                }
-
+            (Type::Reference { inner: inner1 }, Type::Reference { inner: inner2 }) => {
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::Reference { inner: Box::new(unified), is_heap: h1 })
+                Ok(Type::Reference { inner: Box::new(unified) })
             },
-            (Type::MutableReference { inner: inner1, is_heap: h1 }, Type::MutableReference { inner: inner2, is_heap: h2 }) => {
-                if h1 != h2 {
-                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
-                }
-
+            (Type::MutableReference { inner: inner1 }, Type::MutableReference { inner: inner2 }) => {
                 let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::MutableReference { inner: Box::new(unified), is_heap: h1 })
+                Ok(Type::MutableReference { inner: Box::new(unified) })
             },
-            (Type::MutableReference { inner: p_inner, is_heap: h1 }, Type::Reference { inner: e_inner, is_heap: h2 }) => {
-                if h1 != h2 {
-                    return Err(self.type_mismatch_error(&t1, &t2, info, Some("heap and stack references are incompatible".to_string())));
-                }
-                
+            (Type::MutableReference { inner: p_inner }, Type::Reference { inner: e_inner }) => {
                 let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-                Ok(Type::Reference { inner: Box::new(unified_inner), is_heap: h1 })
+                Ok(Type::Reference { inner: Box::new(unified_inner) })
             },
 
             (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),
@@ -1619,14 +1603,14 @@ impl SemanticAnalyzer {
         }
 
         let resolved_passed = match resolved_passed.clone() {
-            Type::MutableReference { inner, .. } => Type::MutableReference { inner, is_heap: false },
-            Type::Reference { inner, .. } => Type::Reference { inner, is_heap: false },
+            Type::MutableReference { inner, .. } => Type::MutableReference { inner },
+            Type::Reference { inner, .. } => Type::Reference { inner },
             _ => resolved_passed
         };
 
         let resolved_expected = match resolved_expected.clone() {
-            Type::MutableReference { inner, .. } => Type::MutableReference { inner, is_heap: false },
-            Type::Reference { inner, .. } => Type::Reference { inner, is_heap: false },
+            Type::MutableReference { inner, .. } => Type::MutableReference { inner },
+            Type::Reference { inner, .. } => Type::Reference { inner },
             _ => resolved_expected
         };
 
@@ -1638,7 +1622,7 @@ impl SemanticAnalyzer {
         // `&mut T` -> `&T`
         if let (Type::MutableReference { inner: p_inner, .. }, Type::Reference { inner: e_inner, .. }) = (resolved_passed.clone(), resolved_expected.clone()) {
             let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-            return Ok(Some(Type::Reference { inner: Box::new(unified_inner), is_heap: false }));
+            return Ok(Some(Type::Reference { inner: Box::new(unified_inner) }));
         }
 
         // `&^n T` | `&^n mut T` -> `T`
@@ -1653,8 +1637,8 @@ impl SemanticAnalyzer {
         // `T` -> `&^n T` | `&^n mut T`
         if let p @ Type::Base { .. } = resolved_passed.clone() {
              match resolved_expected.clone() {
-                e @ Type::Reference { .. } => return self.unify(Type::Reference{ inner: Box::new(p), is_heap: false }, e, info).map(Some),
-                e @ Type::MutableReference { .. } => return self.unify(Type::MutableReference { inner: Box::new(p), is_heap: false }, e, info).map(Some),
+                e @ Type::Reference { .. } => return self.unify(Type::Reference{ inner: Box::new(p) }, e, info).map(Some),
+                e @ Type::MutableReference { .. } => return self.unify(Type::MutableReference { inner: Box::new(p) }, e, info).map(Some),
                 _ => {}
             }
         }
@@ -2192,8 +2176,8 @@ impl SemanticAnalyzer {
                     args: resolved_args,
                 }
             },
-            Type::Reference { inner, is_heap } => Type::Reference { inner: Box::new(self.resolve_final_type(inner)), is_heap: *is_heap },
-            Type::MutableReference { inner, is_heap } => Type::MutableReference { inner: Box::new(self.resolve_final_type(inner)), is_heap: *is_heap }
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.resolve_final_type(inner)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.resolve_final_type(inner)) }
         }
     }
 
@@ -2658,12 +2642,8 @@ impl SemanticAnalyzer {
                     args: substituted_args,
                 }
             },
-            Type::Reference { inner, is_heap } => {
-                Type::Reference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)), is_heap: *is_heap }
-            },
-            Type::MutableReference { inner, is_heap } => {
-                Type::MutableReference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)), is_heap: *is_heap }
-            }
+            Type::Reference { inner } => Type::Reference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.apply_trait_substitutions(inner, substitutions)) }
         }
     }
 
