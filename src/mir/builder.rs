@@ -29,7 +29,8 @@ pub struct MIRBuilder<'a> {
     concretize_substitutions: Option<Rc<BTreeMap<TypeSymbolId, Type>>>,
     concretize_value_remap: HashMap<ValueSymbolId, ValueSymbolId>,
     
-    hoisted_iifes: Vec<MIRNode>
+    hoisted_iifes: Vec<MIRNode>,
+    hoisted_declarations: Vec<MIRNode>
 }
 
 fn find_node_by_span(node: &AstNode, target_span: Span) -> Option<&AstNode> {
@@ -55,7 +56,8 @@ impl<'a> MIRBuilder<'a> {
             struct_template_map: HashMap::new(),
             concretize_substitutions: None,
             concretize_value_remap: HashMap::new(),
-            hoisted_iifes: vec![]
+            hoisted_iifes: vec![],
+            hoisted_declarations: vec![]
         }
     }
 }
@@ -1039,18 +1041,30 @@ impl<'a> MIRBuilder<'a> {
                     self.struct_template_map.insert(new_type_symbol_id, (template_symbol.id, substitutions.clone()));
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
-                    return Some(MIRNode {
+                    let mir_node = MIRNode {
                         kind: MIRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
                         span: node.span,
                         value_id: node.value_id,
                         type_id: Some(Type::new_base(new_type_symbol_id)),
                         scope_id: node.scope_id.unwrap()
-                    });
+                    };
+
+                    self.hoisted_declarations.push(mir_node);
+                    return None;
                 } else if generic_parameters.is_empty() {
-                    MIRNodeKind::StructDeclaration {
-                        name: name.clone(),
-                        fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
-                    }
+                    let mir_node = MIRNode {
+                        kind: MIRNodeKind::StructDeclaration {
+                            name: name.clone(),
+                            fields: fields.iter_mut().filter_map(|f| self.lower_node(f)).collect(),
+                        },
+                        span: node.span,
+                        value_id: node.value_id,
+                        type_id: node.type_id.clone(),
+                        scope_id: node.scope_id.unwrap()
+                    };
+
+                    self.hoisted_declarations.push(mir_node);
+                    return None;
                 } else {
                     return None;
                 }
@@ -1127,17 +1141,27 @@ impl<'a> MIRBuilder<'a> {
                 }
             },
 
-            AstNodeKind::EnumDeclaration { name, variants } => MIRNodeKind::EnumDeclaration {
-                name: name.clone(),
-                variants: variants
-                    .iter_mut()
-                    .map(|(k, (v, e))| {
-                        (
-                            k.clone(),
-                            (self.lower_node(v).unwrap(), *e),
-                        )
-                    })
-                    .collect(),
+            AstNodeKind::EnumDeclaration { name, variants } => {
+                let mir_node = MIRNode {
+                    kind: MIRNodeKind::EnumDeclaration {
+                        name: name.clone(),
+                        variants: variants
+                            .iter_mut()
+                            .map(|(k, (v, e))| {
+                                (
+                                    k.clone(),
+                                    (self.lower_node(v).unwrap(), *e),
+                                )
+                            })
+                            .collect(),
+                    },
+                    span: node.span,
+                    value_id: node.value_id,
+                    type_id: node.type_id.clone(),
+                    scope_id: node.scope_id.unwrap()
+                };
+                self.hoisted_declarations.push(mir_node);
+                return None;
             },
             AstNodeKind::EnumVariant(name) => MIRNodeKind::EnumVariant(name.clone()),
 
@@ -1476,11 +1500,19 @@ impl<'a> MIRBuilder<'a> {
         self.propagate_monomorphizations(program);
         let mut mir_program = self.monomorphize(program);
 
-        let MIRNodeKind::Program(hoisted_stmts) = &mut mir_program.kind else { unreachable!(); };
-        let MIRNodeKind::Program(other_stmts) = self.lower_node(program).unwrap().kind else { unreachable!(); };
+        let mir_program_from_ast = self.lower_node(program).unwrap();
+        let other_stmts = if let MIRNodeKind::Program(stmts) = mir_program_from_ast.kind { stmts } else { unreachable!(); };
         
-        hoisted_stmts.extend(other_stmts);
-        hoisted_stmts.extend(std::mem::take(&mut self.hoisted_iifes));
+        let mut final_stmts = std::mem::take(&mut self.hoisted_declarations);
+        if let MIRNodeKind::Program(monomorphized_stmts) = &mut mir_program.kind {
+            final_stmts.append(monomorphized_stmts);
+        }
+        final_stmts.extend(other_stmts);
+        final_stmts.extend(std::mem::take(&mut self.hoisted_iifes));
+        
+        if let MIRNodeKind::Program(stmts_ref) = &mut mir_program.kind {
+            *stmts_ref = final_stmts;
+        }
 
         self.concretize_ids(&mut mir_program);
         self.concretize_symbol_table();
