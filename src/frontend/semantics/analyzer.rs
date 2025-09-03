@@ -770,6 +770,7 @@ impl SymbolTable {
         // --- HEAP IMPLS ---
         let heap_symbol_id = self.find_type_symbol("Heap").unwrap().id;
         let clone_trait_id = trait_registry.get_default_trait(&"Clone".to_string());
+        let drop_trait_id = trait_registry.get_default_trait(&"Drop".to_string());
         let deref_trait_id = trait_registry.get_default_trait(&"Deref".to_string());
         let deref_mut_trait_id = trait_registry.get_default_trait(&"DerefMut".to_string());
 
@@ -828,6 +829,74 @@ impl SymbolTable {
 
             trait_registry.register(
                 clone_trait_id,
+                heap_symbol_id,
+                TraitImpl {
+                    impl_scope_id,
+                    impl_generic_params: vec![t_generic_id],
+                    trait_generic_specialization: vec![],
+                    type_specialization: vec![t_generic_id],
+                    span: Span::default(),
+                },
+            );
+
+            self.exit_scope();
+        }
+
+        // --- impl<T> Drop for Heap<T> ---
+        {
+            let impl_scope_id = self.enter_scope(ScopeKind::Impl);
+            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(drop_trait_id);
+            let t_generic_id = self
+                .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
+                .unwrap();
+            let heap_of_t = Type::Base {
+                symbol: heap_symbol_id,
+                args: vec![Type::new_base(t_generic_id)],
+            };
+
+            self.add_type_symbol(
+                "Self",
+                TypeSymbolKind::TypeAlias((None, Some(heap_of_t.clone()))),
+                vec![],
+                QualifierKind::Public,
+                None,
+            )
+            .unwrap();
+
+            let func_scope_id = self.enter_scope(ScopeKind::Function);
+            self.exit_scope();
+
+            let params = vec![Type::MutableReference {
+                inner: Box::new(heap_of_t.clone()),
+            }];
+            let return_type = Type::new_base(self.find_type_symbol("void").unwrap().id);
+
+            let fn_sig_type_id = self
+                .add_type_symbol(
+                    "drop",
+                    TypeSymbolKind::FunctionSignature {
+                        params,
+                        return_type,
+                        instance: Some(ReferenceKind::MutableReference),
+                    },
+                    vec![],
+                    QualifierKind::Private,
+                    None,
+                )
+                .unwrap();
+
+            let drop_fn_symbol_id = self.add_value_symbol(
+                "drop",
+                ValueSymbolKind::Function(func_scope_id, HashSet::new()),
+                false,
+                QualifierKind::Public,
+                Some(Type::new_base(fn_sig_type_id)),
+                None,
+            ).unwrap();
+            self.get_value_symbol_mut(drop_fn_symbol_id).unwrap().is_intrinsic = true;
+
+            trait_registry.register(
+                drop_trait_id,
                 heap_symbol_id,
                 TraitImpl {
                     impl_scope_id,

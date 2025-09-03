@@ -18,4 +18,5 @@
 
     let x = heap Scalar { x: 4 };
     let y = [Heap<Scalar> as Clone].clone(&x);
+    [Heap<Scalar> as Drop].drop(&mut y);
 }
