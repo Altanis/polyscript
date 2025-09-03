@@ -827,21 +827,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Type::MutableReference { inner } => &**inner,
                         _ => unreachable!(),
                     };
-
-                    if self.analyzer.is_heap_type(operand_type) {
-                        let rc_repr = self.wrap_in_rc(inner_type);
-                        let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap();
-                        
-                        if self.is_copy_type(inner_type) {
-                            let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
-                            return Some(self.builder.build_load(llvm_inner_type, data_ptr, "deref.copy").unwrap());
-                        } else {
-                            let cloned_val = self.builder.build_call(rc_repr.clone_data_fn, &[data_ptr.into()], "deref.clone").unwrap();
-                            return cloned_val.try_as_basic_value().left();
-                        }
-                    } else {
+                    
+                    if self.is_copy_type(inner_type) {
                         let pointee_type = self.map_semantic_type(inner_type).unwrap();
                         return Some(self.builder.build_load(pointee_type, ptr, "deref").unwrap());
+                    } else {
+                        let clone_trait_name = "Clone".to_string();
+                        let clone_fn_name = "clone".to_string();
+                        let callee = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None).unwrap();
+
+                        if self.is_rvo_candidate(inner_type) {
+                            let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
+                            let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
+                            
+                            let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), ptr.into()];
+                            
+                            self.builder.build_call(callee, &args, "").unwrap();
+                            let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
+                            return Some(cloned_val);
+                        } else {
+                            let call = self.builder.build_call(callee, &[ptr.into()], "deref.clone").unwrap();
+                            return call.try_as_basic_value().left();
+                        }
                     }
                 },
                 _ => {
@@ -854,10 +861,31 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_call").unwrap();
                     let result_ptr = call.try_as_basic_value().left().unwrap().into_pointer_value();
 
-                    let pointee_type = self.map_semantic_type(parent_node.type_id.as_ref().unwrap()).unwrap();
-                    let loaded_val = self.builder.build_load(pointee_type, result_ptr, "deref.load").unwrap();
+                    let inner_type = parent_node.type_id.as_ref().unwrap();
 
-                    return Some(loaded_val);
+                    if self.is_copy_type(inner_type) {
+                        let pointee_type = self.map_semantic_type(inner_type).unwrap();
+                        let loaded_val = self.builder.build_load(pointee_type, result_ptr, "deref.load").unwrap();
+                        return Some(loaded_val);
+                    } else {
+                        let clone_trait_name = "Clone".to_string();
+                        let clone_fn_name = "clone".to_string();
+                        let clone_callee = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None).unwrap();
+
+                        if self.is_rvo_candidate(inner_type) {
+                            let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
+                            let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
+                            
+                            let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), result_ptr.into()];
+                            
+                            self.builder.build_call(clone_callee, &args, "").unwrap();
+                            let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
+                            return Some(cloned_val);
+                        } else {
+                            let call = self.builder.build_call(clone_callee, &[result_ptr.into()], "deref.clone").unwrap();
+                            return call.try_as_basic_value().left();
+                        }
+                    }
                 }
             }
         }
