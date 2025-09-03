@@ -83,6 +83,54 @@ impl SemanticAnalyzer {
         operator: &mut Operation,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
+        if operator.is_assignment() 
+            && let AstNodeKind::UnaryOperation { operator: op, operand } = &mut left.kind
+            && *op == Operation::Dereference
+        {
+            let operand_type = self.collect_uvs(operand)?;
+            let place_type = self.unification_context.generate_uv_type(&mut self.symbol_table, left.span);
+            left.type_id = Some(place_type.clone());
+            
+            self.unification_context.register_constraint(
+                Constraint::MutableDereference(operand_type, place_type.clone()),
+                info,
+            );
+            
+            let left_type = place_type;
+            let right_type = self.collect_uvs(right)?;
+            let result_uv = Type::new_base(uv_id);
+
+            match operator.to_trait_data() {
+                Some((trait_name, _)) => {
+                    self.unification_context.register_constraint(
+                        Constraint::Operation(
+                            result_uv,
+                            Type::Base {
+                                symbol: self.trait_registry.get_default_trait(&trait_name),
+                                args: vec![right_type.clone()],
+                            },
+                            left_type,
+                            Some(right_type),
+                            *operator
+                        ),
+                        info,
+                    );
+                }
+                None => {
+                    self.unification_context.register_constraint(Constraint::Equality(left_type, right_type), info);
+                    self.unification_context.register_constraint(
+                        Constraint::Equality(
+                            result_uv,
+                            Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                        ),
+                        info,
+                    );
+                }
+            }
+
+            return Ok(());
+        }
+
         let left_type = self.collect_uvs(left)?;
         let right_type = self.collect_uvs(right)?;
         let result_uv = Type::new_base(uv_id);

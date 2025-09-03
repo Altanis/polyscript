@@ -1282,7 +1282,8 @@ impl SemanticAnalyzer {
                 self.unify_operation(uv_symbol_id, trait_type, lhs, rhs, info, operation)
             },
             Constraint::Cast(source, target) => self.unify_cast(source, target, info),
-            Constraint::Dereference(operand_ty, result_ty) => self.unify_dereference(operand_ty, result_ty, info)
+            Constraint::Dereference(operand_ty, result_ty) => self.unify_dereference(operand_ty, result_ty, info),
+            Constraint::MutableDereference(operand_ty, assigned_ty) => self.unify_mutable_dereference(operand_ty, assigned_ty, info)
         }
     }
 
@@ -1981,7 +1982,7 @@ impl SemanticAnalyzer {
         let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
     
         match &resolved_operand {
-            Type::Reference { inner, .. } => {
+            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
                 if !self.does_type_implement_trait(inner, clone_trait_id)? {
                     return Err(self.create_error(
                         ErrorKind::NonCloneableDereference(self.symbol_table.display_type(inner)),
@@ -1989,10 +1990,6 @@ impl SemanticAnalyzer {
                         &[info.span],
                     ));
                 }
-                self.unify(*inner.clone(), result_ty, info)?;
-                Ok(true)
-            },
-            Type::MutableReference { inner, .. } => {
                 self.unify(*inner.clone(), result_ty, info)?;
                 Ok(true)
             },
@@ -2012,18 +2009,12 @@ impl SemanticAnalyzer {
                     return Ok(true);
                 }
 
-                let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
-                let deref_mut_trait_type = Type::new_base(deref_mut_trait_id);
-                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_mut_trait_type, "Target", info) {
-                    self.unify(result_ty, target_type, info)?;
-                    return Ok(true);
-                }
-    
                 let deref_trait_id = self.trait_registry.get_default_trait(&"Deref".to_string());
                 let deref_trait_type = Type::new_base(deref_trait_id);
+    
                 if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_trait_type, "Target", info) {
                     if !self.does_type_implement_trait(&target_type, clone_trait_id)? {
-                         return Err(self.create_error(
+                        return Err(self.create_error(
                             ErrorKind::NonCloneableDereference(self.symbol_table.display_type(&target_type)),
                             info.span,
                             &[info.span],
@@ -2033,6 +2024,39 @@ impl SemanticAnalyzer {
                     return Ok(true);
                 }
     
+                Err(self.create_error(
+                    ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
+                    info.span,
+                    &[info.span],
+                ))
+            }
+        }
+    }
+    
+    fn unify_mutable_dereference(&mut self, operand_ty: Type, place_ty: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+        let resolved_operand = self.resolve_type(&operand_ty);
+        match &resolved_operand {
+            Type::MutableReference { inner, .. } => {
+                self.unify(*inner.clone(), place_ty, info)?;
+                Ok(true)
+            }
+            Type::Base { symbol, .. } if self.is_uv(*symbol) => Ok(false),
+            _ => {
+                if self.is_heap_type(&resolved_operand) {
+                    let Type::Base { args, .. } = &resolved_operand else { unreachable!() };
+                    let inner = &args[0];
+                    self.unify(inner.clone(), place_ty, info)?;
+                    return Ok(true);
+                }
+
+                let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
+                let deref_mut_trait_type = Type::new_base(deref_mut_trait_id);
+
+                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_mut_trait_type, "Target", info) {
+                    self.unify(target_type, place_ty, info)?;
+                    return Ok(true);
+                }
+                
                 Err(self.create_error(
                     ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
                     info.span,

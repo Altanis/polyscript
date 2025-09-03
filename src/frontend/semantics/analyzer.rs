@@ -1374,7 +1374,9 @@ pub enum Constraint {
     /// The initial type must be validly castable to the other.
     Cast(Type, Type),
     /// The first type must be a reference to the second type.
-    Dereference(Type, Type)
+    Dereference(Type, Type),
+    /// A mutable dereference used as the target of an assignment.
+    MutableDereference(Type, Type),
 }
 
 /// Additional information about a constraint.
@@ -1963,6 +1965,12 @@ impl Constraint {
                         "{} = *{}",
                         self.t.display_type(result).yellow(),
                         self.t.display_type(operand).yellow()
+                    ),
+                    MutableDereference(operand, assigned) => write!(
+                        f,
+                        "*{} = {}",
+                        self.t.display_type(operand).yellow(),
+                        self.t.display_type(assigned).yellow()
                     )
                 }
             }
