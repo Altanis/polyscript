@@ -834,20 +834,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     } else {
                         let clone_trait_name = "Clone".to_string();
                         let clone_fn_name = "clone".to_string();
-                        let callee = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None).unwrap();
-
-                        if self.is_rvo_candidate(inner_type) {
-                            let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
-                            let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
-                            
-                            let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), ptr.into()];
-                            
-                            self.builder.build_call(callee, &args, "").unwrap();
-                            let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
-                            return Some(cloned_val);
+                        
+                        if let Some(callee) = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None) {
+                            if self.is_rvo_candidate(inner_type) {
+                                let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
+                                let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
+                                
+                                let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), ptr.into()];
+                                
+                                self.builder.build_call(callee, &args, "").unwrap();
+                                let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
+                                return Some(cloned_val);
+                            } else {
+                                let call = self.builder.build_call(callee, &[ptr.into()], "deref.clone").unwrap();
+                                return call.try_as_basic_value().left();
+                            }
                         } else {
-                            let call = self.builder.build_call(callee, &[ptr.into()], "deref.clone").unwrap();
-                            return call.try_as_basic_value().left();
+                            let pointee_type = self.map_semantic_type(inner_type).unwrap();
+                            return Some(self.builder.build_load(pointee_type, ptr, "deref.bitwise_copy").unwrap());
                         }
                     }
                 },
