@@ -1997,17 +1997,9 @@ impl SemanticAnalyzer {
 
     fn unify_dereference(&mut self, operand_ty: Type, result_ty: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
         let resolved_operand = self.resolve_type(&operand_ty);
-        let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
-    
+
         match &resolved_operand {
             Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
-                if !self.does_type_implement_trait(inner, clone_trait_id)? {
-                    return Err(self.create_error(
-                        ErrorKind::ImplicitCopyOfNonCloneableType(self.symbol_table.display_type(inner)),
-                        info.span,
-                        &[info.span],
-                    ));
-                }
                 self.unify(*inner.clone(), result_ty, info)?;
                 Ok(true)
             },
@@ -2016,13 +2008,6 @@ impl SemanticAnalyzer {
                 if self.is_heap_type(&resolved_operand) {
                     let Type::Base { args, .. } = &resolved_operand else { unreachable!() };
                     let inner = &args[0];
-                    if !self.does_type_implement_trait(inner, clone_trait_id)? {
-                        return Err(self.create_error(
-                            ErrorKind::ImplicitCopyOfNonCloneableType(self.symbol_table.display_type(inner)),
-                            info.span,
-                            &[info.span],
-                        ));
-                    }
                     self.unify(inner.clone(), result_ty, info)?;
                     return Ok(true);
                 }
@@ -2031,13 +2016,6 @@ impl SemanticAnalyzer {
                 let deref_trait_type = Type::new_base(deref_trait_id);
     
                 if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_trait_type, "Target", info) {
-                    if !self.does_type_implement_trait(&target_type, clone_trait_id)? {
-                        return Err(self.create_error(
-                            ErrorKind::ImplicitCopyOfNonCloneableType(self.symbol_table.display_type(&target_type)),
-                            info.span,
-                            &[info.span],
-                        ));
-                    }
                     self.unify(result_ty, target_type, info)?;
                     return Ok(true);
                 }
@@ -2352,87 +2330,6 @@ impl SemanticAnalyzer {
             }
         }
         
-        Ok(())
-    }
-}
-
-impl SemanticAnalyzer {
-    pub fn implicit_copy_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
-        let mut errors = vec![];
-
-        if let AstNodeKind::Program(statements) = &mut program.kind {
-            for statement in statements {
-                if let Err(err) = self.implicit_copy_check_node(statement) {
-                    errors.push(*err);
-                }
-            }
-        } else {
-            unreachable!();
-        }
-
-        errors
-    }
-
-    fn implicit_copy_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
-        for child in node.children_mut() {
-            self.implicit_copy_check_node(child)?;
-        }
-        
-        match &node.kind {
-            AstNodeKind::VariableDeclaration { initializer, .. } => self.check_if_moved_value_is_clonable(initializer)?,
-            AstNodeKind::Return(Some(expr)) => self.check_if_moved_value_is_clonable(expr)?,
-            AstNodeKind::StructLiteral { fields, .. } => {
-                for field_expr in fields.values() {
-                    self.check_if_moved_value_is_clonable(field_expr)?;
-                }
-            },
-            AstNodeKind::BinaryOperation { operator, right, .. } if *operator == Operation::Assign => {
-                self.check_if_moved_value_is_clonable(right)?;
-            },
-            AstNodeKind::FunctionCall { function, arguments, .. } => {
-                let fn_type = function.type_id.as_ref().unwrap();
-                if let Type::Base { symbol, .. } = fn_type {
-                    let fn_symbol = self.symbol_table.get_type_symbol(*symbol).unwrap().clone();
-
-                    if let TypeSymbolKind::FunctionSignature { params, .. } = &fn_symbol.kind {
-                        let mut params_iter = params.iter();
-
-                        if let AstNodeKind::FieldAccess { left, .. } = &function.kind
-                            && let Some(param_type) = params_iter.next()
-                            && !matches!(param_type, Type::Reference {..} | Type::MutableReference {..})
-                        {
-                            self.check_if_moved_value_is_clonable(left)?;
-                        }
-
-                        for arg in arguments {
-                            if let Some(param_type) = params_iter.next() && !matches!(param_type, Type::Reference {..} | Type::MutableReference {..}) {
-                                self.check_if_moved_value_is_clonable(arg)?;
-                            }
-                        }
-                    }
-                }
-            },
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    fn check_if_moved_value_is_clonable(&mut self, node: &AstNode) -> Result<(), BoxedError> {
-        let ty = node.type_id.as_ref().unwrap();
-        if self.is_copy_type(ty) {
-            return Ok(());
-        }
-
-        let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
-        if !self.does_type_implement_trait(ty, clone_trait_id)? {
-            return Err(self.create_error(
-                ErrorKind::ImplicitCopyOfNonCloneableType(self.symbol_table.display_type(ty)),
-                node.span,
-                &[node.span],
-            ));
-        }
-
         Ok(())
     }
 }
