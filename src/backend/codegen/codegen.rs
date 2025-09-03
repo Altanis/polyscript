@@ -1,3 +1,4 @@
+// backend/codegen/codegen.rs
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -451,6 +452,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
+        if self.analyzer.is_heap_type(ty) {
+            return Some(self.context.ptr_type(AddressSpace::default()).as_basic_type_enum());
+        }
+
         match ty {
             Type::Base { symbol, .. } => {
                 if let Some(&llvm_ty) = self.type_map.get(symbol) {
@@ -681,7 +686,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let init_val = self.compile_node(initializer).unwrap();
 
-        if self.analyzer.is_heap_type(ty) && !matches!(initializer.kind, MIRNodeKind::HeapExpression(_)) {
+        if self.analyzer.is_heap_type(ty) && !matches!(&initializer.kind, MIRNodeKind::HeapExpression(_) | MIRNodeKind::FunctionCall { .. }) {
             let incref = self.get_incref();
             self.builder.build_call(incref, &[init_val.into()], &format!("incref_{}", name)).unwrap();
         }
@@ -897,7 +902,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let value_to_store = self.compile_node(right_node).unwrap();
             
             let right_type = right_node.type_id.as_ref().unwrap();
-            if self.analyzer.is_heap_type(right_type) && !matches!(right_node.kind, MIRNodeKind::HeapExpression(_)) {
+            if self.analyzer.is_heap_type(right_type) && !matches!(&right_node.kind, MIRNodeKind::HeapExpression(_) | MIRNodeKind::FunctionCall { .. }) {
                 let incref = self.get_incref();
                 self.builder.build_call(incref, &[value_to_store.into()], "assign.incref").unwrap();
             }
@@ -1495,27 +1500,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
             let impl_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
 
-            if let Some(trait_id) = impl_scope.trait_id
-                && let Some(argument) = arguments.first()
-                && let Some(ty_id) = argument.type_id.as_ref()
-                && let Type::Reference { inner } = ty_id
-                && self.analyzer.is_heap_type(inner)
-            {
-                let rc = self.compile_node(argument).unwrap();
-
-                let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
-                let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
-
-                if fn_name == "clone" && trait_id == clone_trait_id {
-                    let incref_fn = self.get_incref();
-                    self.builder.build_call(incref_fn, &[rc.into()], "heap.clone.incref").unwrap();
-                    return Some(rc);
-                }
-
-                if fn_name == "drop" && trait_id == drop_trait_id {
-                    let decref_fn = self.get_incref();
-                    self.builder.build_call(decref_fn, &[rc.into()], "heap.drop.decref").unwrap();
-                    return None;
+            if let Some(trait_id) = impl_scope.trait_id && let Some(argument) = arguments.first() && let Some(ty_id) = argument.type_id.as_ref() {
+                match ty_id {
+                    Type::Reference { inner } | Type::MutableReference { inner } if self.analyzer.is_heap_type(inner) => {
+                        let rc_ptr_ptr = self.compile_node(argument).unwrap().into_pointer_value();
+                        let rc_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), rc_ptr_ptr, "rc_ptr").unwrap();
+                        
+                        let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
+                        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
+        
+                        if fn_name == "clone" && trait_id == clone_trait_id {
+                            let incref_fn = self.get_incref();
+                            self.builder.build_call(incref_fn, &[rc_ptr.into()], "heap.clone.incref").unwrap();
+                            return Some(rc_ptr);
+                        }
+        
+                        if fn_name == "drop" && trait_id == drop_trait_id {
+                            let decref_fn = self.get_decref();
+                            self.builder.build_call(decref_fn, &[rc_ptr.into()], "heap.drop.decref").unwrap();
+                            return None;
+                        }
+                    },
+                    _ => {}
                 }
             }
         }

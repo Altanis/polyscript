@@ -11,9 +11,11 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar {
-    x: int;
-}
+{
+    struct Scalar {
+        x: int;
+    }
 
-let x = heap Scalar { x: 4 };
-let y = [Heap<Scalar> as Clone].clone(&x);
+    let x = heap Scalar { x: 4 };
+    let y = [Heap<Scalar> as Clone].clone(&x);
+}
