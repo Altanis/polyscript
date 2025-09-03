@@ -2877,3 +2877,54 @@ impl SemanticAnalyzer {
         Ok(())
     }
 }
+
+impl SemanticAnalyzer {
+    pub fn explicit_drop_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.explicit_drop_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn explicit_drop_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        for child in node.children_mut() {
+            self.explicit_drop_check_node(child)?;
+        }
+
+        if let AstNodeKind::FunctionCall { function, .. } = &node.kind && let Some(fn_value_id) = function.value_id {
+            let fn_symbol = self.symbol_table.get_value_symbol(fn_value_id).unwrap();
+            
+            if self.symbol_table.get_value_name(fn_symbol.name_id) != "drop" {
+                return Ok(());
+            }
+
+            if let ValueSymbolKind::Function(fn_scope_id, _) = fn_symbol.kind {
+                let fn_scope = self.symbol_table.get_scope(fn_scope_id).unwrap();
+                let Some(parent_scope_id) = fn_scope.parent else { return Ok(()) };
+                let parent_scope = self.symbol_table.get_scope(parent_scope_id).unwrap();
+                
+                if parent_scope.kind == ScopeKind::Impl && let Some(trait_id) = parent_scope.trait_id {
+                    let drop_trait_id = self.trait_registry.get_default_trait(&"Drop".to_string());
+                    if trait_id == drop_trait_id {
+                        return Err(self.create_error(
+                            ErrorKind::ExplicitDestruction,
+                            node.span,
+                            &[node.span]
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}

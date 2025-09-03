@@ -71,7 +71,8 @@ pub enum ErrorKind {
     NonConstantInitializer(String, String),
     InvalidImport(String, String),
     InvalidCall(String, String),
-    UntrustedContext(String)
+    UntrustedContext(String),
+    ExplicitDestruction
 }
 
 impl ErrorKind {
@@ -201,6 +202,7 @@ impl ErrorKind {
             ErrorKind::InvalidImport(path, reason) => format!("invalid import of \"{}\": {}", path, reason),
             ErrorKind::InvalidCall(method, ty) => format!("method `{}` is an instance method, not a static method, and cannot be called on type `{}` directly", method, ty),
             ErrorKind::UntrustedContext(reason) => format!("attempted to use trusted feature in untrusted context: {reason}"),
+            ErrorKind::ExplicitDestruction => "cannot explicitly call the Drop implementation for a value".to_string()
         }
     }
 }

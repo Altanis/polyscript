@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, incref, eprint, exit } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, eprint, exit } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -100,7 +100,8 @@ impl<T> Vec<T> {
         }
 
         let dst = self.data + idx * self.element_size;
-        [T as Drop].drop(dst as &mut T);
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+        
         memcpy(dst, element, self.element_size);
 
         true
@@ -127,7 +128,8 @@ impl<T> Vec<T> {
         }
 
         let dst = self.data + idx * self.element_size;
-        [T as Drop].drop(dst as &mut T);
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+
         let src = self.data + idx * (self.element_size + 1);
         let size = self.element_size * (self.size - idx - 1);
 
