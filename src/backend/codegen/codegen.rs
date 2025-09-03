@@ -705,6 +705,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
                 let operand_type = operand.type_id.as_ref().unwrap();
 
+                if self.analyzer.is_heap_type(operand_type) {
+                    let rc_ptr = self.compile_node(operand).unwrap().into_pointer_value();
+                    let inner_type = if let Type::Base { args, .. } = operand_type { &args[0] } else { unreachable!() };
+                    let rc_repr = self.wrap_in_rc(inner_type);
+                    return Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap());
+                }
+
                 match operand_type {
                     Type::Reference { .. } | Type::MutableReference { .. } => {
                         let is_heap = self.analyzer.is_heap_type(operand_type);
@@ -794,6 +801,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if operator == Operation::Dereference {
             let operand_type = operand_node.type_id.as_ref().unwrap();
 
+            if self.analyzer.is_heap_type(operand_type) {
+                let rc_ptr = self.compile_node(operand_node).unwrap().into_pointer_value();
+                let inner_type = if let Type::Base { args, .. } = operand_type { &args[0] } else { unreachable!() };
+                let rc_repr = self.wrap_in_rc(inner_type);
+                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap();
+
+                if self.is_copy_type(inner_type) {
+                    let llvm_inner_type = self.map_semantic_type(inner_type).unwrap();
+                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "heap.deref.load_copy").unwrap());
+                } else {
+                    let clone_fn = rc_repr.clone_data_fn;
+                    let call = self.builder.build_call(clone_fn, &[data_ptr.into()], "cloned_val").unwrap();
+                    return call.try_as_basic_value().left();
+                }
+            }
+    
             match operand_type {
                 Type::Reference { .. } | Type::MutableReference { .. } => {
                     let operand = self.compile_node(operand_node).unwrap();
@@ -844,7 +867,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     
         Some(self.compile_core_unary_op(operator, operand, is_float))
     }
-
+    
     fn compile_core_binary_op(&mut self, operator: Operation, left: BasicValueEnum<'ctx>, right: BasicValueEnum<'ctx>, is_float: bool) -> BasicValueEnum<'ctx> {
         if is_float {
             let l = left.into_float_value();

@@ -101,7 +101,7 @@ impl<T> Vec<T> {
 
         let dst = self.data + idx * self.element_size;
         if #IS_REFCOUNTED#{T} { decref(dst); }
-        
+
         memcpy(dst, element, self.element_size);
 
         true

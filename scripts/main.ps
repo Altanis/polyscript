@@ -11,16 +11,10 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar {
-    x: int;
-}
+struct Scalar { x: int; }
 
-impl Scalar {
-    fn tdrop(&self) {
-        let x = 4;
-    }
+{
+    let x: Heap<Scalar> = heap Scalar { x: 4 };
+    let y: Scalar = *x; // clone of x
+    *x = Scalar { x: 7 };
 }
-
-let x = heap Scalar { x: 4 };
-let y = [Heap<Scalar> as Clone].clone(&x);
-(*y).tdrop();
