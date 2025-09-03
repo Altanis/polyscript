@@ -810,7 +810,11 @@ impl SemanticAnalyzer {
     
                     let fn_sig_symbol = self.symbol_table.get_type_symbol(resolved_type.get_base_symbol()).unwrap();
                     if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
-                        is_static_access == instance.is_none()
+                        if is_static_access {
+                            true
+                        } else {
+                            instance.is_some()
+                        }
                     } else { 
                         false 
                     }
