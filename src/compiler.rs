@@ -52,6 +52,7 @@ pub struct Module {
     pub lined_source: Rc<Vec<String>>,
     pub scope_id: ScopeId,
     pub exports: HashMap<String, (Option<ValueSymbolId>, Option<TypeSymbolId>)>,
+    pub trusted: bool
 }
 
 pub struct Compiler {
@@ -93,7 +94,7 @@ impl Compiler {
             let source_code = fs::read_to_string(&current_path).unwrap_or_else(|_| panic!("Could not read source file: {:?}", current_path));
             let (lined_source, tokens) = self.generate_tokens(source_code, file_path.clone(), trusted);
             let lined_source_rc = Rc::new(lined_source);
-            self.analyzer.set_source(lined_source_rc.clone(), file_path.clone());
+            self.analyzer.set_source(lined_source_rc.clone(), file_path.clone(), trusted);
 
             let mut ast = self.parse_tokens((*lined_source_rc).clone(), tokens.clone(), file_path);
 
@@ -162,6 +163,7 @@ impl Compiler {
                 lined_source: lined_source_rc,
                 scope_id: module_scope_id,
                 exports: HashMap::new(),
+                trusted
             };
 
             self.modules.insert(current_path, module);
@@ -199,7 +201,7 @@ impl Compiler {
             
             let module = self.modules.get_mut(path).unwrap();
             self.analyzer.symbol_table.current_scope_id = module.scope_id;
-            self.analyzer.set_source(module.lined_source.clone(), file_path);
+            self.analyzer.set_source(module.lined_source.clone(), file_path, module.trusted);
 
             if let Err(errs) = self.analyzer.analyze(&mut module.ast) {
                 eprintln!("{} errors emitted in {:?}... printing:", errs.len(), path);

@@ -1434,10 +1434,11 @@ pub struct BuiltinTypes {
 
 pub struct SemanticAnalyzer {
     pub symbol_table: SymbolTable,
-    builtin_types: BuiltinTypes,
     pub trait_registry: TraitRegistry,
     pub unification_context: UnificationContext,
     pub uv_collection_ctx: UVCollectionContext,
+    pub trusted: bool,
+    builtin_types: BuiltinTypes,
     errors: Vec<Error>,
     lines: Rc<Vec<String>>,
     file_path: Option<String>
@@ -1463,6 +1464,7 @@ impl SemanticAnalyzer {
             builtin_types,
             unification_context: UnificationContext::default(),
             uv_collection_ctx: UVCollectionContext { current_return_type: None, in_loop: false, current_function_stack: vec![] },
+            trusted: false,
             errors: vec![],
             lines,
             file_path
@@ -1547,11 +1549,12 @@ impl SemanticAnalyzer {
         Error::from_multiple_errors(kind, primary_span, lines, self.file_path.clone())
     }
 
-    pub fn set_source(&mut self, lines: Rc<Vec<String>>, file_path: Option<String>) {
+    pub fn set_source(&mut self, lines: Rc<Vec<String>>, file_path: Option<String>, trusted: bool) {
         self.lines = lines.clone();
         self.symbol_table.lines = lines;
         self.file_path = file_path.clone();
         self.symbol_table.file_path = file_path;
+        self.trusted = trusted;
     }
 
     pub fn analyze(&mut self, program: &mut AstNode) -> Result<(), Vec<Error>> {

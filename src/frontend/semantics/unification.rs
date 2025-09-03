@@ -1963,6 +1963,18 @@ impl SemanticAnalyzer {
         let source_sym = self.symbol_table.get_type_symbol(resolved_source.get_base_symbol()).unwrap();
         let target_sym = self.symbol_table.get_type_symbol(resolved_target.get_base_symbol()).unwrap();
 
+        let int_symbol = self.get_primitive_type(PrimitiveKind::Int);
+        if self.trusted {
+            match (&resolved_source, &resolved_target) {
+                (Type::Base { symbol, args }, Type::Reference { .. })
+                | (Type::Base { symbol, args }, Type::MutableReference { .. })
+                | (Type::Reference { .. }, Type::Base { symbol, args })
+                | (Type::MutableReference { .. }, Type::Base { symbol, args })
+                    if (args.is_empty() && *symbol == int_symbol) => return Ok(true),
+                _ => {}
+            }
+        }
+
         if source_sym.is_valid_cast(target_sym) {
             Ok(true)
         } else {

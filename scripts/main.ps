@@ -12,15 +12,8 @@
 // maybe add prelude system
 
 struct Scalar { x: int; }
-
-impl Clone for Scalar {
-    fn clone(&self): Self {
-        Scalar { x: self.x + 1 }
-    }
+impl Scalar {
+    fn e(&self) {}
 }
 
-{
-    let x: Heap<Scalar> = heap Scalar { x: 4 };
-    let y: Scalar = *x; // clone of x
-    *x = Scalar { x: 7 };
-}
+let y = Scalar.e;
