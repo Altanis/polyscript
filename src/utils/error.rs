@@ -34,7 +34,7 @@ pub enum ErrorKind {
     },
     ConflictingInherentImpl(String),
     InvalidDereference(String),
-    NonCloneableDereference(String),
+    ImplicitCopyOfNonCloneableType(String),
     ExpectedScopedItem,
     MemberNotFound(String, String),
     InvalidFieldAccess(String),
@@ -139,7 +139,7 @@ impl ErrorKind {
             ErrorKind::InvalidDereference(ty) => {
                 format!("attempted to dereference non-pointer type {ty}")
             }
-            ErrorKind::NonCloneableDereference(ty) => format!("cannot move out of dereference of type `{}`, which does not implement the `Clone` trait", ty),
+            ErrorKind::ImplicitCopyOfNonCloneableType(ty) => format!("cannot move value of type `{}`, which does not implement the `Clone` trait", ty),
             ErrorKind::ExpectedScopedItem => "expected an item with a scope".to_string(),
             ErrorKind::MemberNotFound(field, type_name) => {
                 format!("member \"{field}\" not found in type {type_name}")

@@ -16,7 +16,6 @@ struct Vec<T> {
 }
 
 impl<T> Drop for Vec<T> {
-    // Drops the vector
     fn drop(&mut self) {
         if (self.capacity != 0) {
             self.clear();
@@ -80,13 +79,13 @@ impl<T> Vec<T> {
     }
 
     // Pushes an element to the end of a vector.
-    public fn push(&mut self, element: &T) {
+    public fn push(&mut self, element: T) {
         if (self.size + 1 > self.capacity) {
             self.reserve(if self.capacity == 0 { 1 } else { self.capacity * 2 });
         }
 
-        let dst = self.data + self.capacity * self.element_size;
-        memcpy(dst, element, self.element_size);
+        let dst = self.data + self.size * self.element_size;
+        memcpy(dst, &element, self.element_size);
         self.size += 1;
     }
 
@@ -94,7 +93,7 @@ impl<T> Vec<T> {
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
-    public fn replace(&self, idx: int, element: &T): bool {
+    public fn replace(&self, idx: int, element: T): bool {
         if (idx < 0 || idx + 1 > self.size) {
             return false;
         }
@@ -102,7 +101,7 @@ impl<T> Vec<T> {
         let dst = self.data + idx * self.element_size;
         if #IS_REFCOUNTED#{T} { decref(dst); }
 
-        memcpy(dst, element, self.element_size);
+        memcpy(dst, &element, self.element_size);
 
         true
     }
