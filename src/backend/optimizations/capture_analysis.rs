@@ -94,17 +94,6 @@ fn find_variable_usage(node: &MIRNode, target_id: usize, analyzer: &SemanticAnal
     max_usage.max(current_node_usage)
 }
 
-fn is_copy_type(analyzer: &SemanticAnalyzer, ty: &Type) -> bool {
-    match ty {
-        Type::Base { symbol, .. } => {
-            if let Some(type_symbol) = analyzer.symbol_table.get_type_symbol(*symbol) {
-                matches!(type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
-            } else { false }
-        },
-        Type::Reference { .. } | Type::MutableReference { .. } => true
-    }
-}
-
 fn get_base_variable(node: &MIRNode) -> Option<usize> {
     match &node.kind {
         MIRNodeKind::Identifier(_) => node.value_id,

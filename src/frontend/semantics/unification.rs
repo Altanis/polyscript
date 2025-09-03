@@ -620,6 +620,11 @@ impl SemanticAnalyzer {
     /// Checks if a type implements a trait.
     fn does_type_implement_trait(&mut self, ty: &Type, trait_id: TypeSymbolId) -> Result<bool, BoxedError> {
         let resolved_type = self.resolve_type(ty);
+        let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
+        if trait_id == clone_trait_id && self.is_copy_type(&resolved_type) {
+            return Ok(true);
+        }
+
         if self.is_uv(resolved_type.get_base_symbol()) {
             return Ok(false);
         }
@@ -1973,23 +1978,61 @@ impl SemanticAnalyzer {
 
     fn unify_dereference(&mut self, operand_ty: Type, result_ty: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
         let resolved_operand = self.resolve_type(&operand_ty);
+        let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
+    
         match &resolved_operand {
-            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
+            Type::Reference { inner, .. } => {
+                if !self.does_type_implement_trait(inner, clone_trait_id)? {
+                    return Err(self.create_error(
+                        ErrorKind::NonCloneableDereference(self.symbol_table.display_type(inner)),
+                        info.span,
+                        &[info.span],
+                    ));
+                }
                 self.unify(*inner.clone(), result_ty, info)?;
                 Ok(true)
             },
-            Type::Base { symbol, .. } if self.is_uv(*symbol) => {
-                Ok(false)
+            Type::MutableReference { inner, .. } => {
+                self.unify(*inner.clone(), result_ty, info)?;
+                Ok(true)
             },
+            Type::Base { symbol, .. } if self.is_uv(*symbol) => Ok(false),
             _ => {
-                let deref_trait_id = self.trait_registry.get_default_trait(&"Deref".to_string());
-                let deref_trait_type = Type::new_base(deref_trait_id);
-
-                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_trait_type, "Target", info) {
-                    self.unify(result_ty, target_type, info)?;
+                if self.is_heap_type(&resolved_operand) {
+                    let Type::Base { args, .. } = &resolved_operand else { unreachable!() };
+                    let inner = &args[0];
+                    if !self.does_type_implement_trait(inner, clone_trait_id)? {
+                        return Err(self.create_error(
+                            ErrorKind::NonCloneableDereference(self.symbol_table.display_type(inner)),
+                            info.span,
+                            &[info.span],
+                        ));
+                    }
+                    self.unify(inner.clone(), result_ty, info)?;
                     return Ok(true);
                 }
 
+                let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
+                let deref_mut_trait_type = Type::new_base(deref_mut_trait_id);
+                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_mut_trait_type, "Target", info) {
+                    self.unify(result_ty, target_type, info)?;
+                    return Ok(true);
+                }
+    
+                let deref_trait_id = self.trait_registry.get_default_trait(&"Deref".to_string());
+                let deref_trait_type = Type::new_base(deref_trait_id);
+                if let Ok(Some(MemberResolution::Type(target_type, _))) = self.find_member_in_trait_impl(&resolved_operand, &deref_trait_type, "Target", info) {
+                    if !self.does_type_implement_trait(&target_type, clone_trait_id)? {
+                         return Err(self.create_error(
+                            ErrorKind::NonCloneableDereference(self.symbol_table.display_type(&target_type)),
+                            info.span,
+                            &[info.span],
+                        ));
+                    }
+                    self.unify(result_ty, target_type, info)?;
+                    return Ok(true);
+                }
+    
                 Err(self.create_error(
                     ErrorKind::InvalidDereference(self.symbol_table.display_type(&resolved_operand)),
                     info.span,

@@ -13,6 +13,12 @@
 
 struct Scalar { x: int; }
 
+impl Clone for Scalar {
+    fn clone(&self): Self {
+        Scalar { x: self.x + 1 }
+    }
+}
+
 {
     let x: Heap<Scalar> = heap Scalar { x: 4 };
     let y: Scalar = *x; // clone of x
