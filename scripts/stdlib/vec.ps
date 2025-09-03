@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, decref, eprint, exit } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, eprint, __exit } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -112,7 +112,7 @@ impl<T> Vec<T> {
     public fn get(&self, idx: int): &T {
         if (idx < 0 || idx + 1 > self.size) {
             eprint("oob access in vector\n");
-            exit(1);
+            __exit(1);
         }
 
         (self.data + idx * self.element_size) as &T;

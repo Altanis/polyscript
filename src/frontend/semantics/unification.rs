@@ -1287,7 +1287,8 @@ impl SemanticAnalyzer {
             },
             Constraint::Cast(source, target) => self.unify_cast(source, target, info),
             Constraint::Dereference(operand_ty, result_ty) => self.unify_dereference(operand_ty, result_ty, info),
-            Constraint::MutableDereference(operand_ty, assigned_ty) => self.unify_mutable_dereference(operand_ty, assigned_ty, info)
+            Constraint::MutableDereference(operand_ty, assigned_ty) => self.unify_mutable_dereference(operand_ty, assigned_ty, info),
+            Constraint::ExpressionStatement(inner, result) => self.unify_expression_statement(inner, result, info),
         }
     }
 
@@ -1301,11 +1302,12 @@ impl SemanticAnalyzer {
         match (t1.clone(), t2.clone()) {
             (t1, t2) if t1 == t2 => Ok(t1),
 
+            (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
+            (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
+
+            // Now handle the never type's "bottom" property.
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
                 if self.is_never(s) => Ok(other.clone()),
-
-            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. }) 
-                if self.is_uv(s) => self.unify_variable(s, other, info),
             
             (t1 @ Type::Base { symbol: s1, .. }, t2 @ Type::Base { symbol: s2, .. })
                 if self.is_opaque_type_projection(s1) && self.is_opaque_type_projection(s2) =>
@@ -2081,6 +2083,26 @@ impl SemanticAnalyzer {
             }
         }
     }
+
+    fn unify_expression_statement(&mut self, inner_ty: Type, result_ty: Type, info: ConstraintInfo) -> Result<bool, BoxedError> {
+        let resolved_inner = self.resolve_type(&inner_ty);
+
+        if self.is_uv(resolved_inner.get_base_symbol()) {
+            return Ok(false);
+        }
+
+        let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
+        let target_type_id = if resolved_inner.get_base_symbol() == never_type_id {
+            never_type_id
+        } else {
+            self.get_primitive_type(PrimitiveKind::Void)
+        };
+
+        let target_type = Type::new_base(target_type_id);
+        self.unify(result_ty, target_type, info)?;
+
+        Ok(true)
+    }
 }
 
 impl SemanticAnalyzer {
@@ -2330,6 +2352,128 @@ impl SemanticAnalyzer {
             }
         }
         
+        Ok(())
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn never_return_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.never_return_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn never_return_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        if let AstNodeKind::Function { body: Some(body), name, .. } = &mut node.kind {
+            let fn_symbol = self.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+            let fn_type_id = fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let fn_type_symbol = self.symbol_table.get_type_symbol(fn_type_id).unwrap();
+
+            if let TypeSymbolKind::FunctionSignature { return_type, .. } = &fn_type_symbol.kind {
+                let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
+                if return_type.get_base_symbol() == never_type_id && !self.path_diverges(body) {
+                    let fn_name = if name.is_empty() { "[anonymous function]".to_string() } else { name.clone() };
+                    let err = self.create_error(
+                        ErrorKind::NonDivergingNeverFunction(fn_name),
+                        node.span,
+                        &[node.span]
+                    );
+
+                    return Err(err);
+                }
+            }
+        }
+
+        for child in node.children_mut() {
+            self.never_return_check_node(child)?;
+        }
+
+        Ok(())
+    }
+
+    fn path_diverges(&self, node: &AstNode) -> bool {
+        if let Some(ty) = &node.type_id {
+            let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
+            if ty.get_base_symbol() == never_type_id {
+                return true;
+            }
+        }
+
+        match &node.kind {
+            AstNodeKind::Block(statements) => {
+                if let Some(last_stmt) = statements.last() {
+                    self.path_diverges(last_stmt)
+                } else {
+                    false
+                }
+            },
+            AstNodeKind::IfStatement { then_branch, else_if_branches, else_branch: Some(else_b), .. } => {
+                self.path_diverges(then_branch)
+                    && self.path_diverges(else_b)
+                    && else_if_branches.iter().all(|(_, branch)| self.path_diverges(branch))
+            },
+            AstNodeKind::IfStatement { .. } => false,
+            AstNodeKind::ExpressionStatement(expr) => self.path_diverges(expr),
+            _ => false
+        }
+    }
+
+    pub fn diverging_function_check_pass(&mut self, program: &mut AstNode) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if let AstNodeKind::Program(statements) = &mut program.kind {
+            for statement in statements {
+                if let Err(err) = self.diverging_function_check_node(statement) {
+                    errors.push(*err);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+
+        errors
+    }
+
+    fn diverging_function_check_node(&mut self, node: &mut AstNode) -> Result<(), BoxedError> {
+        if let AstNodeKind::Function { body: Some(body), name, .. } = &mut node.kind {
+            let fn_symbol = self.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
+            let fn_type_id = fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let fn_type_symbol = self.symbol_table.get_type_symbol(fn_type_id).unwrap();
+
+            if let TypeSymbolKind::FunctionSignature { return_type, .. } = &fn_type_symbol.kind {
+                let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
+
+                let actual_return_type_is_never = return_type.get_base_symbol() == never_type_id;
+                let body_is_fully_divergent = self.path_diverges(body);
+
+                if body_is_fully_divergent && !actual_return_type_is_never {
+                    let fn_name = if name.is_empty() { "[anonymous function]".to_string() } else { name.clone() };
+                    let return_type_str = self.symbol_table.display_type(return_type);
+                    let err = self.create_error(
+                        ErrorKind::DivergingFunctionWithNonNeverReturnType(fn_name, return_type_str),
+                        node.span,
+                        &[node.span]
+                    );
+
+                    return Err(err);
+                }
+            }
+        }
+
+        for child in node.children_mut() {
+            self.diverging_function_check_node(child)?;
+        }
+
         Ok(())
     }
 }

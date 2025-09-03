@@ -1377,6 +1377,8 @@ pub enum Constraint {
     Dereference(Type, Type),
     /// A mutable dereference used as the target of an assignment.
     MutableDereference(Type, Type),
+    /// The type of an expression statement, conditional on its inner expression.
+    ExpressionStatement(Type, Type)
 }
 
 /// Additional information about a constraint.
@@ -1574,6 +1576,8 @@ impl SemanticAnalyzer {
         pass!(self, uv_collector_pass, program);
         pass!(self, unification_pass, program);
         pass!(self, substitution_pass, program);
+        pass!(self, never_return_check_pass, program);
+        pass!(self, diverging_function_check_pass, program);
         pass!(self, const_check_pass, program);
         pass!(self, generic_value_check_pass, program);
         pass!(self, member_resolution_pass, program);
@@ -1974,6 +1978,12 @@ impl Constraint {
                         "*{} = {}",
                         self.t.display_type(operand).yellow(),
                         self.t.display_type(assigned).yellow()
+                    ),
+                    ExpressionStatement(inner, result) => write!(
+                        f,
+                        "{} = {};",
+                        self.t.display_type(result).yellow(),
+                        self.t.display_type(inner)
                     )
                 }
             }

@@ -1,8 +1,3 @@
-// compiler directive in trusted mode
-// allow int <=> &T in trusted mode
-// opaque exit with never type, typecheck functions that return never
-// `drop(x)` => dont allow x to be accessed
-
 // arrays + Indexable trait
 // stdlib
     // math + vec + string + io + hashmap
@@ -11,9 +6,10 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Scalar { x: int; }
-impl Scalar {
-    fn e(&self) {}
+fn inf_loop(): never {
+    while (true) {}
 }
 
-let y = Scalar.e;
+fn div(x: int, y: int): int {
+    inf_loop();
+}

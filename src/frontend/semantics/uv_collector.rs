@@ -392,10 +392,16 @@ impl SemanticAnalyzer {
 
         self.collect_uvs(body)?;
 
+        let return_type = if condition.kind == AstNodeKind::BooleanLiteral(true) {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
+        } else {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
+        };
+
         self.unification_context.register_constraint(
             Constraint::Equality(
                 Type::new_base(uv_id),
-                Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                return_type,
             ),
             info,
         );
@@ -420,12 +426,15 @@ impl SemanticAnalyzer {
             self.collect_uvs(init)?;
         }
 
-        if let Some(cond) = condition {
+        let is_infinite = if let Some(cond) = condition {
             let cond_type = self.collect_uvs(cond)?;
             let bool_type = Type::new_base(self.get_primitive_type(PrimitiveKind::Bool));
             self.unification_context
                 .register_constraint(Constraint::Equality(cond_type, bool_type), info);
-        }
+            false
+        } else {
+            true
+        };
 
         if let Some(inc) = increment {
             self.collect_uvs(inc)?;
@@ -433,10 +442,16 @@ impl SemanticAnalyzer {
 
         self.collect_uvs(body)?;
 
+        let return_type = if is_infinite {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Never))
+        } else {
+            Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
+        };
+
         self.unification_context.register_constraint(
             Constraint::Equality(
                 Type::new_base(uv_id),
-                Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
+                return_type,
             ),
             info,
         );
@@ -1558,13 +1573,11 @@ impl SemanticAnalyzer {
                 }
             },
             ExpressionStatement(inner_expr) => {
-                self.collect_uvs(inner_expr)?;
+                let inner_type = self.collect_uvs(inner_expr)?;
+                let result_type = uv.clone();
 
                 self.unification_context.register_constraint(
-                    Constraint::Equality(
-                        uv.clone(),
-                        Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
-                    ),
+                    Constraint::ExpressionStatement(inner_type, result_type),
                     info,
                 );
             },

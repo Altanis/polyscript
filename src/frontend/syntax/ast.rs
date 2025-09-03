@@ -8,7 +8,7 @@ use colored::*;
 use indexmap::IndexMap;
 
 /// The various denominations of an AstNode.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AstNodeKind {
     IntegerLiteral(i64),
     FloatLiteral(f64),
@@ -207,7 +207,7 @@ pub enum AstNodeKind {
     Program(Vec<AstNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AstNode {
     /// The type of node.
     pub kind: AstNodeKind,
