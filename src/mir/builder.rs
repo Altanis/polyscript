@@ -879,6 +879,10 @@ impl<'a> MIRBuilder<'a> {
                     {
                         needs_monomorphization = !args.is_empty();
                     }
+
+                    if fn_value_symbol.is_intrinsic {
+                        needs_monomorphization = false;
+                    }
                     
                     let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization {
                         let concrete_types_for_mangling = if !generic_arguments.is_empty() {

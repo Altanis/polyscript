@@ -1493,72 +1493,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         if let Some(fn_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) {
             let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
-            let fn_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
-            let impl_scope = fn_scope.parent.and_then(|p_id| self.analyzer.symbol_table.get_scope(p_id));
+            let impl_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
 
-            if let Some(impl_scope) = impl_scope
-                && let Some(trait_id) = impl_scope.trait_id
-                && let MIRNodeKind::FieldAccess { left: instance_node, .. } = &function.kind
-                && let Some(instance_type) = &instance_node.type_id
-                && self.analyzer.is_heap_type(instance_type)
+            if let Some(trait_id) = impl_scope.trait_id
+                && let Some(argument) = arguments.first()
+                && let Some(ty_id) = argument.type_id.as_ref()
+                && let Type::Reference { inner } = ty_id
+                && self.analyzer.is_heap_type(inner)
             {
+                let rc = self.compile_node(argument).unwrap();
+
                 let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
                 let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
 
                 if fn_name == "clone" && trait_id == clone_trait_id {
-                    let original_rc_ptr = self.compile_node(instance_node).unwrap().into_pointer_value();
-                    let inner_type = match instance_type {
-                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
-                        _ => unreachable!(),
-                    };
-                    let rc_repr = self.wrap_in_rc(inner_type);
-                    let original_data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, original_rc_ptr, 1, "original_data_ptr_for_clone").unwrap();
-
-                    let user_clone_fn_val = self.functions.get(&fn_symbol.id).copied().unwrap();
-
-                    let cloned_data_val = if self.is_rvo_candidate(inner_type) {
-                        let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
-                        let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "clone_rvo_ret_ptr").unwrap();
-                        let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), original_data_ptr.into()];
-                        self.builder.build_call(user_clone_fn_val, &args, "").unwrap();
-                        self.builder.build_load(return_llvm_type, rvo_return_ptr, "cloned_val").unwrap()
-                    } else {
-                        let call = self.builder.build_call(user_clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
-                        call.try_as_basic_value().left().unwrap()
-                    };
-
-                    let mangled_name = self.mangle_name(inner_type);
-                    let size = rc_repr.rc_struct_type.size_of().unwrap();
-                    let new_rc_ptr = self.build_malloc(size, &format!("heap_alloc.{}", mangled_name));
-                    
-                    let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, new_rc_ptr, 0, "rc.header_ptr").unwrap();
-                    let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "rc.ref_count_ptr").unwrap();
-                    self.builder.build_store(ref_count_ptr, self.context.i64_type().const_int(1, false)).unwrap();
-                    
-                    let deallocate_fn_ptr_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 1, "rc.deallocate_fn_ptr").unwrap();
-                    self.builder.build_store(deallocate_fn_ptr_ptr, rc_repr.deallocate_data_fn.as_global_value().as_pointer_value()).unwrap();
-
-                    let new_data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, new_rc_ptr, 1, "rc.data_ptr").unwrap();
-                    self.builder.build_store(new_data_ptr, cloned_data_val).unwrap();
-                    
-                    return Some(new_rc_ptr.as_basic_value_enum());
+                    let incref_fn = self.get_incref();
+                    self.builder.build_call(incref_fn, &[rc.into()], "heap.clone.incref").unwrap();
+                    return Some(rc);
                 }
 
                 if fn_name == "drop" && trait_id == drop_trait_id {
-                    let rc_ptr = self.compile_node(instance_node).unwrap().into_pointer_value();
-                    
-                    let user_drop_fn_val = self.functions.get(&fn_symbol.id).copied().unwrap();
-                    
-                    let inner_type = match instance_type {
-                        Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
-                        _ => unreachable!(),
-                    };
-                    let rc_repr = self.wrap_in_rc(inner_type);
-                    let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "data_ptr_for_drop").unwrap();
-                    self.builder.build_call(user_drop_fn_val, &[data_ptr.into()], "user_drop_call").unwrap();
-
-                    let decref = self.get_decref();
-                    self.builder.build_call(decref, &[rc_ptr.into()], "rc.drop_decref").unwrap();
+                    let decref_fn = self.get_incref();
+                    self.builder.build_call(decref_fn, &[rc.into()], "heap.drop.decref").unwrap();
                     return None;
                 }
             }

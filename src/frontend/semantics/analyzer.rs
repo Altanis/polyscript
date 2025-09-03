@@ -190,7 +190,8 @@ pub struct ValueSymbol {
     pub qualifier: QualifierKind,
     pub scope_id: ScopeId,
     pub type_id: Option<Type>,
-    pub statically_known_return_value_id: Option<ValueSymbolId>
+    pub statically_known_return_value_id: Option<ValueSymbolId>,
+    pub is_intrinsic: bool
 }
 
 #[derive(Debug, Clone)]
@@ -775,6 +776,7 @@ impl SymbolTable {
         // --- impl<T> Clone for Heap<T> ---
         {
             let impl_scope_id = self.enter_scope(ScopeKind::Impl);
+            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(clone_trait_id);
             let t_generic_id = self
                 .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
                 .unwrap();
@@ -814,15 +816,15 @@ impl SymbolTable {
                 )
                 .unwrap();
 
-            self.add_value_symbol(
+            let clone_fn_symbol_id = self.add_value_symbol(
                 "clone",
                 ValueSymbolKind::Function(func_scope_id, HashSet::new()),
                 false,
                 QualifierKind::Public,
                 Some(Type::new_base(fn_sig_type_id)),
                 None,
-            )
-            .unwrap();
+            ).unwrap();
+            self.get_value_symbol_mut(clone_fn_symbol_id).unwrap().is_intrinsic = true;
 
             trait_registry.register(
                 clone_trait_id,
@@ -842,6 +844,7 @@ impl SymbolTable {
         // --- impl<T> Deref for Heap<T> ---
         {
             let impl_scope_id = self.enter_scope(ScopeKind::Impl);
+            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(deref_trait_id);
             let t_generic_id = self
                 .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
                 .unwrap();
@@ -861,7 +864,8 @@ impl SymbolTable {
             let return_type = Type::Reference { inner: Box::new(t_type) };
 
             let fn_sig_type_id = self.add_type_symbol("deref", TypeSymbolKind::FunctionSignature { params, return_type, instance: Some(ReferenceKind::Reference) }, vec![], QualifierKind::Private, None).unwrap();
-            self.add_value_symbol("deref", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
+            let deref_fn_symbol_id = self.add_value_symbol("deref", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
+            self.get_value_symbol_mut(deref_fn_symbol_id).unwrap().is_intrinsic = true;
 
             trait_registry.register(deref_trait_id, heap_symbol_id, TraitImpl {
                 impl_scope_id,
@@ -877,6 +881,7 @@ impl SymbolTable {
         // --- impl<T> DerefMut for Heap<T> ---
         {
             let impl_scope_id = self.enter_scope(ScopeKind::Impl);
+            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(deref_mut_trait_id);
             let t_generic_id = self
                 .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
                 .unwrap();
@@ -896,7 +901,8 @@ impl SymbolTable {
             let return_type = Type::MutableReference { inner: Box::new(t_type) };
 
             let fn_sig_type_id = self.add_type_symbol("deref_mut", TypeSymbolKind::FunctionSignature { params, return_type, instance: Some(ReferenceKind::MutableReference) }, vec![], QualifierKind::Private, None).unwrap();
-            self.add_value_symbol("deref_mut", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
+            let deref_mut_fn_symbol_id = self.add_value_symbol("deref_mut", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
+            self.get_value_symbol_mut(deref_mut_fn_symbol_id).unwrap().is_intrinsic = true;
 
             trait_registry.register(deref_mut_trait_id, heap_symbol_id, TraitImpl {
                 impl_scope_id,
@@ -941,7 +947,8 @@ impl SymbolTable {
             type_id,
             span,
             scope_id,
-            statically_known_return_value_id: None
+            statically_known_return_value_id: None,
+            is_intrinsic: false
         };
         self.registry.value_symbols.insert(id, symbol);
         self.scopes.get_mut(&scope_id).unwrap().values.insert(name_id, id);
@@ -1717,8 +1724,10 @@ impl SymbolTable {
 
 impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "--- User Scope ({}) ---", self.real_starting_scope)?;
-        self.display_scope(self.real_starting_scope, 0, f)
+        let scope = self.real_starting_scope;
+
+        writeln!(f, "--- User Scope ({}) ---", scope)?;
+        self.display_scope(scope, 0, f)
     }
 }
 
