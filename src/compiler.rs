@@ -33,13 +33,18 @@ pub enum EmitType {
 }
 
 #[derive(Debug)]
+pub struct EmitTarget {
+    pub kind: EmitType,
+    pub path: PathBuf,
+}
+
+#[derive(Debug)]
 pub struct CompilerConfig {
     pub entry_file: String,
     pub opt_level: OptimizationLevel,
     pub target_triple: String,
     pub cpu: String,
-    pub emit_type: EmitType,
-    pub output_file: PathBuf,
+    pub emit_targets: Vec<EmitTarget>,
     pub debug_symbols: bool,
     pub features: String,
     pub linker: String,
@@ -503,48 +508,70 @@ impl Compiler {
         let mut codegen = CodeGen::new(&context, &builder, &module, &self.analyzer);
         codegen.compile_program(&program);
 
-        if let Some(parent) = self.config.output_file.parent() && !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).expect("Failed to create output directory");
+        let mut obj_file_for_linking: Option<PathBuf> = None;
+        let mut executable_target: Option<&EmitTarget> = None;
+    
+        for target in &self.config.emit_targets {
+            if let Some(parent) = target.path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent).expect("Failed to create output directory");
+                }
+            }
+    
+            match target.kind {
+                EmitType::LLIR => module.print_to_file(&target.path).expect("Couldn't write LLVM IR to file"),
+                EmitType::Asm => target_machine.write_to_file(&module, FileType::Assembly, &target.path).expect("Failed to write assembly file"),
+                EmitType::Obj => {
+                    target_machine.write_to_file(&module, FileType::Object, &target.path).expect("Failed to write object file");
+                    obj_file_for_linking = Some(target.path.clone());
+                },
+                EmitType::Executable => {
+                    executable_target = Some(target);
+                }
+            }
         }
-
-        match self.config.emit_type {
-            EmitType::LLIR => module.print_to_file(&self.config.output_file).expect("Couldn't write LLVM IR to file"),
-            EmitType::Asm => target_machine.write_to_file(&module, FileType::Assembly, &self.config.output_file).expect("Failed to write assembly file"),
-            EmitType::Obj => target_machine.write_to_file(&module, FileType::Object, &self.config.output_file).expect("Failed to write object file"),
-            EmitType::Executable => {
-                let temp_obj_path = self.config.output_file.with_extension("o");
-                target_machine.write_to_file(&module, FileType::Object, &temp_obj_path).expect("Failed to write object file");
-
-                let linker_cmd = {
-                    if !self.config.linker.is_empty() {
-                        self.config.linker.clone()
-                    } else if Command::new("clang").arg("--version").output().is_ok() {
-                        "clang".to_string()
-                    } else if Command::new("gcc").arg("--version").output().is_ok() {
-                        "gcc".to_string()
-                    } else {
-                        eprintln!("Error: Could not find a linker.");
-                        eprintln!("Please specify one with the --linker flag, or make sure 'clang' or 'gcc' is in your PATH.");
-                        std::process::exit(1);
-                    }
-                };
-
-                let status = Command::new(&linker_cmd)
-                    .arg(&temp_obj_path)
-                    .arg("-o")
-                    .arg(&self.config.output_file)
-                    .status()
-                    .unwrap_or_else(|e| {
-                        eprintln!("Failed to run linker '{}': {}", linker_cmd, e);
-                        std::process::exit(1);
-                    });
-
-                if !status.success() {
-                    eprintln!("Linking failed.");
+    
+        if let Some(exec_target) = executable_target {
+            let needs_temp_obj = obj_file_for_linking.is_none();
+            let obj_path = if needs_temp_obj {
+                let temp_path = exec_target.path.with_extension("o");
+                target_machine.write_to_file(&module, FileType::Object, &temp_path).expect("Failed to write temporary object file");
+                temp_path
+            } else {
+                obj_file_for_linking.clone().unwrap()
+            };
+    
+            let linker_cmd = {
+                if !self.config.linker.is_empty() {
+                    self.config.linker.clone()
+                } else if Command::new("clang").arg("--version").output().is_ok() {
+                    "clang".to_string()
+                } else if Command::new("gcc").arg("--version").output().is_ok() {
+                    "gcc".to_string()
+                } else {
+                    eprintln!("Error: Could not find a linker.");
+                    eprintln!("Please specify one with the --linker flag, or make sure 'clang' or 'gcc' is in your PATH.");
                     std::process::exit(1);
                 }
-
-                fs::remove_file(&temp_obj_path).expect("Failed to remove temporary object file");
+            };
+    
+            let status = Command::new(&linker_cmd)
+                .arg(&obj_path)
+                .arg("-o")
+                .arg(&exec_target.path)
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to run linker '{}': {}", linker_cmd, e);
+                    std::process::exit(1);
+                });
+    
+            if !status.success() {
+                eprintln!("Linking failed.");
+                std::process::exit(1);
+            }
+    
+            if needs_temp_obj {
+                fs::remove_file(&obj_path).expect("Failed to remove temporary object file");
             }
         }
     }

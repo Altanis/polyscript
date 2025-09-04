@@ -110,29 +110,99 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn get_stdout(&self) -> PointerValue<'ctx> {
+        let triple = self.module.get_triple();
+        let target = triple.as_str().to_str().unwrap();
+
+        let file_struct_type = self.module.get_struct_type("FILE").unwrap_or_else(|| self.context.opaque_struct_type("FILE"));
         let file_ptr_type = self.context.ptr_type(AddressSpace::default());
-        let stdout_global_name = "stdout";
 
-        if let Some(stdout_global) = self.module.get_global(stdout_global_name) {
-            return self.builder.build_load(file_ptr_type, stdout_global.as_pointer_value(), "stdout").unwrap().into_pointer_value();
+        if target.contains("windows") {
+            let iob_func_name = "__acrt_iob_func";
+            let iob_func = self.module.get_function(iob_func_name).unwrap_or_else(|| {
+                let fn_type = file_ptr_type.fn_type(&[], false);
+                self.module.add_function(iob_func_name, fn_type, Some(Linkage::External))
+            });
+
+            let iob_array_ptr = self.builder.build_call(iob_func, &[], "iob_array").unwrap()
+                .try_as_basic_value().left().unwrap().into_pointer_value();
+            
+            unsafe {
+                self.builder.build_gep(
+                    file_struct_type,
+                    iob_array_ptr,
+                    &[self.context.i32_type().const_int(1, false)],
+                    "stdout_ptr"
+                ).unwrap()
+            }
+        } else if target.contains("darwin") {
+            let stdout_global_name = "__stdoutp";
+            let stdout_global = self.module.get_global(stdout_global_name)
+                .unwrap_or_else(|| {
+                    let global = self.module.add_global(file_ptr_type, None, stdout_global_name);
+                    global.set_linkage(Linkage::External);
+                    global
+                });
+
+            self.builder.build_load(file_ptr_type, stdout_global.as_pointer_value(), "stdout").unwrap().into_pointer_value()
+        } else {
+            let stdout_global_name = "stdout";
+            let stdout_global = self.module.get_global(stdout_global_name)
+                .unwrap_or_else(|| {
+                    let global = self.module.add_global(file_ptr_type, None, stdout_global_name);
+                    global.set_linkage(Linkage::External);
+                    global
+                });
+
+            self.builder.build_load(file_ptr_type, stdout_global.as_pointer_value(), "stdout").unwrap().into_pointer_value()
         }
-
-        let stdout = self.module.add_global(file_ptr_type, None, stdout_global_name);
-        stdout.set_linkage(Linkage::External);
-        self.builder.build_load(file_ptr_type, stdout.as_pointer_value(), "stdout").unwrap().into_pointer_value()
     }
 
     fn get_stderr(&self) -> PointerValue<'ctx> {
+        let triple = self.module.get_triple();
+        let target = triple.as_str().to_str().unwrap();
+
+        let file_struct_type = self.module.get_struct_type("FILE").unwrap_or_else(|| self.context.opaque_struct_type("FILE"));
         let file_ptr_type = self.context.ptr_type(AddressSpace::default());
-        let stderr_global_name = "stderr";
 
-        if let Some(stderr_global) = self.module.get_global(stderr_global_name) {
-            return self.builder.build_load(file_ptr_type, stderr_global.as_pointer_value(), "stderr").unwrap().into_pointer_value();
+        if target.contains("windows") {
+            let iob_func_name = "__acrt_iob_func";
+            let iob_func = self.module.get_function(iob_func_name).unwrap_or_else(|| {
+                let fn_type = file_ptr_type.fn_type(&[], false);
+                self.module.add_function(iob_func_name, fn_type, Some(Linkage::External))
+            });
+
+            let iob_array_ptr = self.builder.build_call(iob_func, &[], "iob_array").unwrap()
+                .try_as_basic_value().left().unwrap().into_pointer_value();
+
+            unsafe {
+                self.builder.build_gep(
+                    file_struct_type,
+                    iob_array_ptr,
+                    &[self.context.i32_type().const_int(2, false)],
+                    "stderr_ptr"
+                ).unwrap()
+            }
+        } else if target.contains("darwin") {
+            let stderr_global_name = "__stderrp";
+            let stderr_global = self.module.get_global(stderr_global_name)
+                .unwrap_or_else(|| {
+                    let global = self.module.add_global(file_ptr_type, None, stderr_global_name);
+                    global.set_linkage(Linkage::External);
+                    global
+                });
+
+            self.builder.build_load(file_ptr_type, stderr_global.as_pointer_value(), "stderr").unwrap().into_pointer_value()
+        } else {
+            let stderr_global_name = "stderr";
+            let stderr_global = self.module.get_global(stderr_global_name)
+                .unwrap_or_else(|| {
+                    let global = self.module.add_global(file_ptr_type, None, stderr_global_name);
+                    global.set_linkage(Linkage::External);
+                    global
+                });
+            
+            self.builder.build_load(file_ptr_type, stderr_global.as_pointer_value(), "stderr").unwrap().into_pointer_value()
         }
-
-        let stderr = self.module.add_global(file_ptr_type, None, stderr_global_name);
-        stderr.set_linkage(Linkage::External);
-        self.builder.build_load(file_ptr_type, stderr.as_pointer_value(), "stderr").unwrap().into_pointer_value()
     }
 
     fn get_c_fprintf(&self) -> FunctionValue<'ctx> {

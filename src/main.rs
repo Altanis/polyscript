@@ -11,7 +11,7 @@ use clap::{Parser, ValueEnum};
 use inkwell::OptimizationLevel;
 use std::{fs, path::{Path, PathBuf}};
 
-use crate::compiler::{Compiler, CompilerConfig, EmitType};
+use crate::compiler::{Compiler, CompilerConfig, EmitTarget, EmitType};
 
 mod backend;
 mod compiler;
@@ -35,19 +35,19 @@ struct CliArgs {
     debug_symbols: bool,
 
     /// Emit assembly code
-    #[arg(short = 'S', long, group = "emit", value_name = "FILE")]
+    #[arg(short = 'S', long, value_name = "FILE")]
     emit_asm: Option<PathBuf>,
 
     /// Emit LLVM IR
-    #[arg(long, group = "emit", value_name = "FILE")]
+    #[arg(long, value_name = "FILE")]
     emit_llir: Option<PathBuf>,
 
     /// Compile and assemble, but do not link
-    #[arg(short = 'c', group = "emit", value_name = "FILE")]
+    #[arg(short = 'c', value_name = "FILE")]
     emit_obj: Option<PathBuf>,
 
     /// Specify the output file name for the final executable
-    #[arg(short, long, group = "emit", value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
 
     /// The target triple to compile for
@@ -96,20 +96,20 @@ enum OptLevelArg {
 fn main() {
     let cli = CliArgs::parse();
 
-    let (emit_type, output_file) = if let Some(path) = cli.emit_asm {
-        (EmitType::Asm, path)
-    } else if let Some(path) = cli.emit_obj {
-        (EmitType::Obj, path)
-    } else if let Some(path) = cli.emit_llir {
-        (EmitType::LLIR, path)
-    } else if let Some(path) = cli.output {
-        (EmitType::Executable, path)
-    } else {
+    let mut emit_targets: Vec<_> = [(cli.emit_asm, EmitType::Asm), (cli.emit_obj, EmitType::Obj), (cli.emit_llir, EmitType::LLIR), (cli.output, EmitType::Executable)]
+        .into_iter()
+        .filter_map(|(opt, kind)| opt.map(|path| EmitTarget { kind, path }))
+        .collect();
+
+    if emit_targets.is_empty() {
         let stem = Path::new(&cli.entry_file)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("a.out");
-        (EmitType::Executable, PathBuf::from(stem))
+        emit_targets.push(EmitTarget {
+            kind: EmitType::Executable,
+            path: PathBuf::from(stem),
+        });
     };
 
     let opt_level = match cli.opt_level {
@@ -129,8 +129,7 @@ fn main() {
         opt_level,
         target_triple: cli.target.unwrap_or_default(),
         cpu: cli.cpu.unwrap_or_default(),
-        emit_type,
-        output_file,
+        emit_targets,
         debug_symbols: cli.debug_symbols,
         features: cli.features.unwrap_or_default(),
         linker: cli.linker.unwrap_or_default(),
