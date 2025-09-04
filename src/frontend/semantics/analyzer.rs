@@ -1,3 +1,4 @@
+// frontend/semantics/analyzer.rs
 use crate::{frontend::syntax::ast::AstNode, utils::{error::*, kind::*}};
 use colored::*;
 use std::{collections::{HashMap, HashSet, VecDeque}, rc::Rc};
@@ -267,6 +268,7 @@ pub struct SymbolTable {
     file_path: Option<String>,
 
     pub real_starting_scope: ScopeId,
+    pub intrinsics_scope_id: ScopeId,
 }
 
 impl SymbolTable {
@@ -284,6 +286,7 @@ impl SymbolTable {
             next_type_symbol_id: 0,
             file_path,
             real_starting_scope: 0,
+            intrinsics_scope_id: 0,
         };
 
         let root_scope_id = table.get_next_scope_id();
@@ -337,7 +340,76 @@ impl SymbolTable {
         table.current_scope_id = init_scope_id;
         table.real_starting_scope = init_scope_id;
 
+        let intrinsics_scope_id = table.get_next_scope_id();
+        let intrinsics_scope = Scope {
+            values: HashMap::new(),
+            types: HashMap::new(),
+            parent: None,
+            id: intrinsics_scope_id,
+            kind: ScopeKind::Root,
+            receiver_kind: None,
+            trait_id: None,
+        };
+        table.scopes.insert(intrinsics_scope_id, intrinsics_scope);
+        table.intrinsics_scope_id = intrinsics_scope_id;
+
+        table.populate_intrinsics();
+
         table
+    }
+
+    pub fn populate_intrinsics(&mut self) {
+        let old_scope = self.current_scope_id;
+        self.current_scope_id = self.intrinsics_scope_id;
+
+        let int_type = Type::new_base(self.find_type_symbol("int").unwrap().id);
+        let str_type = Type::new_base(self.find_type_symbol("str").unwrap().id);
+        let void_type = Type::new_base(self.find_type_symbol("void").unwrap().id);
+        let never_type = Type::new_base(self.find_type_symbol("never").unwrap().id);
+
+        let mut add_intrinsic = |name: &str, params: Vec<Type>, ret: Type| {
+            let fn_scope_id = self.enter_scope(ScopeKind::Function);
+            self.exit_scope();
+
+            let fn_sig_type_id = self
+                .add_type_symbol(
+                    &format!("#intrinsic_{}_sig", name),
+                    TypeSymbolKind::FunctionSignature {
+                        params,
+                        return_type: ret.clone(),
+                        instance: None,
+                    },
+                    vec![],
+                    QualifierKind::Public,
+                    None,
+                )
+                .unwrap();
+
+            let value_id = self
+                .add_value_symbol(
+                    name,
+                    ValueSymbolKind::Function(fn_scope_id, HashSet::new()),
+                    false,
+                    QualifierKind::Public,
+                    Some(Type::new_base(fn_sig_type_id)),
+                    None,
+                )
+                .unwrap();
+
+            self.get_value_symbol_mut(value_id).unwrap().is_intrinsic = true;
+        };
+
+        add_intrinsic("calloc", vec![int_type.clone(), int_type.clone()], int_type.clone());
+        add_intrinsic("realloc", vec![int_type.clone(), int_type.clone()], int_type.clone());
+        add_intrinsic("memcpy", vec![int_type.clone(), int_type.clone(), int_type.clone()], void_type.clone());
+        add_intrinsic("memmove", vec![int_type.clone(), int_type.clone(), int_type.clone()], void_type.clone());
+        add_intrinsic("free", vec![int_type.clone()], void_type.clone());
+        add_intrinsic("decref", vec![int_type.clone()], void_type.clone());
+        add_intrinsic("print", vec![str_type.clone()], void_type.clone());
+        add_intrinsic("eprint", vec![str_type.clone()], void_type.clone());
+        add_intrinsic("__exit", vec![int_type.clone()], never_type.clone());
+
+        self.current_scope_id = old_scope;
     }
 
     pub fn populate_with_defaults(&mut self, trait_registry: &mut TraitRegistry) {

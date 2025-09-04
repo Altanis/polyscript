@@ -331,6 +331,33 @@ impl Compiler {
         if let AstNodeKind::Program(stmts) = &module.ast.kind {
             for stmt in stmts {
                 if let AstNodeKind::ImportStatement { file_path, identifiers, .. } = &stmt.kind {
+                    if file_path == "@intrinsics" {
+                        let importing_module = self.modules.get(path).unwrap();
+                        self.analyzer.symbol_table.current_scope_id = importing_module.scope_id;
+
+                        let intrinsics_scope_id = self.analyzer.symbol_table.intrinsics_scope_id;
+                        for ident_node in identifiers {
+                            let name = ident_node.get_name().unwrap();
+                            let value_sym = self.analyzer.symbol_table.find_value_symbol_in_scope(&name, intrinsics_scope_id).cloned();
+
+                            if value_sym.is_none() {
+                                return Err(self.analyzer.create_error(
+                                    ErrorKind::InvalidImport(
+                                        format!("{} from @intrinsics", name),
+                                        "it is not a valid intrinsic".to_string(),
+                                    ),
+                                    ident_node.span,
+                                    &[ident_node.span],
+                                ));
+                            }
+
+                            let name_id = self.analyzer.symbol_table.value_names.intern(&name);
+                            self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().values.insert(name_id, value_sym.unwrap().id);
+                        }
+                        
+                        continue;
+                    }
+
                     let mut dep_path = path.parent().unwrap().to_path_buf();
                     dep_path.push(file_path);
                     let canonical_dep_path = fs::canonicalize(&dep_path).unwrap();

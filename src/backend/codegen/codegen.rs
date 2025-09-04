@@ -1,10 +1,9 @@
-// backend/codegen/codegen.rs
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
@@ -57,7 +56,7 @@ pub struct CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub fn get_malloc(&self) -> FunctionValue<'ctx> {
+    fn get_c_malloc(&self) -> FunctionValue<'ctx> {
         if let Some(func) = self.module.get_function("malloc") {
             return func;
         }
@@ -68,7 +67,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module.add_function("malloc", malloc_type, None)
     }
 
-    pub fn get_free(&self) -> FunctionValue<'ctx> {
+    fn get_c_free(&self) -> FunctionValue<'ctx> {
         if let Some(func) = self.module.get_function("free") {
             return func;
         }
@@ -78,24 +77,75 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module.add_function("free", free_type, None)
     }
 
-    pub fn build_malloc(&self, size: IntValue<'ctx>, name: &str) -> PointerValue<'ctx> {
-        let malloc_fn = self.get_malloc();
+    fn get_c_calloc(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("calloc") {
+            return func;
+        }
 
-        self.builder
-            .build_call(malloc_fn, &[size.into()], name)
-            .unwrap()
-            .try_as_basic_value()
-            .left()
-            .unwrap()
-            .into_pointer_value()
+        let int_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = ptr_type.fn_type(&[int_type.into(), int_type.into()], false);
+        self.module.add_function("calloc", fn_type, None)
     }
 
-    pub fn build_free(&self, ptr: PointerValue<'ctx>) {
-        let free_fn = self.get_free();
+    fn get_c_realloc(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("realloc") {
+            return func;
+        }
 
-        self.builder
-            .build_call(free_fn, &[ptr.into()], "free")
-            .unwrap();
+        let int_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = ptr_type.fn_type(&[ptr_type.into(), int_type.into()], false);
+        self.module.add_function("realloc", fn_type, None)
+    }
+
+    fn get_c_exit(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("exit") {
+            return func;
+        }
+
+        let int_type = self.context.i32_type();
+        let fn_type = self.context.void_type().fn_type(&[int_type.into()], false);
+        self.module.add_function("exit", fn_type, None)
+    }
+
+    fn get_stdout(&self) -> PointerValue<'ctx> {
+        let file_ptr_type = self.context.ptr_type(AddressSpace::default());
+        let stdout_global_name = "stdout";
+
+        if let Some(stdout_global) = self.module.get_global(stdout_global_name) {
+            return self.builder.build_load(file_ptr_type, stdout_global.as_pointer_value(), "stdout").unwrap().into_pointer_value();
+        }
+
+        let stdout = self.module.add_global(file_ptr_type, None, stdout_global_name);
+        stdout.set_linkage(Linkage::External);
+        self.builder.build_load(file_ptr_type, stdout.as_pointer_value(), "stdout").unwrap().into_pointer_value()
+    }
+
+    fn get_stderr(&self) -> PointerValue<'ctx> {
+        let file_ptr_type = self.context.ptr_type(AddressSpace::default());
+        let stderr_global_name = "stderr";
+
+        if let Some(stderr_global) = self.module.get_global(stderr_global_name) {
+            return self.builder.build_load(file_ptr_type, stderr_global.as_pointer_value(), "stderr").unwrap().into_pointer_value();
+        }
+
+        let stderr = self.module.add_global(file_ptr_type, None, stderr_global_name);
+        stderr.set_linkage(Linkage::External);
+        self.builder.build_load(file_ptr_type, stderr.as_pointer_value(), "stderr").unwrap().into_pointer_value()
+    }
+
+    fn get_c_fprintf(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("fprintf") {
+            return func;
+        }
+
+        let i32_type = self.context.i32_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let file_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        let fn_type = i32_type.fn_type(&[file_ptr_type.into(), ptr_type.into()], true);
+        self.module.add_function("fprintf", fn_type, None)
     }
 }
 
@@ -248,7 +298,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let dealloc_fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
         self.builder.build_indirect_call(dealloc_fn_type, deallocate_fn_ptr, &[rc_ptr_generic.into()], "deallocate_call").unwrap();
         
-        self.build_free(rc_ptr_generic);
+        self.builder.build_call(self.get_c_free(), &[rc_ptr_generic.into()], "free").unwrap();
     
         self.builder.build_unconditional_branch(end_block).unwrap();
         self.builder.position_at_end(end_block);
@@ -1091,7 +1141,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let rc_repr = self.wrap_in_rc(inner_type);
 
         let size = rc_repr.rc_struct_type.size_of().unwrap();
-        let raw_ptr = self.build_malloc(size, &format!("heap_alloc.{}", mangled_name));
+        let raw_ptr = self.builder
+            .build_call(self.get_c_malloc(), &[size.into()], &format!("heap_alloc.{mangled_name}"))
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
         
         let header_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, raw_ptr, 0, "rc.header_ptr").unwrap();
         let ref_count_ptr = self.builder.build_struct_gep(self.get_rc_header_type(), header_ptr, 0, "rc.ref_count_ptr").unwrap();
@@ -1552,6 +1608,87 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         if let Some(fn_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) {
+            if fn_symbol.is_intrinsic {
+                let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
+                let compiled_args: Vec<_> = arguments.iter().map(|arg| self.compile_node(arg).unwrap()).collect();
+                let int_type = self.context.i64_type();
+
+                return match fn_name {
+                    "calloc" => {
+                        let func = self.get_c_calloc();
+                        let nelem = compiled_args[0].into_int_value();
+                        let elsize = compiled_args[1].into_int_value();
+                        let call = self.builder.build_call(func, &[nelem.into(), elsize.into()], "calloc").unwrap();
+                        let new_ptr = call.try_as_basic_value().left().unwrap().into_pointer_value();
+                        Some(self.builder.build_ptr_to_int(new_ptr, int_type, "calloc_ptr_int").unwrap().into())
+                    },
+                    "realloc" => {
+                        let func = self.get_c_realloc();
+                        let ptr_as_int = compiled_args[0].into_int_value();
+                        let ptr = self.builder.build_int_to_ptr(ptr_as_int, self.context.ptr_type(AddressSpace::default()), "realloc_ptr").unwrap();
+                        let new_size = compiled_args[1].into_int_value();
+                        let call = self.builder.build_call(func, &[ptr.into(), new_size.into()], "realloc").unwrap();
+                        let new_ptr = call.try_as_basic_value().left().unwrap().into_pointer_value();
+                        Some(self.builder.build_ptr_to_int(new_ptr, int_type, "realloc_new_ptr_int").unwrap().into())
+                    },
+                    "memcpy" => {
+                        let dst_as_int = compiled_args[0].into_int_value();
+                        let src_as_int = compiled_args[1].into_int_value();
+                        let size = compiled_args[2].into_int_value();
+                        let dst = self.builder.build_int_to_ptr(dst_as_int, self.context.ptr_type(AddressSpace::default()), "memcpy_dst").unwrap();
+                        let src = self.builder.build_int_to_ptr(src_as_int, self.context.ptr_type(AddressSpace::default()), "memcpy_src").unwrap();
+                        self.builder.build_memcpy(dst, 1, src, 1, size).unwrap();
+                        None
+                    },
+                    "memmove" => {
+                        let dst_as_int = compiled_args[0].into_int_value();
+                        let src_as_int = compiled_args[1].into_int_value();
+                        let size = compiled_args[2].into_int_value();
+                        let dst = self.builder.build_int_to_ptr(dst_as_int, self.context.ptr_type(AddressSpace::default()), "memmove_dst").unwrap();
+                        let src = self.builder.build_int_to_ptr(src_as_int, self.context.ptr_type(AddressSpace::default()), "memmove_src").unwrap();
+                        self.builder.build_memmove(dst, 1, src, 1, size).unwrap();
+                        None
+                    },
+                    "free" => {
+                        let ptr_as_int = compiled_args[0].into_int_value();
+                        let ptr = self.builder.build_int_to_ptr(ptr_as_int, self.context.ptr_type(AddressSpace::default()), "free_ptr").unwrap();
+                        self.builder.build_call(self.get_c_free(), &[ptr.into()], "free").unwrap();
+                        None
+                    },
+                    "decref" => {
+                        let ptr_as_int = compiled_args[0].into_int_value();
+                        let ptr = self.builder.build_int_to_ptr(ptr_as_int, self.context.ptr_type(AddressSpace::default()), "decref_ptr").unwrap();
+                        let decref_fn = self.get_decref();
+                        self.builder.build_call(decref_fn, &[ptr.into()], "decref_call").unwrap();
+                        None
+                    },
+                    "print" => {
+                        let fprintf = self.get_c_fprintf();
+                        let stdout = self.get_stderr();
+                        let format_str = self.builder.build_global_string_ptr("%s\n", "print_fmt").unwrap();
+                        let str_val = compiled_args[0];
+                        self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
+                        None
+                    },
+                    "eprint" => {
+                        let fprintf = self.get_c_fprintf();
+                        let stderr = self.get_stderr();
+                        let format_str = self.builder.build_global_string_ptr("%s\n", "eprint_fmt").unwrap();
+                        let str_val = compiled_args[0];
+                        self.builder.build_call(fprintf, &[stderr.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
+                        None
+                    },
+                    "__exit" => {
+                        let func = self.get_c_exit();
+                        let code = self.builder.build_int_truncate(compiled_args[0].into_int_value(), self.context.i32_type(), "exit_code").unwrap();
+                        self.builder.build_call(func, &[code.into()], "").unwrap();
+                        self.builder.build_unreachable().unwrap();
+                        None
+                    },
+                    _ => unreachable!()
+                };
+            }
+            
             let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
             let impl_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
 
