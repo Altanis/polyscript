@@ -6,6 +6,15 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-import { print } from "@intrinsics";
+struct HeavyData<T> {
+    x: int;
+}
 
-print("Hi");
+impl<T: Clone> Clone for HeavyData<T> {
+    fn clone(&self): Self {
+        Self { x: [T as Clone].clone(&self.x) }
+    }
+}
+
+let x = HeavyData { x: 4 };
+let y = [HeavyData<int> as Clone].clone(&x);

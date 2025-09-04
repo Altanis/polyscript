@@ -201,7 +201,7 @@ impl ErrorKind {
             ErrorKind::NeedsHeapAllocation(value_symbol) => format!("{value_symbol} needs to be heap allocated"),
             ErrorKind::ClosureWithGenerics(name) => format!("closure \"{}\" defines generic parameters", if name.is_empty() { "[unnamed closure]" } else { name }),
             ErrorKind::NonConstantInitializer(constant, reason) => format!("initializer for constant {} is not a constant expression: {}", constant, reason),
-            ErrorKind::InvalidImport(path, reason) => format!("invalid import of \"{}\": {}", path, reason),
+            ErrorKind::InvalidImport(path, reason) => format!("invalid import of {}: {}", path, reason),
             ErrorKind::InvalidCall(method, ty) => format!("method `{}` is an instance method, not a static method, and cannot be called on type `{}` directly", method, ty),
             ErrorKind::UntrustedContext(reason) => format!("attempted to use trusted feature in untrusted context: {reason}"),
             ErrorKind::ExplicitDestruction => "cannot explicitly call the Drop implementation for a value".to_string(),

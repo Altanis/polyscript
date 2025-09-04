@@ -1,8 +1,8 @@
-import { __exit } from "@intrinsics"
+import { endproc } from "@intrinsics"
 
 // Forcefully ends the process with a code.
 fn exit(code: int): never {
-    __exit(code);
+    endproc(code);
 }
 
 export { exit };

@@ -394,7 +394,7 @@ impl SymbolTable {
         add_intrinsic("decref", vec![int_type.clone()], void_type.clone());
         add_intrinsic("print", vec![str_type.clone()], void_type.clone());
         add_intrinsic("eprint", vec![str_type.clone()], void_type.clone());
-        add_intrinsic("__exit", vec![int_type.clone()], never_type.clone());
+        add_intrinsic("endproc", vec![int_type.clone()], never_type.clone());
 
         self.current_scope_id = old_scope;
     }

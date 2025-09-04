@@ -1748,7 +1748,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_call(fprintf, &[stderr.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
                         None
                     },
-                    "__exit" => {
+                    "endproc" => {
                         let func = self.get_c_exit();
                         let code = self.builder.build_int_truncate(compiled_args[0].into_int_value(), self.context.i32_type(), "exit_code").unwrap();
                         self.builder.build_call(func, &[code.into()], "").unwrap();

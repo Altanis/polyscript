@@ -111,7 +111,7 @@ impl Compiler {
                         let canonical_dep_path = if rel_path_str == "@intrinsics" {
                             if !trusted {
                                 let err = self.analyzer.create_error(
-                                    ErrorKind::InvalidImport(" intrinsics".to_string(), "Only standard library modules can import it.".to_string()),
+                                    ErrorKind::InvalidImport("@intrinsics".to_string(), "Only standard library modules can import it.".to_string()),
                                     stmt.span,
                                     &[stmt.span]
                                 );
@@ -195,11 +195,19 @@ impl Compiler {
         }
 
         for path in &compilation_order {
-            self.resolve_exports_for_module(path).unwrap();
+            if let Err(err) = self.resolve_exports_for_module(path) {
+                eprintln!("1 error emitted in {:?}... printing:", path);
+                eprintln!("{}", err);
+                std::process::exit(1);
+            }
         }
 
         for path in &compilation_order {
-            self.link_imports_for_module(path).unwrap();
+            if let Err(err) = self.link_imports_for_module(path) {
+                eprintln!("1 error emitted in {:?}... printing:", path);
+                eprintln!("{}", err);
+                std::process::exit(1);
+            }
         }
 
         for path in &compilation_order {
@@ -349,7 +357,7 @@ impl Compiler {
                             if value_sym.is_none() {
                                 return Err(self.analyzer.create_error(
                                     ErrorKind::InvalidImport(
-                                        format!("{} from @intrinsics", name),
+                                        format!("\"{}\" from @intrinsics", name),
                                         "it is not a valid intrinsic".to_string(),
                                     ),
                                     ident_node.span,
@@ -512,10 +520,8 @@ impl Compiler {
         let mut executable_target: Option<&EmitTarget> = None;
     
         for target in &self.config.emit_targets {
-            if let Some(parent) = target.path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent).expect("Failed to create output directory");
-                }
+            if let Some(parent) = target.path.parent() && !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).expect("Failed to create output directory");
             }
     
             match target.kind {
