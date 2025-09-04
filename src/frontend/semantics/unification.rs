@@ -2380,29 +2380,56 @@ impl SemanticAnalyzer {
     }
 
     fn path_diverges(&self, node: &AstNode) -> bool {
+        // First, check the type. If it's not `never`, it cannot diverge.
         if let Some(ty) = &node.type_id {
             let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
-            if ty.get_base_symbol() == never_type_id {
-                return true;
+            if ty.get_base_symbol() != never_type_id {
+                return false;
             }
+        } else {
+            // No type information, so we can't determine divergence.
+            return false;
         }
 
+        // The type is `never`. Now we check the AST kind to distinguish
+        // between a normal control-flow exit (like return) and true divergence.
         match &node.kind {
+            // These statements alter control flow but are considered valid exits, not divergence.
+            AstNodeKind::Return(_) | AstNodeKind::Break | AstNodeKind::Continue => false,
+
+            // A block diverges if its last statement diverges.
             AstNodeKind::Block(statements) => {
                 if let Some(last_stmt) = statements.last() {
                     self.path_diverges(last_stmt)
                 } else {
+                    // An empty block has type void, not never, so this path is unlikely.
+                    // If it happens, it's not a divergence.
                     false
                 }
-            },
-            AstNodeKind::IfStatement { then_branch, else_if_branches, else_branch: Some(else_b), .. } => {
+            }
+
+            // An if-statement diverges only if *all* of its paths diverge.
+            // This requires a complete set of branches (i.e., an `else` block).
+            AstNodeKind::IfStatement {
+                then_branch,
+                else_if_branches,
+                else_branch: Some(else_b),
+                ..
+            } => {
                 self.path_diverges(then_branch)
                     && self.path_diverges(else_b)
-                    && else_if_branches.iter().all(|(_, branch)| self.path_diverges(branch))
-            },
+                    && else_if_branches
+                        .iter()
+                        .all(|(_, branch)| self.path_diverges(branch))
+            }
+            // An if-statement without an else branch can never guarantee divergence.
             AstNodeKind::IfStatement { .. } => false,
+            
             AstNodeKind::ExpressionStatement(expr) => self.path_diverges(expr),
-            _ => false
+            
+            // Any other expression whose type is `never` (e.g., a call to a function
+            // that returns `never`, or an infinite loop) is considered a true divergence.
+            _ => true,
         }
     }
 
