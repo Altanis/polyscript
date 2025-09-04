@@ -313,6 +313,8 @@ impl SymbolTable {
                 .unwrap();
         }
 
+        table.populate_intrinsics();
+
         let heap_scope_id = table.enter_scope(ScopeKind::Struct);
         let t_generic_id = table.add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
         table.exit_scope();
@@ -339,21 +341,6 @@ impl SymbolTable {
 
         table.current_scope_id = init_scope_id;
         table.real_starting_scope = init_scope_id;
-
-        let intrinsics_scope_id = table.get_next_scope_id();
-        let intrinsics_scope = Scope {
-            values: HashMap::new(),
-            types: HashMap::new(),
-            parent: None,
-            id: intrinsics_scope_id,
-            kind: ScopeKind::Root,
-            receiver_kind: None,
-            trait_id: None,
-        };
-        table.scopes.insert(intrinsics_scope_id, intrinsics_scope);
-        table.intrinsics_scope_id = intrinsics_scope_id;
-
-        table.populate_intrinsics();
 
         table
     }
