@@ -739,24 +739,24 @@ impl SemanticAnalyzer {
         span: Span,
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
-        let Some(symbol) = self.symbol_table.find_type_symbol_from_scope(scope_id, name) else {
-            return Err(self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]));
-        };
+        let symbol = self.symbol_table.find_type_symbol_from_scope(scope_id, name)
+            .ok_or_else(|| self.create_error(ErrorKind::UnknownIdentifier(name.to_owned()), span, &[span]))?
+            .clone();
 
-        let struct_scope_id = match &symbol.kind {
-            TypeSymbolKind::Struct((struct_scope_id, _)) => *struct_scope_id,
-            TypeSymbolKind::TypeAlias((_, ty)) => {
-                if let Some(ty) = ty
-                    && let TypeSymbolKind::Struct((struct_scope_id, _)) = &self.symbol_table.get_type_symbol(ty.get_base_symbol()).unwrap().kind
-                { 
-                    *struct_scope_id
+        let (struct_symbol, struct_scope_id) = match &symbol.kind {
+            TypeSymbolKind::Struct((id, _)) => (symbol.clone(), *id),
+            TypeSymbolKind::TypeAlias((_, Some(ty))) => {
+                let base_symbol_id = ty.get_base_symbol();
+                let base_symbol_ref = self.symbol_table.get_type_symbol(base_symbol_id).unwrap();
+                if let TypeSymbolKind::Struct((id, _)) = &base_symbol_ref.kind {
+                    (base_symbol_ref.clone(), *id)
                 } else {
                     return Err(self.create_error(ErrorKind::InvalidStructLiteral(name.to_string()), span, &[span]));
                 }
             },
             _ => return Err(self.create_error(ErrorKind::InvalidStructLiteral(name.to_string()), span, &[span]))
         };
-
+        
         let literal_field_names: HashSet<String> = fields.keys().cloned().collect();
         let declared_field_names: HashSet<String> = self.symbol_table.get_scope(struct_scope_id).unwrap()
             .values.values()
@@ -783,8 +783,7 @@ impl SemanticAnalyzer {
             ));
         }
 
-        let symbol_id = symbol.id;
-        let generic_params = symbol.generic_parameters.clone();
+        let generic_params = struct_symbol.generic_parameters.clone();
 
         let generic_uvs: IndexMap<TypeSymbolId, Type> = generic_params
             .iter()
@@ -795,7 +794,7 @@ impl SemanticAnalyzer {
             .collect();
 
         let struct_type = Type::Base {
-            symbol: symbol_id,
+            symbol: struct_symbol.id,
             args: generic_uvs.values().cloned().collect()
         };
 
