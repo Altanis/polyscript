@@ -1194,11 +1194,7 @@ impl SemanticAnalyzer {
 
         while let Some((constraint, info)) = constraints.pop_front() {
             if iterations > limit {
-                if !errors.is_empty() {
-                    break;
-                }
-
-                panic!("incomplete inference: could not resolve constraints likely due to type inference loop");
+                break;
             }
 
             iterations += 1;
@@ -1305,7 +1301,6 @@ impl SemanticAnalyzer {
             (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
             (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
 
-            // Now handle the never type's "bottom" property.
             (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
                 if self.is_never(s) => Ok(other.clone()),
             
@@ -1363,7 +1358,7 @@ impl SemanticAnalyzer {
             (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
                 let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap().clone();
-
+                
                 if let (
                     TypeSymbolKind::FunctionSignature { params: p1, return_type: r1, instance: i1 },
                     TypeSymbolKind::FunctionSignature { params: p2, return_type: r2, instance: i2 }
@@ -1447,50 +1442,62 @@ impl SemanticAnalyzer {
 
                 let callee_symbol = self.symbol_table.get_type_symbol(symbol).unwrap().clone();
 
-                if let TypeSymbolKind::FunctionSignature {
-                    params: sig_params,
-                    return_type: sig_return,
-                    ..
-                } = &callee_symbol.kind
-                {
-                    if params.len() != sig_params.len() {
-                        return Err(self.create_error(
-                            ErrorKind::ArityMismatch(sig_params.len(), params.len()),
-                            info.span,
-                            &[info.span],
-                        ));
-                    }
+                match &callee_symbol.kind {
+                    TypeSymbolKind::OpaqueTypeProjection { ty, tr, member } => {
+                        if let Some(MemberResolution::Value(resolved_member_type, _, _)) = self.find_member_in_trait_impl(ty, tr, member, info)? {
+                            return self.unify_function_signature(
+                                resolved_member_type,
+                                params,
+                                return_ty,
+                                info,
+                            );
+                        } else {
+                            Err(self.create_error(
+                                ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)),
+                                info.span,
+                                &[info.span],
+                            ))
+                        }
+                    },
+                    TypeSymbolKind::FunctionSignature { params: sig_params, return_type: sig_return, .. } => {
+                        if params.len() != sig_params.len() {
+                            return Err(self.create_error(
+                                ErrorKind::ArityMismatch(sig_params.len(), params.len()),
+                                info.span,
+                                &[info.span],
+                            ));
+                        }
 
-                    let mut fn_generic_param_ids = HashSet::new();
+                        let mut fn_generic_param_ids = HashSet::new();
 
-                    self.collect_signature_generics(sig_return, &mut fn_generic_param_ids);
-                    for p in sig_params {
-                        self.collect_signature_generics(p, &mut fn_generic_param_ids);
-                    }
+                        self.collect_signature_generics(sig_return, &mut fn_generic_param_ids);
+                        for p in sig_params {
+                            self.collect_signature_generics(p, &mut fn_generic_param_ids);
+                        }
 
-                    let mut substitutions = HashMap::new();
-                    for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
-                        self.collect_substitutions(
-                            call_arg,
-                            sig_param,
-                            &mut substitutions,
-                            &fn_generic_param_ids,
-                            info,
-                        )?;
-                    }
+                        let mut substitutions = HashMap::new();
+                        for (call_arg, sig_param) in params.iter().zip(sig_params.iter()) {
+                            self.collect_substitutions(
+                                call_arg,
+                                sig_param,
+                                &mut substitutions,
+                                &fn_generic_param_ids,
+                                info,
+                            )?;
+                        }
 
-                    let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
-                    let concrete_return = self.apply_substitution(sig_return, &substitutions);
+                        let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
+                        let concrete_return = self.apply_substitution(sig_return, &substitutions);
 
-                    for (arg, expected) in params.iter().zip(concrete_sig_params.iter()) {
-                        self.unify(arg.clone(), expected.clone(), info)?;
-                    }
+                        for (arg, expected) in params.iter().zip(concrete_sig_params.iter()) {
+                            self.unify(arg.clone(), expected.clone(), info)?;
+                        }
 
-                    self.unify(return_ty, concrete_return, info)?;
+                        self.unify(return_ty, concrete_return, info)?;
 
-                    Ok(true)
-                } else {
-                    Err(self.create_error(
+                        Ok(true)
+                    },
+                    _ => Err(self.create_error(
                         ErrorKind::NotCallable(self.symbol_table.display_type(&callee_ty)),
                         info.span,
                         &[info.span],
@@ -2380,36 +2387,24 @@ impl SemanticAnalyzer {
     }
 
     fn path_diverges(&self, node: &AstNode) -> bool {
-        // First, check the type. If it's not `never`, it cannot diverge.
         if let Some(ty) = &node.type_id {
             let never_type_id = self.get_primitive_type(PrimitiveKind::Never);
             if ty.get_base_symbol() != never_type_id {
                 return false;
             }
         } else {
-            // No type information, so we can't determine divergence.
             return false;
         }
 
-        // The type is `never`. Now we check the AST kind to distinguish
-        // between a normal control-flow exit (like return) and true divergence.
         match &node.kind {
-            // These statements alter control flow but are considered valid exits, not divergence.
             AstNodeKind::Return(_) | AstNodeKind::Break | AstNodeKind::Continue => false,
-
-            // A block diverges if its last statement diverges.
             AstNodeKind::Block(statements) => {
                 if let Some(last_stmt) = statements.last() {
                     self.path_diverges(last_stmt)
                 } else {
-                    // An empty block has type void, not never, so this path is unlikely.
-                    // If it happens, it's not a divergence.
                     false
                 }
-            }
-
-            // An if-statement diverges only if *all* of its paths diverge.
-            // This requires a complete set of branches (i.e., an `else` block).
+            },
             AstNodeKind::IfStatement {
                 then_branch,
                 else_if_branches,
@@ -2422,13 +2417,8 @@ impl SemanticAnalyzer {
                         .iter()
                         .all(|(_, branch)| self.path_diverges(branch))
             }
-            // An if-statement without an else branch can never guarantee divergence.
             AstNodeKind::IfStatement { .. } => false,
-            
             AstNodeKind::ExpressionStatement(expr) => self.path_diverges(expr),
-            
-            // Any other expression whose type is `never` (e.g., a call to a function
-            // that returns `never`, or an infinite loop) is considered a true divergence.
             _ => true,
         }
     }

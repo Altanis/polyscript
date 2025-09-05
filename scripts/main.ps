@@ -7,12 +7,12 @@
 // maybe add prelude system
 
 struct HeavyData<T> {
-    x: int;
+    x: T;
 }
 
-impl<T: Clone> Clone for HeavyData<T> {
+impl<U: Clone> Clone for HeavyData<U> {
     fn clone(&self): Self {
-        Self { x: [T as Clone].clone(&self.x) }
+        Self { x: [U as Clone].clone(&self.x) }
     }
 }
 
