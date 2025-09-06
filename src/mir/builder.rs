@@ -873,9 +873,16 @@ impl<'a> MIRBuilder<'a> {
                     let mut needs_monomorphization = !generic_arguments.is_empty();
                     if !needs_monomorphization
                         && let AstNodeKind::FieldAccess { left, .. } = &function.kind
-                        && let Some(Type::Base { args, .. }) = &left.type_id
+                        && let Some(base_type) = &left.type_id
                     {
-                        needs_monomorphization = !args.is_empty();
+                        let mut current_type = base_type;
+                        while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = current_type {
+                            current_type = inner;
+                        }
+                        
+                        if let Type::Base { args, .. } = current_type {
+                            needs_monomorphization = !args.is_empty();
+                        }
                     }
 
                     if fn_value_symbol.is_intrinsic {
@@ -887,8 +894,17 @@ impl<'a> MIRBuilder<'a> {
                             generic_arguments.clone()
                         } else {
                             let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
-                            let Type::Base { args, .. } = left.type_id.as_ref().unwrap() else { unreachable!() };
-                            args.clone()
+                            
+                            let mut base_type = left.type_id.as_ref().unwrap().clone();
+                            if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
+                                base_type = self.substitute_type(&base_type, substitutions);
+                            }
+
+                            while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = &base_type {
+                                base_type = (**inner).clone();
+                            }
+
+                            if let Type::Base { args, .. } = base_type { args.clone() } else { unreachable!(); }
                         };
 
                         let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
