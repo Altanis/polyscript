@@ -1772,6 +1772,33 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_unreachable().unwrap();
                         None
                     },
+                    "drop" => {
+                        let value_to_drop_node = &arguments[0];
+                        let value_to_drop_type = value_to_drop_node.type_id.as_ref().unwrap();
+
+                        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
+                        let type_id = value_to_drop_type.get_base_symbol();
+
+                        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
+                            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+                        {
+                            let applicable_impl = impls_for_type.iter().find(|imp| {
+                                self.check_trait_impl_applicability_mir(value_to_drop_type, imp)
+                            });
+
+                            if let Some(imp) = applicable_impl
+                                && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
+                                && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
+                            {
+                                let llvm_type = self.map_semantic_type(value_to_drop_type).unwrap();
+                                let arg_ptr = self.builder.build_alloca(llvm_type, "drop_arg_ptr").unwrap();
+                                self.builder.build_store(arg_ptr, compiled_args[0]).unwrap();
+                                self.builder.build_call(drop_fn_val, &[arg_ptr.into()], "").unwrap();
+                            }
+                        }
+
+                        None
+                    },
                     _ => unreachable!()
                 };
             }

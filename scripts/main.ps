@@ -6,7 +6,7 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-import { calloc, realloc, memcpy, memmove, free, decref, eprint, endproc, endproc } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, eprint, endproc, endproc, drop } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -82,7 +82,8 @@ impl<T> Vec<T> {
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); };
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+        else { drop(dst as &mut T); };
 
         memcpy(dst, (&element) as int, self.element_size);
 
@@ -110,7 +111,8 @@ impl<T> Vec<T> {
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); };
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+        else { drop(dst as &mut T); };
 
         let src = self.data + (idx + 1) * self.element_size;
         let size = self.element_size * (self.size - idx - 1);

@@ -395,6 +395,37 @@ impl SymbolTable {
         add_intrinsic("print", vec![str_type.clone()], void_type.clone());
         add_intrinsic("eprint", vec![str_type.clone()], void_type.clone());
         add_intrinsic("endproc", vec![int_type.clone()], never_type.clone());
+        let t_generic_id = self.add_type_symbol("#T_intrinsic_drop", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
+        let t_type = Type::new_base(t_generic_id);
+
+        let fn_scope_id = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+
+        let fn_sig_type_id = self
+            .add_type_symbol(
+                "#intrinsic_drop_sig",
+                TypeSymbolKind::FunctionSignature {
+                    params: vec![t_type],
+                    return_type: void_type.clone(),
+                    instance: None,
+                },
+                vec![t_generic_id],
+                QualifierKind::Public,
+                None,
+            )
+            .unwrap();
+
+        let value_id = self
+            .add_value_symbol(
+                "drop",
+                ValueSymbolKind::Function(fn_scope_id, HashSet::new()),
+                false,
+                QualifierKind::Public,
+                Some(Type::new_base(fn_sig_type_id)),
+                None,
+            )
+            .unwrap();
+        self.get_value_symbol_mut(value_id).unwrap().is_intrinsic = true;
 
         self.current_scope_id = old_scope;
     }

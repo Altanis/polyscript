@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, decref, eprint, endproc, endproc } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, eprint, endproc, endproc, drop } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -54,8 +54,9 @@ impl<T> Vec<T> {
 
     // Pushes an element to the end of a vector.
     public fn push(&mut self, element: T) {
-        if (self.size + 1 > self.capacity) {
-            self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 });
+        if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
+            eprint("oom: couldn't reserve memory for vector\n");
+            endproc(1);
         };
 
         let dst = self.data + self.size * self.element_size;
@@ -67,13 +68,14 @@ impl<T> Vec<T> {
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
-    public fn replace(&self, idx: int, element: T): bool {
-        if (idx < 0 || idx + 1 > self.size) {
+    public fn replace(&mut self, idx: int, element: T): bool {
+        if (idx < 0 || idx >= self.size) {
             return false;
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); };
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+        else { drop(dst as &mut T); };
 
         memcpy(dst, (&element) as int, self.element_size);
 
@@ -83,7 +85,7 @@ impl<T> Vec<T> {
     // Gets the element at index `idx`.
     // * Panics if `idx` is out of bounds.
     public fn get(&self, idx: int): &T {
-        if (idx < 0 || idx + 1 > self.size) {
+        if (idx < 0 || idx >= self.size) {
             eprint("oob access in vector\n");
             endproc(1);
         };
@@ -96,14 +98,15 @@ impl<T> Vec<T> {
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
     public fn remove(&mut self, idx: int): bool {
-        if (idx < 0 || idx + 1 > self.size) {
+        if (idx < 0 || idx >= self.size) {
             return false;
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); };
+        if #IS_REFCOUNTED#{T} { decref(dst); }
+        else { drop(dst as &mut T); };
 
-        let src = self.data + idx * (self.element_size + 1);
+        let src = self.data + (idx + 1) * self.element_size;
         let size = self.element_size * (self.size - idx - 1);
 
         memmove(dst, src, size);
@@ -136,17 +139,14 @@ impl<T> Drop for Vec<T> {
 
 impl<T: Clone> Clone for Vec<T> {
     fn clone(&self): Self {
-        let vec: Vec<T> = [Vec<T>].from_size(self.capacity);
+        let vec: Vec<T> = [Vec<T>].new();
+        vec.reserve(self.size);
 
         for (let i = 0; i < self.size; i += 1) {
             let element: &T = self.get(i);
             vec.push([T as Clone].clone(element));
         }
-
-        vec
+        
+        return vec;
     }
 }
-/*
-let vec = [Vec<int>].new();
-vec.push(5);
-vec.push(3);*/
