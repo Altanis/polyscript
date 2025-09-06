@@ -9,7 +9,7 @@ use crate::{
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind},
-    utils::kind::{DirectiveKind, QualifierKind, Span},
+    utils::kind::{DirectiveKind, Operation, QualifierKind, ReferenceKind, Span},
 };
 
 #[derive(Default)]
@@ -944,9 +944,49 @@ impl<'a> MIRBuilder<'a> {
 
                     let mir_function_expr = if is_instance_method_call {
                         let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
-                        let instance_mir = self.lower_node(left).unwrap();
-                        mir_arguments.insert(0, instance_mir);
+
+                        let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(mir_fn_type.get_base_symbol()).unwrap();
+                        let instance_kind = if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
+                            instance
+                        } else {
+                            None
+                        };
+
+                        let mut instance_mir = self.lower_node(left).unwrap();
+                        let left_type = left.type_id.as_ref().unwrap();
+
+                        if !matches!(left_type, Type::Reference { .. } | Type::MutableReference { .. }) && let Some(instance_kind) = instance_kind {
+                            match instance_kind {
+                                ReferenceKind::Reference => {
+                                    instance_mir = MIRNode {
+                                        kind: MIRNodeKind::UnaryOperation {
+                                            operator: Operation::ImmutableAddressOf,
+                                            operand: Box::new(instance_mir),
+                                        },
+                                        span: left.span,
+                                        value_id: None,
+                                        type_id: Some(Type::Reference { inner: Box::new(left_type.clone()) }),
+                                        scope_id: left.scope_id.unwrap(),
+                                    };
+                                },
+                                ReferenceKind::MutableReference => {
+                                    instance_mir = MIRNode {
+                                        kind: MIRNodeKind::UnaryOperation {
+                                            operator: Operation::MutableAddressOf,
+                                            operand: Box::new(instance_mir),
+                                        },
+                                        span: left.span,
+                                        value_id: None,
+                                        type_id: Some(Type::MutableReference { inner: Box::new(left_type.clone()) }),
+                                        scope_id: left.scope_id.unwrap(),
+                                    };
+                                },
+                                ReferenceKind::Value => {}
+                            }
+                        }
                         
+                        mir_arguments.insert(0, instance_mir);
+
                         MIRNode {
                             kind: MIRNodeKind::Identifier(mir_fn_name),
                             span: function.span,
@@ -963,7 +1003,7 @@ impl<'a> MIRBuilder<'a> {
                             scope_id: node.scope_id.unwrap()
                         }
                     };
-                    
+
                     MIRNodeKind::FunctionCall {
                         function: Box::new(mir_function_expr),
                         arguments: mir_arguments,
