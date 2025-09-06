@@ -1752,7 +1752,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "print" => {
                         let fprintf = self.get_c_fprintf();
                         let stdout = self.get_stderr();
-                        let format_str = self.builder.build_global_string_ptr("%s\n", "print_fmt").unwrap();
+                        let format_str = self.builder.build_global_string_ptr("%s", "print_fmt").unwrap();
                         let str_val = compiled_args[0];
                         self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
                         None
@@ -1760,7 +1760,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "eprint" => {
                         let fprintf = self.get_c_fprintf();
                         let stderr = self.get_stderr();
-                        let format_str = self.builder.build_global_string_ptr("%s\n", "eprint_fmt").unwrap();
+                        let format_str = self.builder.build_global_string_ptr("%s", "eprint_fmt").unwrap();
                         let str_val = compiled_args[0];
                         self.builder.build_call(fprintf, &[stderr.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
                         None
