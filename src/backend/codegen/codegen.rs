@@ -1427,6 +1427,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_type_cast_base(&mut self, expr: &BoxedMIRNode, target_type: &Type, source_val: BasicValueEnum<'ctx>) -> Option<BasicValueEnum<'ctx>> {
         let source_type = expr.type_id.as_ref().unwrap();
         let llvm_target_type = self.map_semantic_type(target_type).unwrap();
+        let int_symbol_id = self.analyzer.get_primitive_type(PrimitiveKind::Int);
+
+        match (source_type, target_type) {
+            (Type::Base { symbol, .. }, Type::Reference { .. }) |
+            (Type::Base { symbol, .. }, Type::MutableReference { .. }) if *symbol == int_symbol_id => {
+                let int_val = source_val.into_int_value();
+                let ptr_type = llvm_target_type.into_pointer_type();
+                return Some(self.builder.build_int_to_ptr(int_val, ptr_type, "int_to_ptr").unwrap().into());
+            }
+            (Type::Reference { .. }, Type::Base { symbol, .. }) |
+            (Type::MutableReference { .. }, Type::Base { symbol, .. }) if *symbol == int_symbol_id => {
+                let ptr_val = source_val.into_pointer_value();
+                let int_type = llvm_target_type.into_int_type();
+                return Some(self.builder.build_ptr_to_int(ptr_val, int_type, "ptr_to_int").unwrap().into());
+            }
+            _ => {}
+        }
 
         #[derive(Debug)]
         enum CastableKind {
