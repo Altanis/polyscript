@@ -859,17 +859,13 @@ impl<'a> MIRBuilder<'a> {
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
                     let Type::Base { symbol: fn_sig_id, .. } = fn_type else { unreachable!() };
-                    let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
-                    let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind else { unreachable!() };
 
-                    let is_method_call = if let AstNodeKind::FieldAccess { left, .. } = &function.kind {
-                        let is_static_path = match &left.kind {
-                            AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_some(),
-                            AstNodeKind::PathQualifier { .. } => true,
-                            _ => false,
-                        };
-                        
-                        instance.is_some() && !is_static_path
+                    let is_instance_method_call = if let AstNodeKind::FieldAccess { left, .. } = &function.kind {
+                        match &left.kind {
+                            AstNodeKind::Identifier(name) => self.analyzer.symbol_table.find_type_symbol_from_scope(left.scope_id.unwrap(), name).is_none(),
+                            AstNodeKind::PathQualifier { .. } => false,
+                            _ => true
+                        }
                     } else {
                         false
                     };
@@ -884,7 +880,7 @@ impl<'a> MIRBuilder<'a> {
 
                     if fn_value_symbol.is_intrinsic {
                         needs_monomorphization = false;
-                    }
+                    } 
                     
                     let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization {
                         let concrete_types_for_mangling = if !generic_arguments.is_empty() {
@@ -904,40 +900,35 @@ impl<'a> MIRBuilder<'a> {
                         (name, fn_value_symbol.id, fn_type.clone())
                     };
                     
-                    if is_method_call && let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
-                        let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
-                        if let Some(trait_scope_id) = self.find_trait_scope_from_signature(fn_sig_symbol) {
-                            let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
-                            let generic_instance_type = left.type_id.as_ref().unwrap();
-                            let concrete_instance_type = self.substitute_type(generic_instance_type, substitutions);
+                    if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone()
+                        && let AstNodeKind::FieldAccess { left, .. } = &function.kind
+                        && let AstNodeKind::PathQualifier { ty: generic_ty_node, tr: trait_ty_node, .. } = &left.kind
+                    {
+                        let generic_base_type = generic_ty_node.type_id.as_ref().unwrap();
+                        let concrete_base_type = self.substitute_type(generic_base_type, substitutions);
 
-                            let trait_id = self.analyzer.symbol_table.registry.type_symbols.values()
-                                .find(|s| matches!(&s.kind, TypeSymbolKind::Trait(id) if *id == trait_scope_id))
-                                .map(|s| s.id)
-                                .unwrap();
-
-                            let concrete_instance_type_id = concrete_instance_type.get_base_symbol();
+                        if self.type_is_fully_concrete(&concrete_base_type) {
+                            let trait_type = trait_ty_node.as_ref().unwrap().type_id.as_ref().unwrap();
+                            let trait_id = trait_type.get_base_symbol();
+                            let concrete_type_id = concrete_base_type.get_base_symbol();
+                            
                             if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
-                                && let Some(impls_for_type) = impls_for_trait.get(&concrete_instance_type_id)
-                                && let Some(applicable_impl) 
-                                    = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_instance_type, imp))
+                                && let Some(impls_for_type) = impls_for_trait.get(&concrete_type_id)
+                                && let Some(imp) = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_base_type, imp))
                             {
                                 let method_name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id);
-                                if let Some(concrete_fn_symbol) = self.analyzer.symbol_table
-                                    .find_value_symbol_in_scope(method_name, applicable_impl.impl_scope_id) {
-        
+                                if let Some(concrete_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope(method_name, imp.impl_scope_id) {
                                     mir_fn_name = self.analyzer.symbol_table.get_value_name(concrete_fn_symbol.name_id).to_string();
                                     mir_fn_value_id = concrete_fn_symbol.id;
                                     mir_fn_type = concrete_fn_symbol.type_id.as_ref().unwrap().clone();
-                                    function.value_id = Some(mir_fn_value_id);
                                 }
                             }
                         }
                     }
 
-                    let mir_function_expr = if is_method_call {
+                    let mir_function_expr = if is_instance_method_call {
                         let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
-                        let instance_mir = self.lower_node(left)?;
+                        let instance_mir = self.lower_node(left).unwrap();
                         mir_arguments.insert(0, instance_mir);
                         
                         MIRNode {

@@ -10,11 +10,18 @@ struct HeavyData<T> {
     x: T;
 }
 
+struct Wow {}
+impl Clone for Wow {
+    fn clone(&self): Self {
+        Wow {}
+    }
+}
+
 impl<U: Clone> Clone for HeavyData<U> {
     fn clone(&self): Self {
         Self { x: [U as Clone].clone(&self.x) }
     }
 }
 
-let x = HeavyData { x: 4 };
-let y = [HeavyData<int> as Clone].clone(&x);
+let x = HeavyData { x: Wow {} };
+let y = [HeavyData<Wow> as Clone].clone(&x);
