@@ -36,39 +36,13 @@ pub fn init(program: &mut MIRNode, analyzer: &mut SemanticAnalyzer) -> Vec<Error
                     break;
                 }
             },
-            Err(e) => errors.push(*e)
+            Err(e) => {
+                errors.push(*e);
+            }
         }
     }
 
     errors
-}
-
-fn heapify_if_local(
-    analyzer: &mut SemanticAnalyzer,
-    value_node: &mut MIRNode,
-    current_function_scope_id: usize,
-) -> Result<bool, BoxedError> {
-    let mut changed = false;
-
-    if let MIRNodeKind::StructLiteral { fields, .. } = &mut value_node.kind {
-        for field_expr in fields.values_mut() {
-            changed |= heapify_if_local(analyzer, field_expr, current_function_scope_id)?;
-        }
-        return Ok(changed);
-    }
-
-    if let Some(var_id) = get_base_variable(value_node) {
-        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
-        
-        if matches!(symbol.kind, ValueSymbolKind::Variable) && is_scope_or_descendant(analyzer, symbol.scope_id, current_function_scope_id) {
-            let symbol_type = symbol.type_id.as_ref().unwrap();
-            
-            if !is_primitive(analyzer, symbol_type) && !is_fn_ptr(analyzer, symbol_type) && !is_str_primitive(analyzer, symbol_type) {
-                return move_to_heap(analyzer, var_id);
-            }
-        }
-    }
-    Ok(changed)
 }
 
 fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<bool, BoxedError> {
@@ -81,7 +55,13 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
     match &mut node.kind {
         MIRNodeKind::Return(Some(expr)) => {
             if let Some(function_scope) = get_function_scope(analyzer, node.scope_id) {
-                changed |= heapify_if_local(analyzer, expr, function_scope)?;
+                let expr_type = expr.type_id.as_ref().unwrap();
+                if matches!(expr_type, Type::Reference { .. } | Type::MutableReference { .. }) {
+                    match check_for_escape(analyzer, expr, function_scope, true) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
+                    }
+                }
             }
         }
 
@@ -91,34 +71,23 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
                 && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
                 && let Some(function_scope) = get_function_scope(analyzer, node.scope_id)
             {
-                changed |= heapify_if_local(analyzer, last_expr, function_scope)?;
-            }
-        },
-
-        MIRNodeKind::BinaryOperation { operator: Operation::Assign, left, right } => {
-            if let Some(base_var_id) = get_base_variable(left)
-                && let Some(func_scope) = get_function_scope(analyzer, node.scope_id)
-            {
-                let symbol = analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                if !is_scope_or_descendant(analyzer, symbol.scope_id, func_scope) {
-                    changed |= heapify_if_local(analyzer, right, func_scope)?;
-                }
-            }
-        },
-
-        MIRNodeKind::FunctionCall { arguments, .. } => {
-            if let Some(func_scope) = get_function_scope(analyzer, node.scope_id) {
-                for arg in arguments.iter_mut() {
-                    if let MIRNodeKind::UnaryOperation { operator, operand } = &mut arg.kind
-                        && (*operator == Operation::ImmutableAddressOf || *operator == Operation::MutableAddressOf)
-                    {
-                        changed |= heapify_if_local(analyzer, operand, func_scope)?;
+                let expr_type = last_expr.type_id.as_ref().unwrap();
+                if matches!(expr_type, Type::Reference { .. } | Type::MutableReference { .. }) {
+                    match check_for_escape(analyzer, last_expr, function_scope, true) {
+                        Ok(c) => changed |= c,
+                        Err(e) => return Err(e),
                     }
                 }
             }
         }
 
         MIRNodeKind::VariableDeclaration { initializer, .. } => {
+            let destination_scope = node.scope_id;
+            match check_for_escape(analyzer, initializer, destination_scope, false) {
+                Ok(c) => changed |= c,
+                Err(e) => return Err(e),
+            }
+
             if let MIRNodeKind::HeapExpression(_) = &initializer.kind {
                  match move_to_heap(analyzer, node.value_id.unwrap()) {
                     Ok(c) => changed |= c,
@@ -126,10 +95,106 @@ fn analysis_pass(analyzer: &mut SemanticAnalyzer, node: &mut MIRNode) -> Result<
                  }
             }
         }
-        
         _ => {}
     }
 
+    Ok(changed)
+}
+
+fn check_for_escape(
+    analyzer: &mut SemanticAnalyzer,
+    expr: &mut MIRNode,
+    destination_scope: usize,
+    is_escaping_context: bool,
+) -> Result<bool, BoxedError> {
+    let mut changed = false;
+    match &mut expr.kind {
+        MIRNodeKind::Identifier(_) => {
+            if let Some(var_id) = expr.value_id {
+                let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+                let should_heapify = if is_escaping_context {
+                    is_scope_or_descendant(analyzer, symbol.scope_id, destination_scope)
+                } else {
+                    is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
+                };
+
+                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
+                    let symbol_type = symbol.type_id.as_ref().unwrap();
+                    if !is_primitive(analyzer, symbol_type) && !is_fn_ptr(analyzer, symbol_type) {
+                        match move_to_heap(analyzer, var_id) {
+                            Ok(c) => changed |= c,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+            }
+        },
+        MIRNodeKind::UnaryOperation { operator, operand }
+            if *operator == Operation::ImmutableAddressOf
+                || *operator == Operation::MutableAddressOf =>
+        {
+            if let Some(var_id) = get_base_variable(operand) {
+                let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+                let should_heapify = if is_escaping_context {
+                    is_scope_or_descendant(analyzer, symbol.scope_id, destination_scope)
+                } else {
+                    is_child_scope_of(analyzer, symbol.scope_id, destination_scope)
+                };
+
+                if matches!(symbol.kind, ValueSymbolKind::Variable) && should_heapify {
+                    let symbol_type = symbol.type_id.as_ref().unwrap();
+                    if !is_fn_ptr(analyzer, symbol_type) {
+                        match move_to_heap(analyzer, var_id) {
+                            Ok(c) => changed |= c,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+            }
+        },
+        MIRNodeKind::Block(statements) => {
+            if let Some(last_expr) = statements.last_mut()
+                && !matches!(last_expr.kind, MIRNodeKind::ExpressionStatement(_))
+            {
+                changed |= check_for_escape(
+                    analyzer,
+                    last_expr,
+                    destination_scope,
+                    is_escaping_context,
+                )?;
+            }
+        },
+        MIRNodeKind::IfStatement {
+            then_branch,
+            else_if_branches,
+            else_branch,
+            ..
+        } => {
+            changed |= check_for_escape(
+                analyzer,
+                then_branch,
+                destination_scope,
+                is_escaping_context,
+            )?;
+            for (_, branch) in else_if_branches {
+                changed |= check_for_escape(
+                    analyzer,
+                    branch,
+                    destination_scope,
+                    is_escaping_context,
+                )?;
+            }
+            if let Some(branch) = else_branch {
+                changed |= check_for_escape(
+                    analyzer,
+                    branch,
+                    destination_scope,
+                    is_escaping_context,
+                )?;
+            }
+        },
+        _ => {}
+    }
     Ok(changed)
 }
 
@@ -143,19 +208,25 @@ fn get_base_variable(place: &MIRNode) -> Option<ValueSymbolId> {
 }
 
 fn move_to_heap(analyzer: &mut SemanticAnalyzer, var_id: ValueSymbolId) -> Result<bool, BoxedError> {
-    let heap_type_id = analyzer.get_heap_type();
-    
-    let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
-    let is_already_heap = analyzer.is_heap_type(symbol.type_id.as_ref().unwrap());
+    let heap_type = analyzer.get_heap_type();
+    let is_heap_type = {
+        let symbol = analyzer.symbol_table.get_value_symbol(var_id).unwrap();
+        analyzer.is_heap_type(symbol.type_id.as_ref().unwrap())
+    };
 
-    if matches!(symbol.kind, ValueSymbolKind::Variable) && !is_already_heap {
-        let (name_id, span) = {
-            let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
-            let original_type = symbol.type_id.as_ref().unwrap().clone();
-            symbol.type_id = Some(Type::Base { symbol: heap_type_id, args: vec![original_type] });
-            (symbol.name_id, symbol.span)
-        };
-        
+    let (kind, ty, name_id, span) = {
+        let symbol = analyzer.symbol_table.get_value_symbol_mut(var_id).unwrap();
+        (
+            symbol.kind.clone(),
+            symbol.type_id.as_mut().unwrap(),
+            symbol.name_id,
+            symbol.span,
+        )
+    };
+
+    if kind == ValueSymbolKind::Variable && !is_heap_type {
+        *ty = Type::Base { symbol: heap_type, args: vec![] };
+
         let name = analyzer.symbol_table.get_value_name(name_id).to_string();
         let span = span.unwrap_or_default();
         return Err(analyzer.create_error(ErrorKind::NeedsHeapAllocation(name), span, &[span]));
@@ -171,8 +242,10 @@ fn get_function_scope(analyzer: &SemanticAnalyzer, scope_id: usize) -> Option<us
         if scope.kind == ScopeKind::Function {
             return Some(id);
         }
+
         current_id = scope.parent;
     }
+
     None
 }
 
@@ -184,6 +257,7 @@ fn is_scope_or_descendant(
     if child_candidate == parent_candidate {
         return true;
     }
+
     is_child_scope_of(analyzer, child_candidate, parent_candidate)
 }
 
@@ -197,7 +271,9 @@ fn is_child_scope_of(
         if id == parent_candidate {
             return true;
         }
+
         current_id = analyzer.symbol_table.get_scope(id).unwrap().parent;
     }
+    
     false
 }

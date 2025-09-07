@@ -184,13 +184,13 @@ impl<T> Drop for Vec<T> {
 // A structure representing a mutable, extensible String.
 struct String {
     // The internal representation 
-    private chars: Vec<char>;
+    private chars: Heap<Vec<char>>;
 }
 
 impl String {
     // Constructs a new string. This function does not reserve any memory for the string.
     public fn new(): Self {
-        Self { chars: [Vec<char>].new() }
+        Self { chars: heap ([Vec<char>].new()) }
     }
 
     // Constructs a new string with space for `n` elements.
@@ -244,10 +244,3 @@ fn println<T: ToString>(data: T) {
 }
 
 println("Hello world!");
-
-struct Struct { x: Vec<char>; }
-
-fn chemicals(s: &mut Struct) {
-    let c = [Vec<char>].new();
-    s.x = c;
-}
