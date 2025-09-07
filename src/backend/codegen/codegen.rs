@@ -222,6 +222,72 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn build_destructor_call(&mut self, ty: &Type, value: BasicValueEnum<'ctx>) {
+        if self.analyzer.is_heap_type(ty) {
+            return;
+        }
+
+        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
+        let type_id = ty.get_base_symbol();
+    
+        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
+            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+        {
+            let applicable_impl = impls_for_type.iter().find(|imp| {
+                self.check_trait_impl_applicability_mir(ty, imp)
+            });
+
+            if let Some(imp) = applicable_impl {
+                let drop_fn_symbol = self.analyzer.symbol_table
+                    .find_value_symbol_in_scope("drop", imp.impl_scope_id)
+                    .unwrap();
+                
+                let generic_drop_fn_type_id = drop_fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+                
+                let drop_fn_val = if let Type::Base { args, .. } = ty {
+                    if !args.is_empty() {
+                        let mangled_name = self.mangle_monomorph_name(generic_drop_fn_type_id, args);
+                        self.module.get_function(&mangled_name).unwrap()
+                    } else {
+                        self.functions.get(&drop_fn_symbol.id).copied().unwrap()
+                    }
+                } else {
+                    self.functions.get(&drop_fn_symbol.id).copied().unwrap()
+                };
+                
+                let llvm_type = self.map_semantic_type(ty).unwrap();
+                let arg_ptr = self.builder.build_alloca(llvm_type, "drop_arg_ptr").unwrap();
+                self.builder.build_store(arg_ptr, value).unwrap();
+                self.builder.build_call(drop_fn_val, &[arg_ptr.into()], "").unwrap();
+            }
+        }
+
+        if let Type::Base { symbol, .. } = ty {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+                
+                let mut field_symbols: Vec<_> = scope.values.values().map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap()).collect();
+                field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+                let struct_val = value.into_struct_value();
+
+                for (i, field_symbol) in field_symbols.iter().enumerate() {
+                    let field_type = field_symbol.type_id.as_ref().unwrap();
+                    let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
+                    
+                    let field_val = self.builder.build_extract_value(
+                        struct_val,
+                        i as u32,
+                        &format!("field_val_for_drop_{}", field_name)
+                    ).unwrap();
+                    
+                    self.build_destructor_call(field_type, field_val);
+                }
+            }
+        }
+    }
+
     fn compile_scope_drop(&mut self, scope_id: ScopeId) {
         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
         for &value_id in scope.values.values() {
@@ -1819,28 +1885,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "drop" => {
                         let value_to_drop_node = &arguments[0];
                         let value_to_drop_type = value_to_drop_node.type_id.as_ref().unwrap();
-
-                        let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
-                        let type_id = value_to_drop_type.get_base_symbol();
-
-                        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
-                            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
-                        {
-                            let applicable_impl = impls_for_type.iter().find(|imp| {
-                                self.check_trait_impl_applicability_mir(value_to_drop_type, imp)
-                            });
-
-                            if let Some(imp) = applicable_impl
-                                && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
-                                && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
-                            {
-                                let llvm_type = self.map_semantic_type(value_to_drop_type).unwrap();
-                                let arg_ptr = self.builder.build_alloca(llvm_type, "drop_arg_ptr").unwrap();
-                                self.builder.build_store(arg_ptr, compiled_args[0]).unwrap();
-                                self.builder.build_call(drop_fn_val, &[arg_ptr.into()], "").unwrap();
-                            }
-                        }
-
+                        let compiled_arg = compiled_args[0];
+                        self.build_destructor_call(value_to_drop_type, compiled_arg);
                         None
                     },
                     _ => unreachable!()
