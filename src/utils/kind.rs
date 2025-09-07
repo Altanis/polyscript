@@ -48,7 +48,6 @@ pub const TRAIT_KEYWORD: &str = "trait";
 pub const TYPE_KEYWORD: &str = "type";
 pub const MUT_KEYWORD: &str = "mut";
 pub const AS_KEYWORD: &str = "as";
-pub const HEAP_KEYWORD: &str = "heap";
 pub const IMPORT_KEYWORD: &str = "import";
 pub const FROM_KEYWORD: &str = "from";
 pub const EXPORT_KEYWORD: &str = "export";
@@ -482,7 +481,6 @@ pub enum KeywordKind {
     Trait,
     Type,
     Mut,
-    Heap,
     Import,
     From,
     Export,
@@ -711,7 +709,6 @@ impl std::fmt::Display for TokenKind {
                 KeywordKind::Impl => "Keyword::Impl".purple(),
                 KeywordKind::Trait => "Keyword::Trait".purple(),
                 KeywordKind::Type => "Keyword::Type".purple(),
-                KeywordKind::Heap => "Keyword::Heap".magenta(),
                 KeywordKind::Import => "Keyword::Import".yellow(),
                 KeywordKind::From => "Keyword::From".yellow(),
                 KeywordKind::Export => "Keyword::Export".yellow(),

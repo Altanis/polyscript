@@ -11,7 +11,7 @@ use inkwell::targets::{
 use inkwell::OptimizationLevel;
 
 use crate::backend::codegen::codegen::CodeGen;
-use crate::backend::optimizations::{capture_analysis, escape_analysis};
+use crate::backend::optimizations::capture_analysis;
 use crate::frontend::semantics::analyzer::{ScopeId, ScopeKind, SemanticAnalyzer, TypeSymbolId, ValueSymbolId,};
 use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
@@ -492,18 +492,7 @@ impl Compiler {
     }
 
     fn optimize(&mut self, program: &mut MIRNode) {
-        let mut errs = vec![];
-        errs.extend(escape_analysis::init(program, &mut self.analyzer));
         capture_analysis::init(program, &self.analyzer);
-
-        if !errs.is_empty() {
-            eprintln!("{} errors emitted... printing:", errs.len());
-            for err in errs {
-                eprintln!("{}", err);
-            }
-
-            std::process::exit(1);
-        }
     }
 
     fn compile_mir(&self, program: MIRNode) {

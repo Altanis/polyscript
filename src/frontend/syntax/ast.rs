@@ -39,7 +39,6 @@ pub enum AstNodeKind {
         left: BoxedAstNode,
         right: BoxedAstNode,
     },
-    HeapExpression(BoxedAstNode),
 
     TypeCast {
         expr: BoxedAstNode,
@@ -349,10 +348,6 @@ impl AstNode {
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?
-            }
-            AstNodeKind::HeapExpression(expr) => {
-                write!(f, "{}heap ", indent_str)?;
-                expr.fmt_with_indent(f, 0, table)?;
             }
             AstNodeKind::TypeCast { expr, target_type } => {
                 write!(f, "{}(", indent_str)?;
@@ -954,7 +949,6 @@ impl AstNode {
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
             },
-            HeapExpression(expr) => vec![expr.as_mut()],
 
             TypeCast { expr, target_type } => vec![expr.as_mut(), target_type.as_mut()],
             PathQualifier { ty, tr } => {
@@ -1268,7 +1262,6 @@ impl AstNode {
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_ref(), right.as_ref()]
             },
-            HeapExpression(expr) => vec![expr.as_ref()],
 
             TypeCast { expr, target_type } => vec![expr.as_ref(), target_type.as_ref()],
             PathQualifier { ty, tr } => {

@@ -2012,13 +2012,6 @@ impl SemanticAnalyzer {
             },
             Type::Base { symbol, .. } if self.is_uv(*symbol) => Ok(false),
             _ => {
-                if self.is_heap_type(&resolved_operand) {
-                    let Type::Base { args, .. } = &resolved_operand else { unreachable!() };
-                    let inner = &args[0];
-                    self.unify(inner.clone(), result_ty, info)?;
-                    return Ok(true);
-                }
-
                 let deref_trait_id = self.trait_registry.get_default_trait(&"Deref".to_string());
                 let deref_trait_type = Type::new_base(deref_trait_id);
     
@@ -2045,13 +2038,6 @@ impl SemanticAnalyzer {
             }
             Type::Base { symbol, .. } if self.is_uv(*symbol) => Ok(false),
             _ => {
-                if self.is_heap_type(&resolved_operand) {
-                    let Type::Base { args, .. } = &resolved_operand else { unreachable!() };
-                    let inner = &args[0];
-                    self.unify(inner.clone(), place_ty, info)?;
-                    return Ok(true);
-                }
-
                 let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
                 let deref_mut_trait_type = Type::new_base(deref_mut_trait_id);
 
@@ -2656,10 +2642,6 @@ impl SemanticAnalyzer {
                 self.generic_value_check_node(left)?;
                 self.check_node_is_not_generic_fn(right)?;
                 self.generic_value_check_node(right)?;
-            },
-            HeapExpression(expr) => {
-                self.check_node_is_not_generic_fn(expr)?;
-                self.generic_value_check_node(expr)?;
             },
             TypeCast { expr, .. } => {
                 self.check_node_is_not_generic_fn(expr)?;

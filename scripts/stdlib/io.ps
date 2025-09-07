@@ -2,7 +2,7 @@ import { print_char, eprint_char } from "@intrinsics";
 import { String, ToString } from "stdlib/vec.ps";
 
 fn print<T: ToString>(data: T) {
-    let string = data.to_string();
+    let string = [T as ToString].to_string(&data);
     for (let i = 0; i < string.length(); i += 1) {
         print_char(string.get(i));
     }

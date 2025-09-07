@@ -50,7 +50,6 @@ pub enum MIRNodeKind {
         left: Box<MIRNode>,
         right: Box<MIRNode>,
     },
-    HeapExpression(Box<MIRNode>),
 
     TypeCast {
         expr: Box<MIRNode>,
@@ -164,7 +163,6 @@ impl MIRNode {
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_mut(), right.as_mut()]
             }
-            HeapExpression(expr) => vec![expr.as_mut()],
             TypeCast { expr, .. } => vec![expr.as_mut()],
             Block(nodes) => nodes.iter_mut().collect(),
             IfStatement {
@@ -259,7 +257,6 @@ impl MIRNode {
             BinaryOperation { left, right, .. } | ConditionalOperation { left, right, .. } => {
                 vec![left.as_ref(), right.as_ref()]
             }
-            HeapExpression(expr) => vec![expr.as_ref()],
             TypeCast { expr, .. } => vec![expr.as_ref()],
             Block(nodes) => nodes.iter().collect(),
             IfStatement {
@@ -411,10 +408,6 @@ impl MIRNode {
                 write!(f, " {} ", operator)?;
                 right.fmt_with_indent(f, 0, table)?;
                 write!(f, ")")?;
-            }
-            MIRNodeKind::HeapExpression(expr) => {
-                write!(f, "{}heap ", indent_str)?;
-                expr.fmt_with_indent(f, 0, table)?;
             }
             MIRNodeKind::TypeCast { expr, target_type } => {
                 write!(f, "{}(", indent_str)?;

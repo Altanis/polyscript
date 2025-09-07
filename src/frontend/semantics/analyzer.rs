@@ -328,17 +328,6 @@ impl SymbolTable {
 
         table.populate_intrinsics();
 
-        let heap_scope_id = table.enter_scope(ScopeKind::Struct);
-        let t_generic_id = table.add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
-        table.exit_scope();
-        table.add_type_symbol(
-            "Heap",
-            TypeSymbolKind::Struct((heap_scope_id, vec![])),
-            vec![t_generic_id],
-            QualifierKind::Public,
-            None
-        ).unwrap();
-
         let init_scope_id = table.get_next_scope_id();
         let init_scope = Scope {
             values: HashMap::new(),
@@ -875,223 +864,6 @@ impl SymbolTable {
         ).unwrap();
         trait_registry.default_traits.insert("DerefMut".to_string(), trait_id);
 
-        // --- HEAP IMPLS ---
-        let heap_symbol_id = self.find_type_symbol("Heap").unwrap().id;
-        let clone_trait_id = trait_registry.get_default_trait(&"Clone".to_string());
-        let drop_trait_id = trait_registry.get_default_trait(&"Drop".to_string());
-        let deref_trait_id = trait_registry.get_default_trait(&"Deref".to_string());
-        let deref_mut_trait_id = trait_registry.get_default_trait(&"DerefMut".to_string());
-
-        // --- impl<T> Clone for Heap<T> ---
-        {
-            let impl_scope_id = self.enter_scope(ScopeKind::Impl);
-            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(clone_trait_id);
-            let t_generic_id = self
-                .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
-                .unwrap();
-            let heap_of_t = Type::Base {
-                symbol: heap_symbol_id,
-                args: vec![Type::new_base(t_generic_id)],
-            };
-
-            self.add_type_symbol(
-                "Self",
-                TypeSymbolKind::TypeAlias((None, Some(heap_of_t.clone()))),
-                vec![],
-                QualifierKind::Public,
-                None,
-            )
-            .unwrap();
-
-            let func_scope_id = self.enter_scope(ScopeKind::Function);
-            self.exit_scope();
-
-            let params = vec![Type::Reference {
-                inner: Box::new(heap_of_t.clone()),
-            }];
-            let return_type = heap_of_t.clone();
-
-            let fn_sig_type_id = self
-                .add_type_symbol(
-                    "clone",
-                    TypeSymbolKind::FunctionSignature {
-                        params,
-                        return_type,
-                        instance: Some(ReferenceKind::Reference),
-                    },
-                    vec![],
-                    QualifierKind::Private,
-                    None,
-                )
-                .unwrap();
-
-            let clone_fn_symbol_id = self.add_value_symbol(
-                "clone",
-                ValueSymbolKind::Function(func_scope_id, HashSet::new()),
-                false,
-                QualifierKind::Public,
-                Some(Type::new_base(fn_sig_type_id)),
-                None,
-            ).unwrap();
-            self.get_value_symbol_mut(clone_fn_symbol_id).unwrap().is_intrinsic = true;
-
-            trait_registry.register(
-                clone_trait_id,
-                heap_symbol_id,
-                TraitImpl {
-                    impl_scope_id,
-                    impl_generic_params: vec![t_generic_id],
-                    trait_generic_specialization: vec![],
-                    type_specialization: vec![t_generic_id],
-                    span: Span::default(),
-                },
-            );
-
-            self.exit_scope();
-        }
-
-        // --- impl<T> Drop for Heap<T> ---
-        {
-            let impl_scope_id = self.enter_scope(ScopeKind::Impl);
-            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(drop_trait_id);
-            let t_generic_id = self
-                .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
-                .unwrap();
-            let heap_of_t = Type::Base {
-                symbol: heap_symbol_id,
-                args: vec![Type::new_base(t_generic_id)],
-            };
-
-            self.add_type_symbol(
-                "Self",
-                TypeSymbolKind::TypeAlias((None, Some(heap_of_t.clone()))),
-                vec![],
-                QualifierKind::Public,
-                None,
-            )
-            .unwrap();
-
-            let func_scope_id = self.enter_scope(ScopeKind::Function);
-            self.exit_scope();
-
-            let params = vec![Type::MutableReference {
-                inner: Box::new(heap_of_t.clone()),
-            }];
-            let return_type = Type::new_base(self.find_type_symbol("void").unwrap().id);
-
-            let fn_sig_type_id = self
-                .add_type_symbol(
-                    "drop",
-                    TypeSymbolKind::FunctionSignature {
-                        params,
-                        return_type,
-                        instance: Some(ReferenceKind::MutableReference),
-                    },
-                    vec![],
-                    QualifierKind::Private,
-                    None,
-                )
-                .unwrap();
-
-            let drop_fn_symbol_id = self.add_value_symbol(
-                "drop",
-                ValueSymbolKind::Function(func_scope_id, HashSet::new()),
-                false,
-                QualifierKind::Public,
-                Some(Type::new_base(fn_sig_type_id)),
-                None,
-            ).unwrap();
-            self.get_value_symbol_mut(drop_fn_symbol_id).unwrap().is_intrinsic = true;
-
-            trait_registry.register(
-                drop_trait_id,
-                heap_symbol_id,
-                TraitImpl {
-                    impl_scope_id,
-                    impl_generic_params: vec![t_generic_id],
-                    trait_generic_specialization: vec![],
-                    type_specialization: vec![t_generic_id],
-                    span: Span::default(),
-                },
-            );
-
-            self.exit_scope();
-        }
-
-        // --- impl<T> Deref for Heap<T> ---
-        {
-            let impl_scope_id = self.enter_scope(ScopeKind::Impl);
-            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(deref_trait_id);
-            let t_generic_id = self
-                .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
-                .unwrap();
-            let heap_of_t = Type::Base {
-                symbol: heap_symbol_id,
-                args: vec![Type::new_base(t_generic_id)],
-            };
-            let t_type = Type::new_base(t_generic_id);
-
-            self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, Some(heap_of_t.clone()))), vec![], QualifierKind::Public, None).unwrap();
-            self.add_type_symbol("Target", TypeSymbolKind::TypeAlias((None, Some(t_type.clone()))), vec![], QualifierKind::Public, None).unwrap();
-
-            let func_scope_id = self.enter_scope(ScopeKind::Function);
-            self.exit_scope();
-
-            let params = vec![Type::Reference { inner: Box::new(heap_of_t.clone()) }];
-            let return_type = Type::Reference { inner: Box::new(t_type) };
-
-            let fn_sig_type_id = self.add_type_symbol("deref", TypeSymbolKind::FunctionSignature { params, return_type, instance: Some(ReferenceKind::Reference) }, vec![], QualifierKind::Private, None).unwrap();
-            let deref_fn_symbol_id = self.add_value_symbol("deref", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
-            self.get_value_symbol_mut(deref_fn_symbol_id).unwrap().is_intrinsic = true;
-
-            trait_registry.register(deref_trait_id, heap_symbol_id, TraitImpl {
-                impl_scope_id,
-                impl_generic_params: vec![t_generic_id],
-                trait_generic_specialization: vec![],
-                type_specialization: vec![t_generic_id],
-                span: Span::default(),
-            });
-
-            self.exit_scope();
-        }
-
-        // --- impl<T> DerefMut for Heap<T> ---
-        {
-            let impl_scope_id = self.enter_scope(ScopeKind::Impl);
-            self.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(deref_mut_trait_id);
-            let t_generic_id = self
-                .add_type_symbol("T", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None)
-                .unwrap();
-            let heap_of_t = Type::Base {
-                symbol: heap_symbol_id,
-                args: vec![Type::new_base(t_generic_id)],
-            };
-            let t_type = Type::new_base(t_generic_id);
-
-            self.add_type_symbol("Self", TypeSymbolKind::TypeAlias((None, Some(heap_of_t.clone()))), vec![], QualifierKind::Public, None).unwrap();
-            self.add_type_symbol("Target", TypeSymbolKind::TypeAlias((None, Some(t_type.clone()))), vec![], QualifierKind::Public, None).unwrap();
-
-            let func_scope_id = self.enter_scope(ScopeKind::Function);
-            self.exit_scope();
-
-            let params = vec![Type::MutableReference { inner: Box::new(heap_of_t.clone()) }];
-            let return_type = Type::MutableReference { inner: Box::new(t_type) };
-
-            let fn_sig_type_id = self.add_type_symbol("deref_mut", TypeSymbolKind::FunctionSignature { params, return_type, instance: Some(ReferenceKind::MutableReference) }, vec![], QualifierKind::Private, None).unwrap();
-            let deref_mut_fn_symbol_id = self.add_value_symbol("deref_mut", ValueSymbolKind::Function(func_scope_id, HashSet::new()), false, QualifierKind::Public, Some(Type::new_base(fn_sig_type_id)), None).unwrap();
-            self.get_value_symbol_mut(deref_mut_fn_symbol_id).unwrap().is_intrinsic = true;
-
-            trait_registry.register(deref_mut_trait_id, heap_symbol_id, TraitImpl {
-                impl_scope_id,
-                impl_generic_params: vec![t_generic_id],
-                trait_generic_specialization: vec![],
-                type_specialization: vec![t_generic_id],
-                span: Span::default(),
-            });
-
-            self.exit_scope();
-        }
-
         self.current_scope_id = old_scope;
     }
 
@@ -1538,8 +1310,7 @@ pub struct UVCollectionContext {
 }
 
 pub struct BuiltinTypes {
-    primitives: Vec<TypeSymbolId>,
-    heap_struct: TypeSymbolId
+    primitives: Vec<TypeSymbolId>
 }
 
 pub struct SemanticAnalyzer {
@@ -1564,8 +1335,7 @@ impl SemanticAnalyzer {
         let builtin_types = BuiltinTypes {
             primitives: PrimitiveKind::iter()
                 .map(|k| symbol_table.find_type_symbol(k.to_symbol_str()).unwrap().id)
-                .collect(),
-            heap_struct: symbol_table.find_type_symbol("Heap").unwrap().id
+                .collect()
         };
 
         SemanticAnalyzer {
@@ -1582,14 +1352,11 @@ impl SemanticAnalyzer {
     }
 
     pub fn is_copy_type(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Base { symbol, .. } => {
-                if let Some(type_symbol) = self.symbol_table.get_type_symbol(*symbol) {
-                    matches!(type_symbol.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
-                } else { false }
-            },
-            Type::Reference { .. } | Type::MutableReference { .. } => true
-        }
+        matches!(ty, Type::Reference { .. } | Type::MutableReference { .. })
+    }
+
+    pub fn is_heap_type(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Base { .. })
     }
 
     pub fn is_ancestor_of(&self, ancestor_id: ScopeId, child_id: ScopeId) -> bool {
@@ -1602,18 +1369,6 @@ impl SemanticAnalyzer {
             } else {
                 break;
             }
-        }
-
-        false
-    }
-
-    pub fn get_heap_type(&self) -> TypeSymbolId {
-        self.builtin_types.heap_struct
-    }
-
-    pub fn is_heap_type(&self, ty: &Type) -> bool {
-        if let Type::Base { symbol, .. } = ty {
-            return *symbol == self.builtin_types.heap_struct;
         }
 
         false

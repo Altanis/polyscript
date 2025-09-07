@@ -27,9 +27,9 @@ impl<T> Vec<T> {
     }
 
     // Constructs a new vector with space for `n` elements.
-    public fn from_size(n: int): Self {
+    public fn from_capacity(n: int): Self {
         Self {
-            size: n,
+            size: 0,
             capacity: n,
             element_size: sizeof T,
             data: if (n == 0) { nullptr } else { calloc(n, sizeof T) }
@@ -75,11 +75,13 @@ impl<T> Vec<T> {
 
         let dst = self.data + idx * self.element_size;
 
-        if #IS_REFCOUNTED#{T} { decref(dst); }
-        else { drop(*(dst as &mut T)); };
+        if #IS_REFCOUNTED#{T} {
+            decref(*(dst as &int));
+        } else {
+            drop(*(dst as &mut T));
+        };
 
         memcpy(dst, (&element) as int, self.element_size);
-
         true
     }
 
@@ -97,7 +99,7 @@ impl<T> Vec<T> {
     // Removes the element at index `idx`.
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
-    // * The replaced element is dropped.
+    // * The removed element is dropped.
     public fn remove(&mut self, idx: int): bool {
         if (idx < 0 || idx >= self.size) {
             return false;
@@ -105,13 +107,16 @@ impl<T> Vec<T> {
 
         let dst = self.data + idx * self.element_size;
 
-        if #IS_REFCOUNTED#{T} { decref(dst); }
-        else { drop(*(dst as &mut T)); };
+        if #IS_REFCOUNTED#{T} {
+            decref(*(dst as &int));
+        } else {
+            drop(*(dst as &mut T));
+        };
 
         let src = self.data + (idx + 1) * self.element_size;
         let size = self.element_size * (self.size - idx - 1);
 
-        memmove(dst, src, size);
+        if (size > 0) { memmove(dst, src, size); };
         self.size -= 1;
 
         true
@@ -121,7 +126,17 @@ impl<T> Vec<T> {
     // * All elements in the vector are dropped.
     public fn clear(&mut self) {
         while (self.size > 0) {
-            self.remove(0);
+            let last = self.size - 1;
+            let dst = self.data + last * self.element_size;
+
+            if #IS_REFCOUNTED#{T} {
+                let old_ptr: int = *(dst as &int);
+                decref(old_ptr);
+            } else {
+                drop(*(dst as &mut T));
+            };
+
+            self.size = last;
         }
     }
 
@@ -157,5 +172,3 @@ impl<T: Clone> Clone for Vec<T> {
         return vec;
     }
 }
-
-export { Vec };
