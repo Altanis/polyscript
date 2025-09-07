@@ -74,8 +74,7 @@ impl<T> Vec<T> {
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); }
-        else { drop(dst as &mut T); };
+        drop(*(dst as &mut T));
 
         memcpy(dst, (&element) as int, self.element_size);
 
@@ -103,8 +102,7 @@ impl<T> Vec<T> {
         };
 
         let dst = self.data + idx * self.element_size;
-        if #IS_REFCOUNTED#{T} { decref(dst); }
-        else { drop(dst as &mut T); };
+        drop(*(dst as &mut T));
 
         let src = self.data + (idx + 1) * self.element_size;
         let size = self.element_size * (self.size - idx - 1);
@@ -126,6 +124,7 @@ impl<T> Vec<T> {
 
 impl<T> Drop for Vec<T> {
     fn drop(&mut self) {
+            eprint("Way down.");
         if (self.capacity != 0) {
             self.clear();
             free(self.data);
@@ -149,4 +148,24 @@ impl<T: Clone> Clone for Vec<T> {
         
         return vec;
     }
+}
+
+struct Scalar { x: int; }
+struct Data { x: Scalar; }
+
+impl Drop for Data {
+    fn drop(&mut self) {
+        eprint("hi");
+    }
+}
+
+impl Drop for Scalar {
+    fn drop(&mut self) {
+        eprint("hi2");
+    }
+}
+
+{
+    let tensor: Vec<Data> = [Vec<Data>].new();
+    tensor.push(Data { x: Scalar { x: 3 } });
 }

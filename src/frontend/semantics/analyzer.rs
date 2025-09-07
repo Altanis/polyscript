@@ -1,7 +1,7 @@
 // frontend/semantics/analyzer.rs
 use crate::{frontend::syntax::ast::AstNode, utils::{error::*, kind::*}};
 use colored::*;
-use std::{collections::{HashMap, HashSet, VecDeque}, rc::Rc};
+use std::{collections::{BTreeMap, HashMap, HashSet, VecDeque}, rc::Rc};
 use strum::IntoEnumIterator;
 use rustc_hash::FxHashMap;
 
@@ -247,7 +247,8 @@ pub struct Scope {
 #[derive(Default, Debug, Clone)]
 pub struct SymbolRegistry {
     pub value_symbols: HashMap<ValueSymbolId, ValueSymbol>,
-    pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>
+    pub type_symbols: HashMap<TypeSymbolId, TypeSymbol>,
+    pub struct_template_map: HashMap<TypeSymbolId, (TypeSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>
 }
 
 pub struct SymbolTable {

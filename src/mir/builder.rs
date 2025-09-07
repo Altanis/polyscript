@@ -24,7 +24,6 @@ pub struct MIRBuilder<'a> {
 
     fn_template_map: HashMap<ValueSymbolId, (ValueSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>,
     fn_param_remaps: HashMap<ValueSymbolId, HashMap<ValueSymbolId, ValueSymbolId>>,
-    struct_template_map: HashMap<TypeSymbolId, (TypeSymbolId, Rc<BTreeMap<TypeSymbolId, Type>>)>,
 
     concretize_substitutions: Option<Rc<BTreeMap<TypeSymbolId, Type>>>,
     concretize_value_remap: HashMap<ValueSymbolId, ValueSymbolId>,
@@ -53,7 +52,6 @@ impl<'a> MIRBuilder<'a> {
             monomorphization_ctx: MonomorphizationContext::default(),
             fn_template_map: HashMap::new(),
             fn_param_remaps: HashMap::new(),
-            struct_template_map: HashMap::new(),
             concretize_substitutions: None,
             concretize_value_remap: HashMap::new(),
             hoisted_iifes: vec![],
@@ -158,6 +156,7 @@ impl<'a> MIRBuilder<'a> {
             for (template_symbol_id, specializations) in instantiations_clone.iter() {
                 let template_symbol = self.analyzer.symbol_table.get_type_symbol(*template_symbol_id).unwrap();
 
+                // Propagate through inherent implementations
                 if let TypeSymbolKind::Struct((_, inherent_impls)) = &template_symbol.kind {
                     let inherent_impls_clone = inherent_impls.clone();
 
@@ -219,6 +218,65 @@ impl<'a> MIRBuilder<'a> {
                                 let instantiations_for_func = self.monomorphization_ctx.instantiations.entry(func_type_id).or_default();
                                 if instantiations_for_func.insert(impl_substitutions.clone()) {
                                     changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let trait_registry_clone = self.analyzer.trait_registry.register.clone();
+                for (_, impls_for_trait) in trait_registry_clone.iter() {
+                    if let Some(trait_impls) = impls_for_trait.get(template_symbol_id) {
+                        for trait_impl in trait_impls {
+                            if trait_impl.impl_generic_params.is_empty() {
+                                continue;
+                            }
+
+                            for specialization_map in specializations.iter() {
+                                let concrete_args: Vec<Type> = template_symbol.generic_parameters
+                                    .iter()
+                                    .map(|gid| specialization_map.get(gid).unwrap().clone())
+                                    .collect();
+                                let concrete_instance_type = Type::Base {
+                                    symbol: *template_symbol_id,
+                                    args: concrete_args,
+                                };
+
+                                let mut impl_substitutions = BTreeMap::new();
+                                let mut is_applicable = true;
+
+                                if let Type::Base { args: instance_args, .. } = &concrete_instance_type {
+                                    if instance_args.len() == trait_impl.type_specialization.len() {
+                                        for (instance_arg, &impl_spec_id) in instance_args.iter().zip(&trait_impl.type_specialization) {
+                                            if trait_impl.impl_generic_params.contains(&impl_spec_id) {
+                                                impl_substitutions.insert(impl_spec_id, instance_arg.clone());
+                                            } else if instance_arg.get_base_symbol() != impl_spec_id {
+                                                is_applicable = false;
+                                                break;
+                                            }
+                                        }
+                                    } else {
+                                        is_applicable = false;
+                                    }
+                                } else if !trait_impl.type_specialization.is_empty() {
+                                    is_applicable = false;
+                                }
+
+                                if !is_applicable || impl_substitutions.is_empty() {
+                                    continue;
+                                }
+
+                                let impl_scope = self.analyzer.symbol_table.get_scope(trait_impl.impl_scope_id).unwrap();
+                                for &func_value_id in impl_scope.values.values() {
+                                    let func_symbol = self.analyzer.symbol_table.get_value_symbol(func_value_id).unwrap();
+                                    if let ValueSymbolKind::Function(_, _) = func_symbol.kind
+                                        && let Some(func_type_id) = func_symbol.type_id.as_ref().map(|t| t.get_base_symbol())
+                                    {
+                                        let instantiations_for_func = self.monomorphization_ctx.instantiations.entry(func_type_id).or_default();
+                                        if instantiations_for_func.insert(impl_substitutions.clone()) {
+                                            changed = true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1085,7 +1143,7 @@ impl<'a> MIRBuilder<'a> {
                         Some(node.span),
                     ).unwrap();
 
-                    self.struct_template_map.insert(new_type_symbol_id, (template_symbol.id, substitutions.clone()));
+                    self.analyzer.symbol_table.registry.struct_template_map.insert(new_type_symbol_id, (template_symbol.id, substitutions.clone()));
                     self.analyzer.symbol_table.current_scope_id = original_scope;
 
                     let mir_node = MIRNode {

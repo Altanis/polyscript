@@ -5,7 +5,9 @@ use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind};
@@ -229,23 +231,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
             let type_id = ty.get_base_symbol();
-            
+
+            let (template_id, concrete_args, is_monomorphization) =
+                if let Some((template, subs)) = self.analyzer.symbol_table.registry.struct_template_map.get(&type_id) {
+                    (*template, subs.values().cloned().collect(), true)
+                } else if let Type::Base { symbol, args } = ty {
+                    (*symbol, args.clone(), false)
+                } else {
+                    (type_id, vec![], false)
+                };
+
             if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
-                && let Some(impls_for_type) = impls_for_trait.get(&type_id)
+                && let Some(impls_for_type) = impls_for_trait.get(&template_id)
             {
+                let reconstructed_ty_for_check = Type::Base { symbol: template_id, args: concrete_args.clone() };
+                
                 let applicable_impl = impls_for_type.iter().find(|imp| {
-                    self.check_trait_impl_applicability_mir(ty, imp)
+                    self.check_trait_impl_applicability_mir(&reconstructed_ty_for_check, imp)
                 });
 
-                if let Some(imp) = applicable_impl
-                    && let Some(drop_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id)
-                    && let Some(drop_fn_val) = self.functions.get(&drop_fn_symbol.id).copied()
-                {
+                if let Some(imp) = applicable_impl {
+                    let generic_drop_fn_symbol = self.analyzer.symbol_table.find_value_symbol_in_scope("drop", imp.impl_scope_id).unwrap();
+                    let generic_drop_fn_type_id = generic_drop_fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+
+                    let drop_fn_val = if is_monomorphization {
+                        let mangled_name = self.mangle_monomorph_name(generic_drop_fn_type_id, &concrete_args);
+                        self.module.get_function(&mangled_name).unwrap()
+                    } else {
+                        self.functions.get(&generic_drop_fn_symbol.id).copied().unwrap()
+                    };
+
                     let var_ptr = self.variables.get(&value_id).unwrap();
 
                     if self.analyzer.is_heap_type(ty) {
                         let rc_ptr = self.builder.build_load(self.context.ptr_type(AddressSpace::default()), *var_ptr, "rc_ptr_for_drop").unwrap().into_pointer_value();
-
                         let inner_type = match ty {
                             Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
                             _ => unreachable!(),
@@ -269,7 +288,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn mangle_name(&self, ty: &Type) -> String {
+    fn mangle_monomorph_name<I>(&self, id: TypeSymbolId, concrete_types: I) -> String
+    where
+        I: IntoIterator,
+        I::Item: Borrow<Type>
+    {
+        let mut out = String::new();
+        write!(&mut out, "#{}", id).unwrap();
+
+        let mut it = concrete_types.into_iter().peekable();
+        if it.peek().is_some() {
+            out.push('_');
+        }
+        
+        for (i, ty) in it.enumerate() {
+            if i > 0 {
+                out.push('_');
+            }
+
+            let s = self.analyzer.symbol_table.display_type(ty.borrow());
+            out.push_str(&s);
+        }
+
+        out
+    }
+
+    fn mangle_type_name(&self, ty: &Type) -> String {
         self.analyzer.symbol_table.display_type(ty).replace(|c: char| !c.is_alphanumeric(), "_")
     }
 
@@ -383,7 +427,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return *repr;
         }
 
-        let type_name_mangled = self.mangle_name(ty);
+        let type_name_mangled = self.mangle_type_name(ty);
         let llvm_data_type = self.map_semantic_type(ty).unwrap();
 
         let rc_header_type = self.get_rc_header_type();
@@ -1207,7 +1251,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_heap_expression(&mut self, inner_expr: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
         let inner_type = inner_expr.type_id.as_ref().unwrap();
-        let mangled_name = self.mangle_name(inner_type);
+        let mangled_name = self.mangle_type_name(inner_type);
         let rc_repr = self.wrap_in_rc(inner_type);
 
         let size = rc_repr.rc_struct_type.size_of().unwrap();
