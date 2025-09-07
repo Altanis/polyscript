@@ -1,4 +1,5 @@
 // private field and public fn of same name throws err
+// escape analysis for immediates
 // stdlib
     // math + vec + string + io + hashmap
 // default traits such as Drop, Clone, Default, ToString
@@ -6,30 +7,25 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Point<T> {
-    x: T;
+struct Iterable {}
+
+trait Iterator {
+    type Item;
+
+    fn next(&self): Self.Item;
 }
 
-impl Point<int> {
-    const precise: bool = false;
-    type Implementor = int;
+impl Iterator for Iterable {
+    type Item = int;
 
-    fn default(): Self {
-        Point { x: 1 }
+    fn next(&self): Self.Item {
+        return 3;
     }
 }
 
-impl Point<float> {
-    const precise: bool = true;
-    type Implementor = float;
-
-    fn default(): Self {
-        Point { x: 1.0 }
-    }
+fn next<I: Iterator>(x: &I): [I as Iterator].Item {
+    return x.next();
 }
 
-let val = [Point<int>].precise;
-let val2: [Point<float>].Implementor = 3.0;
-
-let p1: Point<int> = [Point<int>].default();
-let p2: Point<float> = [Point<float>].default();
+let iterator = Iterable {};
+let x: int = next(&iterator);

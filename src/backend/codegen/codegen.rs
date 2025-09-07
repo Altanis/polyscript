@@ -236,12 +236,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn is_heap_type(&self, ty: &Type) -> bool {
         if let Type::Base { symbol, .. } = ty {
             let sym = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if matches!(sym.kind, TypeSymbolKind::Primitive(PrimitiveKind::StaticString)) {
+            if matches!(sym.kind, TypeSymbolKind::Primitive(_)) {
                 return false;
             }
         }
-        
-        self.analyzer.is_heap_type(ty)
+
+        matches!(ty, Type::Base { .. })
     }
 
     fn is_rvalue(&self, expr: &MIRNode) -> bool {
@@ -1711,7 +1711,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let MIRNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
 
         let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id, name).unwrap();
-        let enum_llvm_type = self.map_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
+        let enum_llvm_type = self.map_inner_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
 
         let TypeSymbolKind::Enum((scope_id, _)) = enum_type_symbol.kind else { unreachable!(); };
 
@@ -2192,8 +2192,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    fn compile_const_initializer(&mut self, node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
+        match &node.kind {
+            MIRNodeKind::IntegerLiteral(v) => Some(self.compile_integer_literal(*v)),
+            MIRNodeKind::FloatLiteral(v) => Some(self.compile_float_literal(*v)),
+            MIRNodeKind::BooleanLiteral(v) => Some(self.compile_bool_literal(*v)),
+            MIRNodeKind::CharLiteral(v) => Some(self.compile_char_literal(*v)),
+            MIRNodeKind::StringLiteral(v) => Some(self.compile_string_literal(v)),
+            _ => {
+                None
+            }
+        }
+    }
+
+    fn find_and_compile_string_literals(&mut self, stmt: &MIRNode) {
+        if let MIRNodeKind::StringLiteral(value) = &stmt.kind {
+            self.compile_string_literal(value);
+        }
+
+        for child in stmt.children() {
+            self.find_and_compile_string_literals(child);
+        }
+    }
+}
+
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_declarations_pass(&mut self, stmts: &'a [MIRNode]) -> Vec<&'a MIRNode> {
         let mut functions = vec![];
+
+        for stmt in stmts {
+            self.find_and_compile_string_literals(stmt);
+        }
 
         for stmt in stmts.iter() {
             self.compile_declaration_node(stmt, &mut functions);
@@ -2214,9 +2243,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
             MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
-            MIRNodeKind::VariableDeclaration { mutable: false, .. } => {
-                let init_val = self.compile_node(stmt).unwrap();
-                self.constants.insert(stmt.value_id.unwrap(), init_val);
+            MIRNodeKind::VariableDeclaration { mutable: false, initializer, .. } => {
+                let const_val = self.compile_const_initializer(initializer).unwrap();
+                self.constants.insert(stmt.value_id.unwrap(), const_val);
             },
             _ => {}
         }

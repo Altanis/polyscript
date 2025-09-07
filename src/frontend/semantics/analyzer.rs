@@ -1355,10 +1355,6 @@ impl SemanticAnalyzer {
         matches!(ty, Type::Reference { .. } | Type::MutableReference { .. })
     }
 
-    pub fn is_heap_type(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Base { .. })
-    }
-
     pub fn is_ancestor_of(&self, ancestor_id: ScopeId, child_id: ScopeId) -> bool {
         let mut current_id = Some(child_id);
         while let Some(id) = current_id {
