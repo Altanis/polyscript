@@ -955,27 +955,34 @@ impl<'a> MIRBuilder<'a> {
                     } 
                     
                     let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization {
-                        let concrete_types_for_mangling = if !generic_arguments.is_empty() {
-                            generic_arguments.clone()
-                        } else {
-                            let AstNodeKind::FieldAccess { left, .. } = &function.kind else { unreachable!() };
-                            
-                            let mut base_type = left.type_id.as_ref().unwrap().clone();
-                            if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
-                                base_type = self.substitute_type(&base_type, substitutions);
-                            }
-
-                            while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = &base_type {
-                                base_type = (**inner).clone();
-                            }
-
-                            if let Type::Base { args, .. } = base_type { args.clone() } else { unreachable!(); }
-                        };
-
-                        let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
-                        let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id).unwrap().id;
-                        let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name).unwrap().clone();
-                        (mangled_name, monomorphized_fn_value_symbol.id, monomorphized_fn_value_symbol.type_id.unwrap())
+                        (|| {
+                            let concrete_types_for_mangling = if !generic_arguments.is_empty() {
+                                generic_arguments.clone()
+                            } else {
+                                let AstNodeKind::FieldAccess { left, .. } = &function.kind else { return None; };
+                                
+                                let mut base_type = left.type_id.as_ref()?.clone();
+                                if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
+                                    base_type = self.substitute_type(&base_type, substitutions);
+                                }
+    
+                                while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = &base_type {
+                                    base_type = (**inner).clone();
+                                }
+    
+                                if let Type::Base { args, .. } = base_type { args.clone() } else { return None; }
+                            };
+    
+                            let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
+                            let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id)?.id;
+                            let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name)?.clone();
+                            let fn_type = monomorphized_fn_value_symbol.type_id?;
+                            Some((mangled_name, monomorphized_fn_value_symbol.id, fn_type))
+                        })()
+                        .unwrap_or_else(|| {
+                            let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
+                            (name, fn_value_symbol.id, fn_type.clone())
+                        })
                     } else {
                         let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
                         (name, fn_value_symbol.id, fn_type.clone())
