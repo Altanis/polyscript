@@ -35,7 +35,7 @@ impl<T> Vec<T> {
     }
 
     // Constructs a new vector with space for `n` elements.
-    public fn from_size(n: int): Self {
+    public fn from_capacity(n: int): Self {
         Self {
             size: 0,
             capacity: n,
@@ -124,7 +124,7 @@ impl<T> Vec<T> {
         let src = self.data + (idx + 1) * self.element_size;
         let size = self.element_size * (self.size - idx - 1);
 
-        if (size > 0) { memmove(dst, src, size); }
+        if (size > 0) { memmove(dst, src, size); };
         self.size -= 1;
 
         true
@@ -136,12 +136,14 @@ impl<T> Vec<T> {
         while (self.size > 0) {
             let last = self.size - 1;
             let dst = self.data + last * self.element_size;
+
             if #IS_REFCOUNTED#{T} {
                 let old_ptr: int = *(dst as &int);
                 decref(old_ptr);
             } else {
                 drop(*(dst as &mut T));
-            }
+            };
+
             self.size = last;
         }
     }
@@ -165,7 +167,7 @@ impl<T> Drop for Vec<T> {
     }
 }
 
-impl<T: Clone> Clone for Vec<T> {
+/*impl<T: Clone> Clone for Vec<T> {
     fn clone(&self): Self {
         let vec: Vec<T> = [Vec<T>].new();
         vec.reserve(self.size);
@@ -177,7 +179,7 @@ impl<T: Clone> Clone for Vec<T> {
         
         return vec;
     }
-}
+}*/
 
 // A structure representing a mutable, extensible String.
 struct String {
@@ -230,15 +232,22 @@ impl ToString for str {
 }
 
 fn print<T: ToString>(data: T) {
+
+}
+
+fn println<T: ToString>(data: T) {
     let string = [T as ToString].to_string(&data);
     for (let i = 0; i < string.length(); i += 1) {
         print_char(string.get(i));
     }
-}
-
-fn println<T: ToString>(data: T) {
-    print(data);
     print_char('\n');
 }
 
 println("Hello world!");
+
+struct Struct { x: Vec<char>; }
+
+fn chemicals(s: &mut Struct) {
+    let c = [Vec<char>].new();
+    s.x = c;
+}
