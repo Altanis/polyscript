@@ -6,7 +6,7 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-import { calloc, realloc, memcpy, memmove, free, decref, eprint, endproc, endproc, drop, strlen, strget } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -219,3 +219,17 @@ impl ToString for str {
         String.from_str(*self)
     }
 }
+
+fn print<T: ToString>(data: T) {
+    let string = [T as ToString].to_string(&data);
+    for (let i = 0; i < string.length(); i += 1) {
+        print_char(string.get(i));
+    }
+}
+
+fn println<T: ToString>(data: T) {
+    print(data);
+    print_char('\n');
+}
+
+println("Hello world!");

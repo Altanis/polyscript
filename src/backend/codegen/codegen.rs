@@ -299,11 +299,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_scope_drop(&mut self, scope_id: ScopeId) {
+    fn compile_scope_drop(&mut self, scope_id: ScopeId, moved_var_id: Option<ValueSymbolId>) {
         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
         for &value_id in scope.values.values() {
+            if moved_var_id == Some(value_id) {
+                continue;
+            }
+
             let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
             let ty = symbol.type_id.as_ref().unwrap();
+
+            if self.analyzer.is_copy_type(ty) {
+                continue;
+            }
+
             let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
 
             let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
@@ -554,14 +563,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
 
                     if self.analyzer.is_heap_type(field_semantic_type) {
-                        let field_rc_ptr = self.builder.build_extract_value(
+                        let field_val = self.builder.build_extract_value(
                             data_struct_val,
                             i as u32,
-                            &format!("{}_rc_ptr", field_name),
+                            &format!("{}_rc_ptr", field_name)
                         ).unwrap();
 
                         let decref = self.get_decref();
-                        self.builder.build_call(decref, &[field_rc_ptr.into()], &format!("decref_{}", field_name)).unwrap();
+                        self.builder.build_call(decref, &[field_val.into()], &format!("decref_{}", field_name)).unwrap();
                     }
                 }
             }
@@ -1358,6 +1367,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut last_val = None;
         let last_stmt_is_expr = stmts.last().is_some_and(|s| !matches!(s.kind, MIRNodeKind::ExpressionStatement(_)));
         let last_stmt_is_heap_expr = stmts.last().is_some_and(|s| !matches!(s.kind, MIRNodeKind::HeapExpression(_)));
+        
+        let moved_var_id = if last_stmt_is_expr {
+            get_base_variable(stmts.last().unwrap())
+        } else {
+            None
+        };
 
         for stmt in stmts {
             last_val = self.compile_node(stmt);
@@ -1376,7 +1391,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             
-            self.compile_scope_drop(scope_id);
+            self.compile_scope_drop(scope_id, moved_var_id);
         }
         
         last_val
@@ -2170,6 +2185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
                     let value = self.compile_node(expr).unwrap();
+                    let returned_var_id = get_base_variable(expr);
 
                     let expr_type = expr.type_id.as_ref().unwrap();
                     if self.analyzer.is_heap_type(expr_type) && !matches!(expr.kind, MIRNodeKind::HeapExpression(_)) {
@@ -2188,7 +2204,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let mut current_scope_id = Some(stmt.scope_id);
                     while let Some(scope_id) = current_scope_id {
                         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                        self.compile_scope_drop(scope_id);
+                        self.compile_scope_drop(scope_id, returned_var_id);
                         if scope.kind == ScopeKind::Function {
                             break;
                         }
@@ -2205,7 +2221,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let mut current_scope_id = Some(stmt.scope_id);
                     while let Some(scope_id) = current_scope_id {
                         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                        self.compile_scope_drop(scope_id);
+                        self.compile_scope_drop(scope_id, None);
                         if scope.kind == ScopeKind::Function {
                             break;
                         }
@@ -2231,7 +2247,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let mut current_scope_id = Some(stmt.scope_id);
                 while let Some(scope_id) = current_scope_id {
                     let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                    self.compile_scope_drop(scope_id);
+                    self.compile_scope_drop(scope_id, None);
 
                     if scope.kind == ScopeKind::ForLoop || scope.kind == ScopeKind::WhileLoop {
                         break;
@@ -2249,7 +2265,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let mut current_scope_id = Some(stmt.scope_id);
                 while let Some(scope_id) = current_scope_id {
                     let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                    self.compile_scope_drop(scope_id);
+                    self.compile_scope_drop(scope_id, None);
 
                     if scope.kind == ScopeKind::ForLoop || scope.kind == ScopeKind::WhileLoop {
                         break;
