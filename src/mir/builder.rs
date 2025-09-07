@@ -986,8 +986,27 @@ impl<'a> MIRBuilder<'a> {
                             let trait_type = trait_ty_node.as_ref().unwrap().type_id.as_ref().unwrap();
                             let trait_id = trait_type.get_base_symbol();
                             let concrete_type_id = concrete_base_type.get_base_symbol();
-                            
-                            if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
+
+                            if self.analyzer.is_copy_type(&concrete_base_type) {
+                                let clone_arg = arguments.get_mut(0).unwrap();
+                                let mir_arg = self.lower_node(clone_arg)?;
+
+                                match &clone_arg.type_id.as_ref().unwrap() {
+                                    Type::MutableReference { inner } | Type::Reference { inner } => {
+                                        return Some(MIRNode {
+                                            kind: MIRNodeKind::UnaryOperation {
+                                                operator: Operation::Dereference,
+                                                operand: Box::new(mir_arg),
+                                            },
+                                            span: node.span,
+                                            value_id: None,
+                                            type_id: Some(inner.as_ref().clone()),
+                                            scope_id: node.scope_id.unwrap()
+                                        });
+                                    },
+                                    _ => {}
+                                }
+                            } else if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
                                 && let Some(impls_for_type) = impls_for_trait.get(&concrete_type_id)
                                 && let Some(imp) = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_base_type, imp))
                             {
