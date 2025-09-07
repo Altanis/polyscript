@@ -1163,10 +1163,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let operand = self.compile_node(operand_node).unwrap();
         let is_float = operand.is_float_value();
         
-        let operand_type = operand_node.type_id.as_ref().unwrap();
-        let operand_data = if self.is_heap_type(operand_type) {
+        let operand_data = if self.is_heap_type(operand_node.type_id.as_ref().unwrap()) {
             let rc_ptr = operand.into_pointer_value();
-            let rc_repr = self.wrap_in_rc(operand_type);
+            let rc_repr = self.wrap_in_rc(operand_node.type_id.as_ref().unwrap());
             let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "data_ptr").unwrap();
             self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "data_val").unwrap()
         } else {
@@ -2051,8 +2050,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             (self.compile_node(arg).unwrap(), arg)
         }).collect();
 
+        let callee_type = function.type_id.as_ref().unwrap();
         let callee_value = self.compile_node(function).unwrap();
-        let closure_struct = callee_value.into_struct_value();
+        
+        let closure_struct = if self.is_heap_type(callee_type) && callee_value.is_pointer_value() {
+            let rc_ptr = callee_value.into_pointer_value();
+            let rc_repr = self.wrap_in_rc(callee_type);
+            let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap();
+            self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "fn.closure_struct").unwrap()
+        } else {
+            callee_value
+        }.into_struct_value();
 
         let fn_ptr_val = self.builder.build_extract_value(closure_struct, 0, "fn_ptr").unwrap();
         let env_ptr_val = self.builder.build_extract_value(closure_struct, 1, "env_ptr").unwrap();

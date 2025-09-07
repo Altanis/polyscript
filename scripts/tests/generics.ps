@@ -37,8 +37,8 @@ let vector: Vector2D<int> = Vector2D { x: 3, y: 4 };
 impl<T: TAddable> Vector2D<T> {
     public fn add(self, vector: Vector2D<T>): Vector2D<T> {
         return Vector2D {
-            x: self.x.add(vector.x),
-            y: self.y.add(vector.y)
+            x: [T as TAddable].add(self.x, vector.x),
+            y: [T as TAddable].add(self.x, vector.y)
         };
     }
 

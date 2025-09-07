@@ -15,7 +15,7 @@ impl Iterator for Iterable {
 }
 
 fn next<I: Iterator>(x: &I): [I as Iterator].Item {
-    return x.next();
+    return [I as Iterator].next(&x);
 }
 
 let iterator = Iterable {};

@@ -7,25 +7,8 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-struct Iterable {}
+let add = fn(x: int, y: int): int {
+    x + y
+};
 
-trait Iterator {
-    type Item;
-
-    fn next(&self): Self.Item;
-}
-
-impl Iterator for Iterable {
-    type Item = int;
-
-    fn next(&self): Self.Item {
-        return 3;
-    }
-}
-
-fn next<I: Iterator>(x: &I): [I as Iterator].Item {
-    return x.next();
-}
-
-let iterator = Iterable {};
-let x: int = next(&iterator);
+add(3, 4);
