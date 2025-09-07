@@ -152,23 +152,3 @@ impl<T: Clone> Clone for Vec<T> {
         return vec;
     }
 }
-
-struct Scalar { x: int; }
-struct Data { x: Scalar; }
-
-impl Drop for Data {
-    fn drop(&mut self) {
-        eprint("hi");
-    }
-}
-
-impl Drop for Scalar {
-    fn drop(&mut self) {
-        eprint("hi2");
-    }
-}
-
-{
-    let tensor: Vec<Data> = [Vec<Data>].new();
-    tensor.push(Data { x: Scalar { x: 3 } });
-}

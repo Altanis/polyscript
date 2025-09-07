@@ -1,4 +1,3 @@
-// frontend/semantics/analyzer.rs
 use crate::{frontend::syntax::ast::AstNode, utils::{error::*, kind::*}};
 use colored::*;
 use std::{collections::{BTreeMap, HashMap, HashSet, VecDeque}, rc::Rc};
@@ -313,6 +312,19 @@ impl SymbolTable {
                 )
                 .unwrap();
         }
+
+        let intrinsics_scope_id = table.get_next_scope_id();
+        let intrinsics_scope = Scope {
+            values: HashMap::new(),
+            types: HashMap::new(),
+            parent: Some(root_scope_id),
+            id: intrinsics_scope_id,
+            kind: ScopeKind::Block,
+            receiver_kind: None,
+            trait_id: None,
+        };
+        table.scopes.insert(intrinsics_scope_id, intrinsics_scope);
+        table.intrinsics_scope_id = intrinsics_scope_id;
 
         table.populate_intrinsics();
 
