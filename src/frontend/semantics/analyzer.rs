@@ -363,6 +363,7 @@ impl SymbolTable {
         self.current_scope_id = self.intrinsics_scope_id;
 
         let int_type = Type::new_base(self.find_type_symbol("int").unwrap().id);
+        let char_type = Type::new_base(self.find_type_symbol("char").unwrap().id);
         let str_type = Type::new_base(self.find_type_symbol("str").unwrap().id);
         let void_type = Type::new_base(self.find_type_symbol("void").unwrap().id);
         let never_type = Type::new_base(self.find_type_symbol("never").unwrap().id);
@@ -407,7 +408,11 @@ impl SymbolTable {
         add_intrinsic("decref", vec![int_type.clone()], void_type.clone());
         add_intrinsic("print", vec![str_type.clone()], void_type.clone());
         add_intrinsic("eprint", vec![str_type.clone()], void_type.clone());
+        add_intrinsic("print_char", vec![char_type.clone()], void_type.clone());
+        add_intrinsic("eprint_char", vec![char_type.clone()], void_type.clone());
         add_intrinsic("endproc", vec![int_type.clone()], never_type.clone());
+        add_intrinsic("strlen", vec![str_type.clone()], int_type.clone());
+        add_intrinsic("strget", vec![str_type.clone(), int_type.clone()], char_type.clone());
         let t_generic_id = self.add_type_symbol("#T_intrinsic_drop", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
         let t_type = Type::new_base(t_generic_id);
 

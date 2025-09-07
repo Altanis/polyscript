@@ -219,6 +219,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_type = i32_type.fn_type(&[file_ptr_type.into(), ptr_type.into()], true);
         self.module.add_function("fprintf", fn_type, None)
     }
+
+    fn get_c_strlen(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("strlen") {
+            return func;
+        }
+
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        self.module.add_function("strlen", fn_type, None)
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1875,12 +1886,47 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_call(fprintf, &[stderr.into(), format_str.as_pointer_value().into(), str_val.into()], "").unwrap();
                         None
                     },
+                    "print_char" => {
+                        let fprintf = self.get_c_fprintf();
+                        let stdout = self.get_stdout();
+                        let format_str = self.builder.build_global_string_ptr("%c", "oprint_char_fmt").unwrap();
+                        let char_val = compiled_args[0].into_int_value();
+                        let promoted_char = self.builder.build_int_z_extend(char_val, self.context.i32_type(), "promoted_char").unwrap();
+                        self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), promoted_char.into()], "").unwrap();
+                        None
+                    },
+                    "eprint_char" => {
+                        let fprintf = self.get_c_fprintf();
+                        let stderr = self.get_stderr();
+                        let format_str = self.builder.build_global_string_ptr("%c", "eprint_char_fmt").unwrap();
+                        let char_val = compiled_args[0].into_int_value();
+                        let promoted_char = self.builder.build_int_z_extend(char_val, self.context.i32_type(), "promoted_char").unwrap();
+                        self.builder.build_call(fprintf, &[stderr.into(), format_str.as_pointer_value().into(), promoted_char.into()], "").unwrap();
+                        None
+                    },
                     "endproc" => {
                         let func = self.get_c_exit();
                         let code = self.builder.build_int_truncate(compiled_args[0].into_int_value(), self.context.i32_type(), "exit_code").unwrap();
                         self.builder.build_call(func, &[code.into()], "").unwrap();
                         self.builder.build_unreachable().unwrap();
                         None
+                    },
+                    "strlen" => {
+                        let func = self.get_c_strlen();
+                        let str_ptr = compiled_args[0].into_pointer_value();
+                        let call = self.builder.build_call(func, &[str_ptr.into()], "strlen_call").unwrap();
+                        call.try_as_basic_value().left()
+                    },
+                    "strget" => {
+                        let str_ptr = compiled_args[0].into_pointer_value();
+                        let index = compiled_args[1].into_int_value();
+                        
+                        let char_ptr = unsafe {
+                            self.builder.build_gep(self.context.i8_type(), str_ptr, &[index], "char_ptr").unwrap()
+                        };
+                        let char_val = self.builder.build_load(self.context.i8_type(), char_ptr, "char_val").unwrap();
+
+                        Some(char_val)
                     },
                     "drop" => {
                         let value_to_drop_node = &arguments[0];

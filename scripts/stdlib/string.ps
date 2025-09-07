@@ -1,0 +1,58 @@
+import { strlen, strget } from "@intrinsics";
+import { Vec } from "stdlib/vec.ps";
+
+// A structure representing a mutable, extensible String.
+struct String {
+    // The internal representation 
+    private chars: Vec<char>;
+}
+
+impl String {
+    // Constructs a new string. This function does not reserve any memory for the string.
+    public fn new(): Self {
+        Self {
+            chars: [Vec<char>].new()
+        }
+    }
+
+    // Constructs a new string with space for `n` elements.
+    public fn from_size(n: int): Self {
+        Self {
+            chars: [Vec<char>].from_size(n)
+        }
+    }
+
+    // Constructs a new string from a constant `str`.
+    public fn from_str(s: str): Self {
+        let len = strlen(s);
+
+        let chars = [Vec<char>].from_size(len);
+        for (let i = 0; i < len; i += 1) {
+            chars.push(strget(s, i));
+        }
+
+        Self { chars }
+    }
+
+    // Gets the length of the string.
+    public fn length(&self): int {
+        self.chars.length()
+    }
+
+    // Gets the `i`-th character in the string.
+    public fn get(&self, i: int): char {
+        *self.chars.get(i)
+    }
+}
+
+trait ToString {
+    fn to_string(&self): String;
+}
+
+impl ToString for str {
+    fn to_string(&self): String {
+        String.from_str(*self)
+    }
+}
+
+export { String, ToString };

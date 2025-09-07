@@ -124,6 +124,11 @@ impl<T> Vec<T> {
             self.remove(0);
         }
     }
+
+    // Gets the length of the vector.
+    public fn length(&self): int {
+        self.size
+    }
 }
 
 impl<T> Drop for Vec<T> {
@@ -152,3 +157,5 @@ impl<T: Clone> Clone for Vec<T> {
         return vec;
     }
 }
+
+export { Vec };

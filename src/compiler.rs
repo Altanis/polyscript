@@ -342,12 +342,13 @@ impl Compiler {
     fn link_imports_for_module(&mut self, path: &Path) -> Result<(), BoxedError> {
         let mut dependencies = Vec::new();
         let module = self.modules.get(path).unwrap();
+        let importing_module_scope_id = module.scope_id;
+
         if let AstNodeKind::Program(stmts) = &module.ast.kind {
             for stmt in stmts {
-                if let AstNodeKind::ImportStatement { file_path, identifiers, .. } = &stmt.kind {
-                    if file_path == "@intrinsics" {
-                        let importing_module = self.modules.get(path).unwrap();
-                        self.analyzer.symbol_table.current_scope_id = importing_module.scope_id;
+                if let AstNodeKind::ImportStatement { file_path: rel_path_str, identifiers, .. } = &stmt.kind {
+                    if rel_path_str == "@intrinsics" {
+                        self.analyzer.symbol_table.current_scope_id = importing_module_scope_id;
 
                         let intrinsics_scope_id = self.analyzer.symbol_table.intrinsics_scope_id;
                         for ident_node in identifiers {
@@ -366,23 +367,44 @@ impl Compiler {
                             }
 
                             let name_id = self.analyzer.symbol_table.value_names.intern(&name);
-                            self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().values.insert(name_id, value_sym.unwrap().id);
+                            self.analyzer.symbol_table.get_scope_mut(importing_module_scope_id).unwrap().values.insert(name_id, value_sym.unwrap().id);
                         }
                         
                         continue;
                     }
 
-                    let mut dep_path = path.parent().unwrap().to_path_buf();
-                    dep_path.push(file_path);
-                    let canonical_dep_path = fs::canonicalize(&dep_path).unwrap();
+                    let canonical_dep_path = if let Some(stdlib_prefix_path) = rel_path_str.strip_prefix("stdlib/") {
+                        if let Some(stdlib_path) = &self.config.stdlib_path {
+                            let mut dep_path = stdlib_path.clone();
+                            dep_path.push(stdlib_prefix_path);
+                            fs::canonicalize(&dep_path).unwrap_or_else(|_| {
+                                panic!("Failed to resolve stdlib import path: {:?}", dep_path)
+                            })
+                        } else {
+                            return Err(self.analyzer.create_error(
+                                ErrorKind::InvalidImport(
+                                    rel_path_str.clone(),
+                                    "Standard library not linked. Use the --stdlib flag.".to_string(),
+                                ),
+                                stmt.span,
+                                &[stmt.span],
+                            ));
+                        }
+                    } else {
+                        let mut dep_path = path.parent().unwrap().to_path_buf();
+                        dep_path.push(rel_path_str);
+                        fs::canonicalize(&dep_path).unwrap_or_else(|_| {
+                            panic!("Failed to resolve import path: {:?}", dep_path)
+                        })
+                    };
+
                     dependencies.push((canonical_dep_path, identifiers.clone()));
                 }
             }
         }
 
         for (dep_path, identifiers) in dependencies {
-            let importing_module = self.modules.get(path).unwrap();
-            self.analyzer.symbol_table.current_scope_id = importing_module.scope_id;
+            self.analyzer.symbol_table.current_scope_id = importing_module_scope_id;
 
             let imported_module = self.modules.get(&dep_path).unwrap();
 
@@ -399,12 +421,12 @@ impl Compiler {
 
                 if let Some(val_id) = exported_value_id {
                     let name_id = self.analyzer.symbol_table.value_names.intern(&name);
-                    self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().values.insert(name_id, *val_id);
+                    self.analyzer.symbol_table.get_scope_mut(importing_module_scope_id).unwrap().values.insert(name_id, *val_id);
                 }
 
                 if let Some(type_id) = exported_type_id {
                     let name_id = self.analyzer.symbol_table.type_names.intern(&name);
-                    self.analyzer.symbol_table.get_scope_mut(importing_module.scope_id).unwrap().types.insert(name_id, *type_id);
+                    self.analyzer.symbol_table.get_scope_mut(importing_module_scope_id).unwrap().types.insert(name_id, *type_id);
                 }
             }
         }

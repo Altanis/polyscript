@@ -1,0 +1,14 @@
+import { print_char, eprint_char } from "@intrinsics";
+import { String, ToString } from "stdlib/vec.ps";
+
+fn print<T: ToString>(data: T) {
+    let string = data.to_string();
+    for (let i = 0; i < string.length(); i += 1) {
+        print_char(string.get(i));
+    }
+}
+
+fn println<T: ToString>(data: T) {
+    print(data);
+    print_char('\n');
+}
