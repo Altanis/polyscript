@@ -9,7 +9,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbolId, ValueSymbolKind};
+use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind};
 use crate::utils::kind::Operation;
 
@@ -236,7 +236,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn is_heap_type(&self, ty: &Type) -> bool {
         if let Type::Base { symbol, .. } = ty {
             let sym = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if matches!(sym.kind, TypeSymbolKind::Primitive(_)) {
+            if matches!(sym.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. }) {
                 return false;
             }
         }
@@ -834,7 +834,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .collect::<String>()
     }
 
-    fn find_trait_fn(&mut self, instance_type: &Type, trait_name: &str, fn_name: &str, rhs_type: Option<&Type>) -> Option<FunctionValue<'ctx>> {
+    fn find_trait_fn_symbol(&mut self, instance_type: &Type, trait_name: &str, fn_name: &str, rhs_type: Option<&Type>) -> Option<&'a ValueSymbol> {
         let trait_id = *self.analyzer.trait_registry.default_traits.get(trait_name)?;
         let type_id = instance_type.get_base_symbol();
 
@@ -853,11 +853,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         })?;
 
-        let fn_symbol = self
-            .analyzer
-            .symbol_table
-            .find_value_symbol_in_scope(fn_name, applicable_impl.impl_scope_id)?;
-            
+        self.analyzer.symbol_table.find_value_symbol_in_scope(fn_name, applicable_impl.impl_scope_id)
+    }
+
+    fn find_trait_fn(&mut self, instance_type: &Type, trait_name: &str, fn_name: &str, rhs_type: Option<&Type>) -> Option<FunctionValue<'ctx>> {
+        let fn_symbol = self.find_trait_fn_symbol(instance_type, trait_name, fn_name, rhs_type)?;
         self.functions.get(&fn_symbol.id).copied()
     }
 }
@@ -1160,6 +1160,39 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
     
+        let operand_type = operand_node.type_id.as_ref().unwrap();
+        if !self.is_primitive(operand_type) && let Some((trait_name, _)) = operator.to_trait_data() {
+            let fn_name = self.trait_name_to_fn_name(&trait_name);
+            let callee_symbol = self.find_trait_fn_symbol(operand_type, &trait_name, &fn_name, None).unwrap();
+            let callee = *self.functions.get(&callee_symbol.id).unwrap();
+
+            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let callee_type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type_id).unwrap();
+
+            let return_type = if let TypeSymbolKind::FunctionSignature { return_type, .. } = &callee_type_symbol.kind {
+                return_type
+            } else {
+                unreachable!();
+            };
+
+            let use_rvo = self.is_rvo_candidate(return_type);
+            let operand = self.compile_node(operand_node).unwrap();
+            let mut args: Vec<BasicMetadataValueEnum> = vec![operand.into()];
+            
+            if use_rvo {
+                let return_llvm_type = self.map_semantic_type(return_type).unwrap();
+                let rvo_ptr = self.builder.build_alloca(return_llvm_type, "unary.op.rvo.ret.ptr").unwrap();
+                args.insert(0, rvo_ptr.into());
+                
+                self.builder.build_call(callee, &args, "").unwrap();
+                let loaded_val = self.builder.build_load(return_llvm_type, rvo_ptr, "unary.op.rvo.load").unwrap();
+                return Some(loaded_val);
+            } else {
+                let call = self.builder.build_call(callee, &args, &format!("{}_call", fn_name)).unwrap();
+                return call.try_as_basic_value().left();
+            }
+        }
+    
         let operand = self.compile_node(operand_node).unwrap();
         let is_float = operand.is_float_value();
         
@@ -1254,13 +1287,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         
         if !self.is_primitive(left_type) && let Some((trait_name, _)) = operator.to_trait_data() {
             let fn_name = self.trait_name_to_fn_name(&trait_name);
-            let callee = self.find_trait_fn(left_type, &trait_name, &fn_name, Some(right_type)).unwrap();
+            let callee_symbol = self.find_trait_fn_symbol(left_type, &trait_name, &fn_name, Some(right_type)).unwrap();
+            let callee = *self.functions.get(&callee_symbol.id).unwrap();
+
+            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let callee_type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type_id).unwrap();
+
+            let return_type = if let TypeSymbolKind::FunctionSignature { return_type, .. } = &callee_type_symbol.kind {
+                return_type
+            } else {
+                unreachable!();
+            };
+
+            let use_rvo = self.is_rvo_candidate(return_type);
 
             let left = self.compile_node(left_node).unwrap();
             let right = self.compile_node(right_node).unwrap();
-
-            let call = self.builder.build_call(callee, &[left.into(), right.into()], &format!("{}_call", fn_name)).unwrap();
-            return call.try_as_basic_value().left();
+            
+            let mut args: Vec<BasicMetadataValueEnum> = vec![left.into(), right.into()];
+            
+            if use_rvo {
+                let return_llvm_type = self.map_semantic_type(return_type).unwrap();
+                let rvo_ptr = self.builder.build_alloca(return_llvm_type, "op.rvo.ret.ptr").unwrap();
+                args.insert(0, rvo_ptr.into());
+                
+                self.builder.build_call(callee, &args, "").unwrap();
+                let loaded_val = self.builder.build_load(return_llvm_type, rvo_ptr, "op.rvo.load").unwrap();
+                return Some(loaded_val);
+            } else {
+                let call = self.builder.build_call(callee, &args, &format!("{}_call", fn_name)).unwrap();
+                return call.try_as_basic_value().left();
+            }
         }
 
         if operator.is_assignment() {
