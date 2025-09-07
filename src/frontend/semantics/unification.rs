@@ -231,7 +231,7 @@ impl SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
-    fn check_impl_generic_constraints(
+    pub fn check_impl_generic_constraints(
         &mut self,
         generic_params: &[TypeSymbolId],
         substitutions: &HashMap<TypeSymbolId, Type>,

@@ -1,4 +1,3 @@
-// mir/builder.rs
 use std::{borrow::Borrow, collections::{BTreeMap, HashMap, HashSet}, fmt::Write, rc::Rc};
 
 use colored::Colorize;
@@ -154,9 +153,8 @@ impl<'a> MIRBuilder<'a> {
             let instantiations_clone = self.monomorphization_ctx.instantiations.clone();
             
             for (template_symbol_id, specializations) in instantiations_clone.iter() {
-                let template_symbol = self.analyzer.symbol_table.get_type_symbol(*template_symbol_id).unwrap();
+                let template_symbol = self.analyzer.symbol_table.get_type_symbol(*template_symbol_id).unwrap().clone();
 
-                // Propagate through inherent implementations
                 if let TypeSymbolKind::Struct((_, inherent_impls)) = &template_symbol.kind {
                     let inherent_impls_clone = inherent_impls.clone();
 
@@ -207,6 +205,11 @@ impl<'a> MIRBuilder<'a> {
                             }
 
                             if !consistent || impl_substitutions.is_empty() {
+                                continue;
+                            }
+
+                            let hash_map_substitutions: HashMap<_, _> = impl_substitutions.iter().map(|(k, v)| (*k, v.clone())).collect();
+                            if !self.analyzer.check_impl_generic_constraints(&imp.generic_params, &hash_map_substitutions).unwrap_or(false) {
                                 continue;
                             }
 
@@ -263,6 +266,11 @@ impl<'a> MIRBuilder<'a> {
                                 }
 
                                 if !is_applicable || impl_substitutions.is_empty() {
+                                    continue;
+                                }
+
+                                let hash_map_substitutions: HashMap<_, _> = impl_substitutions.iter().map(|(k, v)| (*k, v.clone())).collect();
+                                if !self.analyzer.check_impl_generic_constraints(&trait_impl.impl_generic_params, &hash_map_substitutions).unwrap_or(false) {
                                     continue;
                                 }
 
