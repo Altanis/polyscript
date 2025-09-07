@@ -977,6 +977,7 @@ impl<'a> MIRBuilder<'a> {
                     if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone()
                         && let AstNodeKind::FieldAccess { left, .. } = &function.kind
                         && let AstNodeKind::PathQualifier { ty: generic_ty_node, tr: trait_ty_node, .. } = &left.kind
+                        && trait_ty_node.is_some()
                     {
                         let generic_base_type = generic_ty_node.type_id.as_ref().unwrap();
                         let concrete_base_type = self.substitute_type(generic_base_type, substitutions);
