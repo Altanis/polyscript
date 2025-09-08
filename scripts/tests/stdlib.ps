@@ -239,3 +239,124 @@ fn println<T: ToString>(data: T) {
 }
 
 println("Hello world.");
+
+
+
+
+
+
+import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, print_int, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
+
+const nullptr: int = 0x0;
+
+struct Vec<T> {
+    public size: int;
+    private capacity: int;
+    private element_size: int;
+    private data: int;
+}
+
+impl<T> Vec<T> {
+    public fn from_capacity(n: int): Self {
+        Self {
+            size: 0,
+            capacity: n,
+            element_size: sizeof T,
+            data: if (n == 0) { nullptr } else { calloc(n, sizeof T) }
+        }
+    }
+
+    public fn reserve(&mut self, new_capacity: int): bool {
+        if (new_capacity <= self.capacity) { print_int(new_capacity); print_int(self.capacity); return false; };
+
+        let bytes = self.element_size * new_capacity;
+        let new_data = realloc(self.data, bytes);
+        if (new_data == nullptr) { return false; };
+
+        self.data = new_data;
+        self.capacity = new_capacity;
+
+        true
+    }
+
+    public fn push(&mut self, element: T) {
+        eprint("aint it.\n");
+        print_int(self.size);
+        print_int(self.capacity);
+        if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
+            eprint("oom: couldn't reserve memory for vector\n");
+            endproc(1);
+        };
+
+        let dst = self.data + self.size * self.element_size;
+        memcpy(dst, (&element) as int, self.element_size);
+        self.size += 1;
+    }
+
+    public fn get(&self, idx: int): &T {
+        if (idx < 0 || idx >= self.size) {
+            eprint("oob access in vector\n");
+            endproc(1);
+        };
+
+        (self.data + idx * self.element_size) as &T
+    }
+
+    public fn length(&self): int {
+        self.size
+    }
+}
+
+struct String {
+    private chars: Vec<char>;
+}
+
+impl String {
+    public fn from_capacity(n: int): Self {
+        Self { chars: [Vec<char>].from_capacity(n) }
+    }
+    
+    public fn from_str(s: str): Self {
+        let len = strlen(s);
+        eprint(s);
+        print_int(len);
+
+        let chars = [Vec<char>].from_capacity(len);
+        print_int(chars.size);
+
+        for (let i = 0; i < len; i += 1) {
+            let c = strget(s, i);
+            chars.push(c);
+        }
+
+        Self { chars }
+    }
+
+    public fn length(&self): int {
+        self.chars.length()
+    }
+
+    public fn get(&self, i: int): char {
+        *self.chars.get(i)
+    }
+}
+
+trait ToString {
+    fn to_string(&self): String;
+}
+
+impl ToString for str {
+    fn to_string(&self): String {
+        String.from_str(*self)
+    }
+}
+
+fn println(data: str) {
+    let string = [str as ToString].to_string(&data);
+    for (let i = 0; i < string.length(); i += 1) {
+        print_char(string.get(i));
+    }
+    print_char('\n');
+}
+
+println("Hello world.\n");

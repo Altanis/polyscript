@@ -1988,6 +1988,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match instance_kind {
             ReferenceKind::Value => self.compile_node(instance_node).unwrap(),
             ReferenceKind::Reference | ReferenceKind::MutableReference => {
+                if let MIRNodeKind::UnaryOperation { operator: op, .. } = &instance_node.kind
+                    && (*op == Operation::ImmutableAddressOf || *op == Operation::MutableAddressOf)
+                {
+                    return self.compile_node(instance_node).unwrap();
+                }
+                
                 if self.is_rvalue(instance_node) {
                     let val = self.compile_node(instance_node).unwrap();
                     let alloca = self.builder.build_alloca(val.get_type(), "autoref.temp").unwrap();
