@@ -1038,7 +1038,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             },
             MIRNodeKind::FieldAccess { left, .. } => {
-                 let mut struct_ptr = self.compile_place_expression(left)?;
+                let mut struct_ptr = self.compile_place_expression(left)?;
     
                 let left_type = left.type_id.as_ref().unwrap();
                 let base_type = if let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = left_type {
@@ -1050,6 +1050,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 };
 
                 if self.is_heap_type(base_type) {
+                    let llvm_ptr_type = self.map_semantic_type(base_type).unwrap();
+                    struct_ptr = self.builder.build_load(llvm_ptr_type, struct_ptr, "rc_ptr.load").unwrap().into_pointer_value();
+                    
                     let rc_repr = self.wrap_in_rc(base_type);
                     struct_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, struct_ptr, 1, "rc.data_ptr").unwrap();
                 }
