@@ -47,3 +47,10 @@ let add = fn(x: int, y: int): int {
 add(3, 4);
 
 (fn() {})();
+
+let x = 5;
+fn clojure(y: int): int {
+    x + y
+}
+
+let z = clojure(4);

@@ -42,6 +42,7 @@ pub struct CodeGen<'a, 'ctx> {
     variables: HashMap<ValueSymbolId, PointerValue<'ctx>>,
     functions: HashMap<ValueSymbolId, FunctionValue<'ctx>>,
     constants: HashMap<ValueSymbolId, BasicValueEnum<'ctx>>,
+    closure_info: HashMap<ValueSymbolId, Vec<(ValueSymbolId, CaptureStrategy)>>,
 
     string_interner: NameInterner,
     string_literals: HashMap<StringLiteralId, PointerValue<'ctx>>,
@@ -918,7 +919,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return self.builder.build_load(llvm_ty, ptr, name).unwrap();
         }
 
-        if let Some(func) = self.functions.get(&value_id).cloned() {
+        if let ValueSymbolKind::Function(_, _) = &symbol.kind && let Some(func) = self.functions.get(&value_id).cloned() {
             let closure_struct_type = self.map_inner_semantic_type(ty).unwrap().into_struct_type();
             let closure_ptr = self.builder.build_alloca(closure_struct_type, &format!("{}_closure", name)).unwrap();
 
@@ -926,8 +927,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.build_store(fn_ptr_field, func.as_global_value().as_pointer_value()).unwrap();
 
             let env_ptr_field = self.builder.build_struct_gep(closure_struct_type, closure_ptr, 1, &format!("{}_env_ptr.addr", name)).unwrap();
-            let env_ptr_type = self.context.ptr_type(AddressSpace::default());
-            self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
+            
+            if let Some(captures) = self.closure_info.get(&value_id).cloned() {
+                let capture_types: Vec<_> = captures.iter().map(|(capture_id, strategy)| {
+                    let capture_symbol = self.analyzer.symbol_table.get_value_symbol(*capture_id).unwrap();
+                    let capture_type = capture_symbol.type_id.as_ref().unwrap();
+                    match strategy {
+                        CaptureStrategy::Copy => self.map_semantic_type(capture_type).unwrap(),
+                        CaptureStrategy::Reference | CaptureStrategy::MutableReference => self.context.ptr_type(AddressSpace::default()).into()
+                    }
+                }).collect();
+                let env_struct_type = self.context.struct_type(&capture_types, false);
+
+                let env_ptr = self.builder.build_malloc(env_struct_type, "env_alloc").unwrap();
+                
+                for (i, (capture_id, strategy)) in captures.iter().enumerate() {
+                    let capture_symbol = self.analyzer.symbol_table.get_value_symbol(*capture_id).unwrap();
+                    let capture_name = self.analyzer.symbol_table.get_value_name(capture_symbol.name_id);
+                    let field_ptr = self.builder.build_struct_gep(env_struct_type, env_ptr, i as u32, &format!("{}.addr", capture_name)).unwrap();
+                    
+                    match strategy {
+                        CaptureStrategy::Copy => {
+                            let value_to_store = self.compile_identifier(*capture_id, capture_symbol.type_id.as_ref().unwrap());
+                            self.builder.build_store(field_ptr, value_to_store).unwrap();
+                        },
+                        CaptureStrategy::Reference | CaptureStrategy::MutableReference => {
+                            let ptr_to_store = self.variables.get(capture_id).unwrap();
+                            self.builder.build_store(field_ptr, *ptr_to_store).unwrap();
+                        }
+                    }
+                }
+
+                self.builder.build_store(env_ptr_field, env_ptr).unwrap();
+            } else {
+                let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+                self.builder.build_store(env_ptr_field, env_ptr_type.const_null()).unwrap();
+            }
 
             return self.builder.build_load(closure_struct_type, closure_ptr, &format!("{}_closure.val", name)).unwrap();
         }
@@ -2244,6 +2279,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             variables: HashMap::new(),
             functions: HashMap::new(),
             constants: HashMap::new(),
+            closure_info: HashMap::new(),
             string_interner: NameInterner::new(),
             string_literals: HashMap::new(),
             continue_blocks: vec![],
@@ -2331,9 +2367,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         match &stmt.kind {
-            MIRNodeKind::Function { .. } => {
+            MIRNodeKind::Function { captures, .. } => {
                 self.compile_function_declaration(stmt);
                 functions.push(stmt);
+
+                let fn_id = stmt.value_id.unwrap();
+                if !captures.is_empty() {
+                    let info: Vec<_> = captures.iter().map(|c| {
+                        let MIRNodeKind::EnvironmentCapture { strategy, .. } = c.kind else { unreachable!() };
+                        (c.value_id.unwrap(), strategy)
+                    }).collect();
+                    self.closure_info.insert(fn_id, info);
+                }
             },
             MIRNodeKind::StructDeclaration { .. } => self.compile_struct_declaration(stmt),
             MIRNodeKind::EnumDeclaration { .. } => self.compile_enum_declaration(stmt),
