@@ -11,7 +11,7 @@ use std::fmt::Write;
 
 use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind};
-use crate::utils::kind::Operation;
+use crate::utils::kind::{Operation, ReferenceKind};
 
 pub type StringLiteralId = usize;
 
@@ -322,7 +322,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.functions.get(&drop_fn_symbol.id).copied().unwrap()
                 };
                 
-                let llvm_type = self.map_semantic_type(ty).unwrap();
+                let llvm_type = self.map_inner_semantic_type(ty).unwrap();
                 let arg_ptr = self.builder.build_alloca(llvm_type, "drop_arg_ptr").unwrap();
                 self.builder.build_store(arg_ptr, value).unwrap();
                 self.builder.build_call(drop_fn_val, &[arg_ptr.into()], "").unwrap();
@@ -1949,6 +1949,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(aggregate.into())
     }
 
+    fn compile_instance_argument(&mut self, instance_node: &MIRNode, instance_kind: ReferenceKind) -> BasicValueEnum<'ctx> {
+        match instance_kind {
+            ReferenceKind::Value => self.compile_node(instance_node).unwrap(),
+            ReferenceKind::Reference | ReferenceKind::MutableReference => {
+                if self.is_rvalue(instance_node) {
+                    let val = self.compile_node(instance_node).unwrap();
+                    let alloca = self.builder.build_alloca(val.get_type(), "autoref.temp").unwrap();
+                    self.builder.build_store(alloca, val).unwrap();
+                    alloca.as_basic_value_enum()
+                } else {
+                    self.compile_place_expression(instance_node).unwrap().as_basic_value_enum()
+                }
+            }
+        }
+    }
+
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         if let Some(fn_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) {
             if fn_symbol.is_intrinsic {
@@ -2103,13 +2119,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        let compiled_args: Vec<(BasicValueEnum, &MIRNode)> = arguments.iter().map(|arg| {
-            (self.compile_node(arg).unwrap(), arg)
-        }).collect();
-
         let callee_type = function.type_id.as_ref().unwrap();
-        let callee_value = self.compile_node(function).unwrap();
+        let Type::Base { symbol: fn_sig_id, .. } = callee_type else { unreachable!() };
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
+        let TypeSymbolKind::FunctionSignature { return_type, instance, .. } = &type_symbol.kind else { unreachable!() };
         
+        let mut final_args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+        let mut explicit_args = arguments;
+
+        let mut return_ptr = None;
+        let use_rvo = self.is_rvo_candidate(return_type);
+        if use_rvo {
+            let return_llvm_type = self.map_semantic_type(return_type).unwrap();
+            let ptr = self.builder.build_alloca(return_llvm_type, "rvo_ret_val").unwrap();
+            final_args.push(ptr.into());
+            return_ptr = Some(ptr);
+        }
+
+        if let Some(instance_kind) = instance {
+            let (instance_node, rest_args) = arguments.split_first().expect("Instance method call with no arguments");
+            let instance_arg = self.compile_instance_argument(instance_node, *instance_kind);
+            final_args.push(instance_arg.into());
+            explicit_args = rest_args;
+        }
+
+        for (i, arg_node) in explicit_args.iter().enumerate() {
+            let arg_val = self.compile_node(arg_node).unwrap();
+            let arg_type = arg_node.type_id.as_ref().unwrap();
+
+            if self.is_heap_type(arg_type) && !self.is_rvalue(arg_node) {
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[arg_val.into()], &format!("incref.arg{}", i)).unwrap();
+            }
+            final_args.push(arg_val.into());
+        }
+        
+        let callee_value = self.compile_node(function).unwrap();
         let closure_struct = if self.is_heap_type(callee_type) && callee_value.is_pointer_value() {
             let rc_ptr = callee_value.into_pointer_value();
             let rc_repr = self.wrap_in_rc(callee_type);
@@ -2121,41 +2166,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let fn_ptr_val = self.builder.build_extract_value(closure_struct, 0, "fn_ptr").unwrap();
         let env_ptr_val = self.builder.build_extract_value(closure_struct, 1, "env_ptr").unwrap();
-
+        
         let fn_ptr = fn_ptr_val.into_pointer_value();
         let env_ptr = env_ptr_val.into_pointer_value();
 
         let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
         let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
-        let fn_type_ast = function.type_id.as_ref().unwrap();
-
-        let Type::Base { symbol, .. } = fn_type_ast else { unreachable!() };
-        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-        let TypeSymbolKind::FunctionSignature { return_type, .. } = &type_symbol.kind else { unreachable!() };
-        let use_rvo = self.is_rvo_candidate(return_type);
-
-        let mut return_ptr = None;
-        if use_rvo {
-            let return_llvm_type = self.map_semantic_type(return_type).unwrap();
-            let ptr = self.builder.build_alloca(return_llvm_type, "rvo_ret_val").unwrap();
-            return_ptr = Some(ptr);
+        if is_closure {
+            final_args.insert(0, env_ptr.into());
         }
 
-        let mut final_args: Vec<_> = Vec::new();
-        
-        if is_closure { final_args.push(env_ptr.into()); }
-        if let Some(ptr) = return_ptr { final_args.push(ptr.into()); }
-        
-        for (i, (arg_val, arg_node)) in compiled_args.iter().enumerate() {
-            let arg_type = arg_node.type_id.as_ref().unwrap();
-            if self.is_heap_type(arg_type) && !self.is_rvalue(arg_node) {
-                let incref = self.get_incref();
-                self.builder.build_call(incref, &[(*arg_val).into()], &format!("incref.arg{}", i)).unwrap();
-            }
-            final_args.push((*arg_val).into());
-        }
-
-        let fn_type = self.map_semantic_fn_type(function.type_id.as_ref().unwrap(), is_closure);
+        let fn_type = self.map_semantic_fn_type(callee_type, is_closure);
         let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "call").unwrap();
 
         if use_rvo {
