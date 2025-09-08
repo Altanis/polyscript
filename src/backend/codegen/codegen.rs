@@ -2046,6 +2046,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), promoted_char.into()], "").unwrap();
                         None
                     },
+                    "print_int" => {
+                        let fprintf = self.get_c_fprintf();
+                        let stdout = self.get_stdout();
+                        let format_str = self.builder.build_global_string_ptr("%d\n", "oprint_int_fmt").unwrap();
+                        let char_val = compiled_args[0].into_int_value();
+                        let promoted_char = self.builder.build_int_z_extend(char_val, self.context.i32_type(), "int").unwrap();
+                        self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), promoted_char.into()], "").unwrap();
+                        None
+                    },
                     "eprint_char" => {
                         let fprintf = self.get_c_fprintf();
                         let stderr = self.get_stderr();
@@ -2127,6 +2136,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut final_args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
         let mut explicit_args = arguments;
 
+        let callee_value = self.compile_node(function).unwrap();
+        let closure_struct = if self.is_heap_type(callee_type) && callee_value.is_pointer_value() {
+            let rc_ptr = callee_value.into_pointer_value();
+            let rc_repr = self.wrap_in_rc(callee_type);
+            let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap();
+            self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "fn.closure_struct").unwrap()
+        } else {
+            callee_value
+        }.into_struct_value();
+        let fn_ptr_val = self.builder.build_extract_value(closure_struct, 0, "fn_ptr").unwrap();
+        let env_ptr_val = self.builder.build_extract_value(closure_struct, 1, "env_ptr").unwrap();
+        
+        let fn_ptr = fn_ptr_val.into_pointer_value();
+        let env_ptr = env_ptr_val.into_pointer_value();
+
+        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
+        let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
+        if is_closure {
+            final_args.insert(0, env_ptr.into());
+        }
+
         let mut return_ptr = None;
         let use_rvo = self.is_rvo_candidate(return_type);
         if use_rvo {
@@ -2152,28 +2182,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.build_call(incref, &[arg_val.into()], &format!("incref.arg{}", i)).unwrap();
             }
             final_args.push(arg_val.into());
-        }
-        
-        let callee_value = self.compile_node(function).unwrap();
-        let closure_struct = if self.is_heap_type(callee_type) && callee_value.is_pointer_value() {
-            let rc_ptr = callee_value.into_pointer_value();
-            let rc_repr = self.wrap_in_rc(callee_type);
-            let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap();
-            self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "fn.closure_struct").unwrap()
-        } else {
-            callee_value
-        }.into_struct_value();
-
-        let fn_ptr_val = self.builder.build_extract_value(closure_struct, 0, "fn_ptr").unwrap();
-        let env_ptr_val = self.builder.build_extract_value(closure_struct, 1, "env_ptr").unwrap();
-        
-        let fn_ptr = fn_ptr_val.into_pointer_value();
-        let env_ptr = env_ptr_val.into_pointer_value();
-
-        let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
-        let is_closure = if let ValueSymbolKind::Function(_, captures) = &fn_symbol.kind { !captures.is_empty() } else { false };
-        if is_closure {
-            final_args.insert(0, env_ptr.into());
         }
 
         let fn_type = self.map_semantic_fn_type(callee_type, is_closure);

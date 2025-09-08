@@ -1,4 +1,4 @@
-import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, print_int, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -40,7 +40,7 @@ impl<T> Vec<T> {
     // * Returns `true` if successful, `false` otherwise.
     // * This function returns false if `new_capacity` is less than or equal to the current capacity.
     public fn reserve(&mut self, new_capacity: int): bool {
-        if (new_capacity <= self.capacity) { return false; };
+        if (new_capacity <= self.capacity) { print_int(new_capacity); print_int(self.capacity); return false; };
 
         let bytes = self.element_size * new_capacity;
         let new_data = realloc(self.data, bytes);
@@ -193,6 +193,9 @@ impl String {
     // Constructs a new string from a constant `str`.
     public fn from_str(s: str): Self {
         let len = strlen(s);
+        eprint(s);
+        eprint_char('\n');
+        print_int(len);
         let chars = [Vec<char>].from_capacity(len);
 
         for (let i = 0; i < len; i += 1) {
