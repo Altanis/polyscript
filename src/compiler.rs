@@ -464,29 +464,22 @@ impl Compiler {
 
     fn lower_ast_to_mir<'s>(&'s mut self, compilation_order: &[PathBuf]) -> (MIRBuilder<'s>, MIRNode) {
         let mut builder = MIRBuilder::new(&mut self.analyzer);
-        let mut all_mir_stmts = vec![];
 
+        let mut program_stmts = vec![];
         for path in compilation_order {
-            let module = self.modules.get_mut(path).unwrap();
-            let mut module_mir = builder.build(&mut module.ast);
-            if let MIRNodeKind::Program(stmts) = &mut module_mir.kind {
-                all_mir_stmts.append(stmts);
+            let module = self.modules.remove(path).unwrap();
+            if let AstNodeKind::Program(stmts) = module.ast.kind {
+                program_stmts.extend(stmts);
             }
         }
 
-        let program_span = if let Some(last_path) = compilation_order.last() {
-            self.modules.get(last_path).unwrap().ast.span
-        } else {
-            Span::default()
+        let mut program_ast = AstNode {
+            kind: AstNodeKind::Program(program_stmts),
+            span: Span::default(),
+            value_id: None, type_id: None, scope_id: Some(0), id: 0
         };
 
-        let mir_program = MIRNode {
-            kind: MIRNodeKind::Program(all_mir_stmts),
-            span: program_span,
-            value_id: None,
-            type_id: None,
-            scope_id: 0,
-        };
+        let mir_program = builder.build(&mut program_ast);
 
         (builder, mir_program)
     }

@@ -1,5 +1,5 @@
 import { print_char, eprint_char } from "@intrinsics";
-import { String, ToString } from "stdlib/vec.ps";
+import { String, ToString } from "stdlib/string.ps";
 
 fn print<T: ToString>(data: T) {
     let string = [T as ToString].to_string(&data);
@@ -12,3 +12,5 @@ fn println<T: ToString>(data: T) {
     print(data);
     print_char('\n');
 }
+
+export { print, println };
