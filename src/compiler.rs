@@ -17,7 +17,7 @@ use crate::frontend::syntax::ast::{AstNode, AstNodeKind};
 use crate::frontend::syntax::lexer::Lexer;
 use crate::frontend::syntax::parser::Parser;
 use crate::mir::builder::MIRBuilder;
-use crate::mir::ir_node::{MIRNode, MIRNodeKind};
+use crate::mir::ir_node::MIRNode;
 use crate::utils::error::{BoxedError, ErrorKind};
 use crate::utils::kind::{Span, Token};
 
@@ -519,6 +519,10 @@ impl Compiler {
 
         let mut codegen = CodeGen::new(&context, &builder, &module, &self.analyzer);
         codegen.compile_program(&program);
+
+        if let Err(err) = module.verify() {
+            panic!("Module verification failed: {}", err);
+        }
 
         let mut obj_file_for_linking: Option<PathBuf> = None;
         let mut executable_target: Option<&EmitTarget> = None;

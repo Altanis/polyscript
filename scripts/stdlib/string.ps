@@ -3,7 +3,7 @@ import { Vec } from "stdlib/vec.ps";
 
 // A structure representing a mutable, extensible String.
 struct String {
-    // The internal representation 
+    // The internal representation of the string, in characters.
     private chars: Vec<char>;
 }
 
@@ -18,7 +18,7 @@ impl String {
         Self { chars: [Vec<char>].from_capacity(n) }
     }
     
-    // Constructs a new string from a constant `str`.
+    // Constructs a new string from a constant str `s`.
     public fn from_str(s: str): Self {
         let len = strlen(s);
         let chars = [Vec<char>].from_capacity(len);
@@ -26,6 +26,14 @@ impl String {
         for (let i = 0; i < len; i += 1) {
             chars.push(strget(s, i));
         }
+
+        Self { chars }
+    }
+
+    // Constructs a new string from a character `c`.
+    public fn from_char(c: char): Self {
+        let chars = [Vec<char>].from_capacity(1);
+        chars.push(c);
 
         Self { chars }
     }
@@ -48,6 +56,28 @@ trait ToString {
 impl ToString for str {
     fn to_string(&self): String {
         String.from_str(*self)
+    }
+}
+
+impl ToString for char {
+    fn to_string(&self): String {
+        String.from_char(*self)
+    }
+}
+
+impl ToString for bool {
+    fn to_string(&self): String {
+        if (*self) {
+            String.from_str("true")
+        } else {
+            String.from_str("false")
+        }
+    }
+}
+
+impl ToString for String {
+    fn to_string(&self): String {
+        *self
     }
 }
 
