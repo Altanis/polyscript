@@ -43,6 +43,20 @@ fn find_node_by_span(node: &AstNode, target_span: Span) -> Option<&AstNode> {
     None
 }
 
+fn find_node_by_span_mut(node: &mut AstNode, target_span: Span) -> Option<&mut AstNode> {
+    if node.span == target_span {
+        return Some(node);
+    }
+
+    for child in node.children_mut() {
+        if let Some(found) = find_node_by_span_mut(child, target_span) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
 
 impl<'a> MIRBuilder<'a> {
     pub fn new(analyzer: &'a mut SemanticAnalyzer) -> Self {
@@ -167,7 +181,7 @@ impl<'a> MIRBuilder<'a> {
         }
     }
 
-    fn propagate_monomorphizations(&mut self, program: &AstNode) {
+    fn propagate_monomorphizations(&mut self, program: &mut AstNode) {
         let mut changed = true;
         while changed {
             changed = false;
@@ -182,13 +196,13 @@ impl<'a> MIRBuilder<'a> {
                         .find(|vs| vs.type_id.as_ref().is_some_and(|ty| ty.get_base_symbol() == *template_symbol_id)).cloned()
                     && let Some(span) = value_symbol.span
                 {
-                    let mut func_node = find_node_by_span(program, span).unwrap().clone();
+                    let func_node = find_node_by_span_mut(program, span).unwrap();
                     
                     for specialization_map in specializations.iter() {
                         let old_ctx = self.monomorphization_ctx.substitution_ctx.replace(Rc::new(specialization_map.clone()));
                         
                         let total_instantiations_before = self.monomorphization_ctx.instantiations.values().map(|s| s.len()).sum::<usize>();
-                        self.collect_monomorphization_sites(&mut func_node);
+                        self.collect_monomorphization_sites(func_node);
                         let total_instantiations_after = self.monomorphization_ctx.instantiations.values().map(|s| s.len()).sum::<usize>();
 
                         if total_instantiations_after > total_instantiations_before {
@@ -524,7 +538,6 @@ impl<'a> MIRBuilder<'a> {
                         .collect();
 
                     *generic_arguments = ordered_args;
-                    println!("[{}] Insertion of function {} with {:?}", node.id, fn_symbol_id, &generic_arguments);
 
                     self.monomorphization_ctx
                         .instantiations
@@ -723,7 +736,6 @@ impl<'a> MIRBuilder<'a> {
 
 impl<'a> MIRBuilder<'a> {
     fn lower_node(&mut self, node: &mut AstNode) -> Option<MIRNode> {
-        println!("{}", node);
         let kind = match &mut node.kind {
             AstNodeKind::IntegerLiteral(v) => MIRNodeKind::IntegerLiteral(*v),
             AstNodeKind::FloatLiteral(v) => MIRNodeKind::FloatLiteral(*v),
@@ -972,7 +984,6 @@ impl<'a> MIRBuilder<'a> {
                         arguments: mir_arguments,
                     }
                 } else if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
-                    println!("[{}] Fn call for {} with gen_params {:?}.", node.id, fn_value_symbol.type_id.as_ref().unwrap().get_base_symbol(), &generic_arguments);
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
@@ -1033,7 +1044,6 @@ impl<'a> MIRBuilder<'a> {
                             Some((mangled_name, monomorphized_fn_value_symbol.id, fn_type))
                         })()
                         .unwrap_or_else(|| {
-                            println!("Fukuona Girl.");
                             let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
                             (name, fn_value_symbol.id, fn_type.clone())
                         })
