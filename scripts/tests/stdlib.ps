@@ -245,7 +245,8 @@ println("Hello world.");
 
 
 
-import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, print_int, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
+
+import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, endproc, endproc, drop, strlen, strget } from "@intrinsics";
 
 const nullptr: int = 0x0;
 
@@ -267,7 +268,7 @@ impl<T> Vec<T> {
     }
 
     public fn reserve(&mut self, new_capacity: int): bool {
-        if (new_capacity <= self.capacity) { print_int(new_capacity); print_int(self.capacity); return false; };
+        if (new_capacity <= self.capacity) { return false; };
 
         let bytes = self.element_size * new_capacity;
         let new_data = realloc(self.data, bytes);
@@ -280,9 +281,6 @@ impl<T> Vec<T> {
     }
 
     public fn push(&mut self, element: T) {
-        eprint("aint it.\n");
-        print_int(self.size);
-        print_int(self.capacity);
         if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
             eprint("oom: couldn't reserve memory for vector\n");
             endproc(1);
@@ -318,11 +316,7 @@ impl String {
     
     public fn from_str(s: str): Self {
         let len = strlen(s);
-        eprint(s);
-        print_int(len);
-
         let chars = [Vec<char>].from_capacity(len);
-        print_int(chars.size);
 
         for (let i = 0; i < len; i += 1) {
             let c = strget(s, i);
@@ -351,11 +345,15 @@ impl ToString for str {
     }
 }
 
-fn println(data: str) {
-    let string = [str as ToString].to_string(&data);
+fn print<T: ToString>(data: T) {
+    let string = [T as ToString].to_string(&data);
     for (let i = 0; i < string.length(); i += 1) {
         print_char(string.get(i));
     }
+}
+
+fn println<T: ToString>(data: T) {
+    print(data);
     print_char('\n');
 }
 

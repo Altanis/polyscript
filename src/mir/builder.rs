@@ -57,6 +57,28 @@ impl<'a> MIRBuilder<'a> {
             hoisted_declarations: vec![]
         }
     }
+
+    fn apply_substitutions(ty: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
+        match ty {
+            Type::Base { symbol, args } => {
+                if let Some(concrete_type) = substitutions.get(symbol) {
+                    return Self::apply_substitutions(concrete_type, substitutions);
+                }
+
+                let new_args = args
+                    .iter()
+                    .map(|arg| Self::apply_substitutions(arg, substitutions))
+                    .collect();
+
+                Type::Base {
+                    symbol: *symbol,
+                    args: new_args,
+                }
+            },
+            Type::Reference { inner } => Type::Reference { inner: Box::new(Self::apply_substitutions(inner, substitutions)) },
+            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(Self::apply_substitutions(inner, substitutions)) }
+        }
+    }
 }
 
 impl<'a> MIRBuilder<'a> {
@@ -154,6 +176,28 @@ impl<'a> MIRBuilder<'a> {
             
             for (template_symbol_id, specializations) in instantiations_clone.iter() {
                 let template_symbol = self.analyzer.symbol_table.get_type_symbol(*template_symbol_id).unwrap().clone();
+
+                if let TypeSymbolKind::FunctionSignature { .. } = &template_symbol.kind
+                    && let Some(value_symbol) = self.analyzer.symbol_table.registry.value_symbols.values()
+                        .find(|vs| vs.type_id.as_ref().is_some_and(|ty| ty.get_base_symbol() == *template_symbol_id)).cloned()
+                    && let Some(span) = value_symbol.span
+                {
+                    let mut func_node = find_node_by_span(program, span).unwrap().clone();
+                    
+                    for specialization_map in specializations.iter() {
+                        let old_ctx = self.monomorphization_ctx.substitution_ctx.replace(Rc::new(specialization_map.clone()));
+                        
+                        let total_instantiations_before = self.monomorphization_ctx.instantiations.values().map(|s| s.len()).sum::<usize>();
+                        self.collect_monomorphization_sites(&mut func_node);
+                        let total_instantiations_after = self.monomorphization_ctx.instantiations.values().map(|s| s.len()).sum::<usize>();
+
+                        if total_instantiations_after > total_instantiations_before {
+                            changed = true;
+                        }
+
+                        self.monomorphization_ctx.substitution_ctx = old_ctx;
+                    }
+                }
 
                 if let TypeSymbolKind::Struct((_, inherent_impls)) = &template_symbol.kind {
                     let inherent_impls_clone = inherent_impls.clone();
@@ -307,6 +351,12 @@ impl<'a> MIRBuilder<'a> {
         template_ty: &Type,
         substitutions: &mut HashMap<TypeSymbolId, Type>,
     ) {
+        let concrete_ty = if let Some(ctx_subs) = &self.monomorphization_ctx.substitution_ctx {
+            Self::apply_substitutions(concrete_ty, ctx_subs)
+        } else {
+            concrete_ty.clone()
+        };
+
         if let Type::Base { symbol: template_symbol, .. } = template_ty {
             let template_type_symbol = self
                 .analyzer
@@ -320,7 +370,7 @@ impl<'a> MIRBuilder<'a> {
             }
         }
 
-        match (concrete_ty, template_ty) {
+        match (&concrete_ty, template_ty) {
             (
                 Type::Base {
                     symbol: concrete_symbol,
@@ -474,6 +524,7 @@ impl<'a> MIRBuilder<'a> {
                         .collect();
 
                     *generic_arguments = ordered_args;
+                    println!("[{}] Insertion of function {} with {:?}", node.id, fn_symbol_id, &generic_arguments);
 
                     self.monomorphization_ctx
                         .instantiations
@@ -672,6 +723,7 @@ impl<'a> MIRBuilder<'a> {
 
 impl<'a> MIRBuilder<'a> {
     fn lower_node(&mut self, node: &mut AstNode) -> Option<MIRNode> {
+        println!("{}", node);
         let kind = match &mut node.kind {
             AstNodeKind::IntegerLiteral(v) => MIRNodeKind::IntegerLiteral(*v),
             AstNodeKind::FloatLiteral(v) => MIRNodeKind::FloatLiteral(*v),
@@ -920,6 +972,7 @@ impl<'a> MIRBuilder<'a> {
                         arguments: mir_arguments,
                     }
                 } else if let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id).cloned()) {
+                    println!("[{}] Fn call for {} with gen_params {:?}.", node.id, fn_value_symbol.type_id.as_ref().unwrap().get_base_symbol(), &generic_arguments);
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
@@ -954,7 +1007,7 @@ impl<'a> MIRBuilder<'a> {
                         needs_monomorphization = false;
                     } 
                     
-                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization {
+                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if dbg!(needs_monomorphization) {
                         (|| {
                             let concrete_types_for_mangling = if !generic_arguments.is_empty() {
                                 generic_arguments.clone()
@@ -980,6 +1033,7 @@ impl<'a> MIRBuilder<'a> {
                             Some((mangled_name, monomorphized_fn_value_symbol.id, fn_type))
                         })()
                         .unwrap_or_else(|| {
+                            println!("Fukuona Girl.");
                             let name = self.analyzer.symbol_table.get_value_name(fn_value_symbol.name_id).to_string();
                             (name, fn_value_symbol.id, fn_type.clone())
                         })

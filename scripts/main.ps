@@ -7,17 +7,7 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-import { print_int } from "@intrinsics";
+fn test<T>(x: T) {}
+fn no_test<T>(x: T) { test(x); }
 
-struct Scalar<T> {
-    public x: T;
-}
-
-impl<T> Scalar<T> {
-    fn new(x: T): Self {
-        Self { x }
-    }
-}
-
-let scalar = Scalar { x: 4 };
-print_int(scalar.x);
+no_test(3);
