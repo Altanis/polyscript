@@ -624,6 +624,10 @@ impl SemanticAnalyzer {
         if trait_id == clone_trait_id && self.is_copy_type(&resolved_type) {
             return Ok(true);
         }
+        
+        if matches!(resolved_type, Type::Reference { .. } | Type::MutableReference { .. }) {
+            return Ok(false);
+        }
 
         if self.is_uv(resolved_type.get_base_symbol()) {
             return Ok(false);
@@ -1486,6 +1490,28 @@ impl SemanticAnalyzer {
                             )?;
                         }
 
+                        for &generic_param_id in &fn_generic_param_ids {
+                            let generic_param_symbol = self.symbol_table.get_type_symbol(generic_param_id).unwrap().clone();
+                            let TypeSymbolKind::Generic(constraints) = &generic_param_symbol.kind else {
+                                continue;
+                            };
+
+                            if constraints.is_empty() {
+                                continue;
+                            }
+
+                            if let Some(concrete_type) = substitutions.get(&generic_param_id) {
+                                for &trait_id in constraints {
+                                    if !self.does_type_implement_trait(concrete_type, trait_id)? {
+                                        let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                                        let trait_name = self.symbol_table.get_type_name(trait_symbol.name_id);
+                                        let type_name = self.symbol_table.display_type(concrete_type);
+                                        return Err(self.create_error(ErrorKind::UnimplementedTrait(trait_name.to_string(), type_name), info.span, &[info.span]));
+                                    }
+                                }
+                            }
+                        }
+
                         let concrete_sig_params = sig_params.iter().map(|p| self.apply_substitution(p, &substitutions)).collect::<Vec<_>>();
                         let concrete_return = self.apply_substitution(sig_return, &substitutions);
 
@@ -1587,6 +1613,28 @@ impl SemanticAnalyzer {
                     &fn_generic_param_ids,
                     info,
                 )?;
+            }
+
+            for &generic_param_id in &fn_generic_param_ids {
+                let generic_param_symbol = self.symbol_table.get_type_symbol(generic_param_id).unwrap().clone();
+                let TypeSymbolKind::Generic(constraints) = &generic_param_symbol.kind else {
+                    continue;
+                };
+
+                if constraints.is_empty() {
+                    continue;
+                }
+
+                if let Some(concrete_type) = substitutions.get(&generic_param_id) {
+                    for &trait_id in constraints {
+                        if !self.does_type_implement_trait(concrete_type, trait_id)? {
+                            let trait_symbol = self.symbol_table.get_type_symbol(trait_id).unwrap();
+                            let trait_name = self.symbol_table.get_type_name(trait_symbol.name_id);
+                            let type_name = self.symbol_table.display_type(concrete_type);
+                            return Err(self.create_error(ErrorKind::UnimplementedTrait(trait_name.to_string(), type_name), info.span, &[info.span]));
+                        }
+                    }
+                }
             }
 
             let concrete_receiver = self.apply_substitution(expected_receiver_ty, &substitutions);
