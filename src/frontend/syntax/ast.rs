@@ -1,7 +1,7 @@
-use std::fmt::Write;
+use std::{collections::{BTreeMap, HashMap}, fmt::Write, rc::Rc};
 
 use crate::{
-    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, ValueSymbolId},
+    frontend::semantics::analyzer::{PrimitiveKind, ScopeId, SymbolTable, Type, TypeSymbolId, ValueSymbolId},
     utils::kind::*,
 };
 use colored::*;
@@ -150,7 +150,7 @@ pub enum AstNodeKind {
     FunctionCall {
         function: BoxedAstNode,
         arguments: Vec<AstNode>,
-        generic_arguments: Vec<Type>
+        monomorphized_generic_arguments: HashMap<Rc<BTreeMap<TypeSymbolId, Type>>, Vec<Type>>
     },
 
     TraitDeclaration {

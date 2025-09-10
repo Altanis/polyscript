@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use indexmap::IndexMap;
 
 use crate::{
@@ -228,7 +230,7 @@ impl Parser {
                     kind: AstNodeKind::FunctionCall {
                         function: boxed!(lhs),
                         arguments,
-                        generic_arguments: vec![]
+                        monomorphized_generic_arguments: HashMap::new()
                     },
                     type_id: None,
                     value_id: None,

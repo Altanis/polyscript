@@ -7,24 +7,10 @@
     // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-/*import { print_char } from "@intrinsics";
-
-trait Nightmare {
-    fn yep(&self);
+fn print<T>(x: T) {}
+fn println<T>(x: T) {
+    print(x);
 }
 
-impl Nightmare for char {
-    fn yep(&self) {
-        print_char(*self);
-        print_char('\n');
-    }
-}
-
-let c = 'e';
-[char as Nightmare].yep(&c);*/
-
-import { println } from "stdlib/io.ps";
-import { String } from "stdlib/string.ps";
-
-println("Hello");
-println(true);
+println("3");
+println('3');

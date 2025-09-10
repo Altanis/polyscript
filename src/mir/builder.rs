@@ -437,7 +437,7 @@ impl<'a> MIRBuilder<'a> {
         }
 
         match &mut node.kind {
-            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+            AstNodeKind::FunctionCall { function, arguments, monomorphized_generic_arguments } => {
                 let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) else { return; };
                 let Some(template_fn_type) = fn_value_symbol.type_id.as_ref() else { return; };
 
@@ -457,9 +457,13 @@ impl<'a> MIRBuilder<'a> {
                     && let AstNodeKind::FieldAccess { left, .. } = &function.kind
                     && let Some(instance_type) = &left.type_id
                 {
-                    let mut concrete_receiver_ty = instance_type;
+                    let mut concrete_receiver_ty = instance_type.clone();
+                    if let Some(subs) = &self.monomorphization_ctx.substitution_ctx {
+                        concrete_receiver_ty = Self::apply_substitutions(&concrete_receiver_ty, subs);
+                    }
+
                     while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = concrete_receiver_ty {
-                        concrete_receiver_ty = inner;
+                        concrete_receiver_ty = inner.as_ref().clone();
                     }
                 
                     let template_receiver_ty = &template_params[0];
@@ -469,7 +473,7 @@ impl<'a> MIRBuilder<'a> {
                     }
                 
                     self.collect_generic_mappings(
-                        concrete_receiver_ty,
+                        &concrete_receiver_ty,
                         base_template_receiver_ty,
                         &mut generic_id_to_concrete_type,
                     );
@@ -483,13 +487,21 @@ impl<'a> MIRBuilder<'a> {
 
                 for (arg_node, template_param) in arguments.iter().zip(params_to_zip.iter()) {
                     if let Some(concrete_type) = &arg_node.type_id {
-                        self.collect_generic_mappings(concrete_type, template_param, &mut generic_id_to_concrete_type);
+                        let mut final_concrete_type = concrete_type.clone();
+                        if let Some(subs) = &self.monomorphization_ctx.substitution_ctx {
+                            final_concrete_type = Self::apply_substitutions(&final_concrete_type, subs);
+                        }
+                        self.collect_generic_mappings(&final_concrete_type, template_param, &mut generic_id_to_concrete_type);
                     }
                 }
                 
                 if let Some(call_site_return_type) = &node.type_id {
+                    let mut final_return_type = call_site_return_type.clone();
+                    if let Some(subs) = &self.monomorphization_ctx.substitution_ctx {
+                        final_return_type = Self::apply_substitutions(&final_return_type, subs);
+                    }
                     self.collect_generic_mappings(
-                        call_site_return_type,
+                        &final_return_type,
                         template_return,
                         &mut generic_id_to_concrete_type,
                     );
@@ -536,8 +548,9 @@ impl<'a> MIRBuilder<'a> {
                         .cloned()
                         .zip(ordered_args.iter().cloned())
                         .collect();
-
-                    *generic_arguments = ordered_args;
+                    
+                    let key = self.monomorphization_ctx.substitution_ctx.clone().unwrap_or_else(|| Rc::new(BTreeMap::new()));
+                    monomorphized_generic_arguments.insert(key, ordered_args);
 
                     self.monomorphization_ctx
                         .instantiations
@@ -962,7 +975,7 @@ impl<'a> MIRBuilder<'a> {
                 name: name.clone(),
                 mutable: *mutable,
             },
-            AstNodeKind::FunctionCall { function, arguments, generic_arguments } => {
+            AstNodeKind::FunctionCall { function, arguments, monomorphized_generic_arguments } => {
                 if let AstNodeKind::Function { .. } = &mut function.kind {
                     let function_mir = self.lower_node(function).unwrap();
                     let hoisted_name = if let MIRNodeKind::Function { name, .. } = &function_mir.kind { name.clone() } else { unreachable!(); };
@@ -999,7 +1012,7 @@ impl<'a> MIRBuilder<'a> {
                         false
                     };
 
-                    let mut needs_monomorphization = !generic_arguments.is_empty();
+                    let mut needs_monomorphization = !monomorphized_generic_arguments.is_empty();
                     if !needs_monomorphization
                         && let AstNodeKind::FieldAccess { left, .. } = &function.kind
                         && let Some(base_type) = &left.type_id
@@ -1018,13 +1031,12 @@ impl<'a> MIRBuilder<'a> {
                         needs_monomorphization = false;
                     } 
                     
-                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if dbg!(needs_monomorphization) {
+                    let (mut mir_fn_name, mut mir_fn_value_id, mut mir_fn_type) = if needs_monomorphization && !fn_value_symbol.is_intrinsic {
                         (|| {
-                            let concrete_types_for_mangling = if !generic_arguments.is_empty() {
-                                generic_arguments.clone()
-                            } else {
-                                let AstNodeKind::FieldAccess { left, .. } = &function.kind else { return None; };
-                                
+                            let key = self.monomorphization_ctx.substitution_ctx.clone().unwrap_or_else(|| Rc::new(BTreeMap::new()));
+                            let concrete_types_for_mangling = if let Some(args) = monomorphized_generic_arguments.get(&key) {
+                                args.clone()
+                            } else if let AstNodeKind::FieldAccess { left, .. } = &function.kind {
                                 let mut base_type = left.type_id.as_ref()?.clone();
                                 if let Some(substitutions) = &self.monomorphization_ctx.substitution_ctx.clone() {
                                     base_type = self.substitute_type(&base_type, substitutions);
@@ -1035,6 +1047,8 @@ impl<'a> MIRBuilder<'a> {
                                 }
     
                                 if let Type::Base { args, .. } = base_type { args.clone() } else { return None; }
+                            } else {
+                                return None;
                             };
     
                             let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
