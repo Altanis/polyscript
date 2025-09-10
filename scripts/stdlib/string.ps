@@ -53,6 +53,39 @@ trait ToString {
     fn to_string(&self): String;
 }
 
+impl ToString for int {
+    fn to_string(&self): String {
+        if (*self == 0) { return String.from_str("0"); };
+
+        let n = *self;
+        let negative = false;
+        if (n < 0) {
+            negative = true;
+            n = -n;
+        };
+
+        let digits = [Vec<char>].new();
+
+        while (n > 0) {
+            let d = (n % 10) as char;
+            digits.push(('0' as int + d as int) as char);
+            n /= 10;
+        }
+
+        if (negative) {
+            digits.push('-');
+        };
+
+        let chars = [Vec<char>].from_capacity(digits.length());
+        for (let i = digits.length() - 1; i >= 0; i -= 1) {
+            chars.push(*digits.get(i));
+        }
+
+        String { chars }
+    }
+}
+
+
 impl ToString for str {
     fn to_string(&self): String {
         String.from_str(*self)

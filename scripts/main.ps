@@ -3,14 +3,8 @@
 // stdlib
     // math + vec + string + io + hashmap
 // default traits such as Drop, Clone, Default, ToString
-// create String struct of Vec<u8> (maybe add unions and union [u8; 15] and Vec<u8>)
-    // impl Add<str> for str {} inside file
 // maybe add prelude system
 
-trait Blah {}
-impl Blah for char {}
+import { println } from "stdlib/io.ps";
 
-fn print<T: Blah>(x: T) {}
-
-let c = 'e';
-print(&c);
+println(8493);

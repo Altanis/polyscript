@@ -2003,7 +2003,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder.build_store(alloca, val).unwrap();
                     alloca.as_basic_value_enum()
                 } else {
-                    self.compile_place_expression(instance_node).unwrap().as_basic_value_enum()
+                    let place_ptr = self.compile_place_expression(instance_node).unwrap();
+                    let place_type = self.map_semantic_type(instance_node.type_id.as_ref().unwrap()).unwrap();
+                    self.builder.build_load(place_type, place_ptr, "instance.load").unwrap()
                 }
             }
         }
@@ -2058,6 +2060,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_call(self.get_c_free(), &[ptr.into()], "free").unwrap();
                         None
                     },
+                    "incref" => {
+                        let ptr_as_int = compiled_args[0].into_int_value();
+                        let ptr = self.builder.build_int_to_ptr(ptr_as_int, self.context.ptr_type(AddressSpace::default()), "incref_ptr").unwrap();
+                        let incref_fn = self.get_incref();
+                        self.builder.build_call(incref_fn, &[ptr.into()], "incref_call").unwrap();
+                        None
+                    },
                     "decref" => {
                         let ptr_as_int = compiled_args[0].into_int_value();
                         let ptr = self.builder.build_int_to_ptr(ptr_as_int, self.context.ptr_type(AddressSpace::default()), "decref_ptr").unwrap();
@@ -2095,7 +2104,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let stdout = self.get_stdout();
                         let format_str = self.builder.build_global_string_ptr("%d\n", "oprint_int_fmt").unwrap();
                         let char_val = compiled_args[0].into_int_value();
-                        let promoted_char = self.builder.build_int_z_extend(char_val, self.context.i32_type(), "int").unwrap();
+                        let promoted_char = if char_val.get_type().get_bit_width() < 32 {
+                            self.builder.build_int_z_extend(char_val, self.context.i32_type(), "int").unwrap()
+                        } else if char_val.get_type().get_bit_width() > 32 {
+                            self.builder.build_int_truncate(char_val, self.context.i32_type(), "int").unwrap()
+                        } else {
+                            char_val
+                        };
                         self.builder.build_call(fprintf, &[stdout.into(), format_str.as_pointer_value().into(), promoted_char.into()], "").unwrap();
                         None
                     },

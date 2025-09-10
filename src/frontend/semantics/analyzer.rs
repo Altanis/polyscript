@@ -394,6 +394,7 @@ impl SymbolTable {
         add_intrinsic("memcpy", vec![int_type.clone(), int_type.clone(), int_type.clone()], void_type.clone());
         add_intrinsic("memmove", vec![int_type.clone(), int_type.clone(), int_type.clone()], void_type.clone());
         add_intrinsic("free", vec![int_type.clone()], void_type.clone());
+        add_intrinsic("incref", vec![int_type.clone()], void_type.clone());
         add_intrinsic("decref", vec![int_type.clone()], void_type.clone());
         add_intrinsic("print", vec![str_type.clone()], void_type.clone());
         add_intrinsic("eprint", vec![str_type.clone()], void_type.clone());
