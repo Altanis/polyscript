@@ -1940,21 +1940,17 @@ impl SemanticAnalyzer {
         }
 
         if let Some((imp, substitutions)) = found_impl {
-            let output_type_symbol = self.symbol_table
-                .find_type_symbol_in_scope("Output", imp.impl_scope_id)
-                .ok_or_else(|| {
-                    let trait_name = self.symbol_table.display_type(&Type::new_base(trait_id));
-                    self.create_error(ErrorKind::UnknownIdentifier(format!("associated type 'Output' for trait '{}'", trait_name)), info.span, &[info.span])
-                })?
-                .clone();
+            if let Some(output_type_symbol) = self.symbol_table.find_type_symbol_in_scope("Output", imp.impl_scope_id).cloned() {
+                let TypeSymbolKind::TypeAlias((_, Some(output_type_template))) = &output_type_symbol.kind else {
+                    unreachable!("The 'Output' associated type in a trait impl must be a resolved alias");
+                };
 
-            let TypeSymbolKind::TypeAlias((_, Some(output_type_template))) = &output_type_symbol.kind else {
-                unreachable!("The 'Output' associated type in a trait impl must be a resolved alias");
-            };
-
-            let concrete_output_type = self.apply_substitution(output_type_template, &substitutions);
-            
-            self.unify(result_ty, concrete_output_type, info)?;
+                let concrete_output_type = self.apply_substitution(output_type_template, &substitutions);
+                
+                self.unify(result_ty, concrete_output_type, info)?;
+            } else {
+                self.unify(result_ty, Type::new_base(self.get_primitive_type(PrimitiveKind::Void)), info)?;
+            }
             
             Ok(true)
         } else {
