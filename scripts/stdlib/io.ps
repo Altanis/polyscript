@@ -13,4 +13,16 @@ fn println<T: ToString>(data: T) {
     print_char('\n');
 }
 
-export { print, println };
+fn eprint<T: ToString>(data: T) {
+    let string = [T as ToString].to_string(&data);
+    for (let i = 0; i < string.length(); i += 1) {
+        eprint_char(string.get(i));
+    }
+}
+
+fn eprintln<T: ToString>(data: T) {
+    eprint(data);
+    eprint_char('\n');
+}
+
+export { print, eprint, println, eprintln };
