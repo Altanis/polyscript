@@ -1,12 +1,29 @@
-// private field and public fn of same name throws err
+// ToString for floats
+
+// string methods: insert(idx, char), remove(idx) -> char, clear(), is_empty() -> bool
+// contains(substring: String) -> bool, starts/ends_with(prefix: String) -> bool, index_of(char)
+// slice(start, end) -> String, split(delimiter) -> Vec<String>
+// to_uppercase() -> String, to_lowercase() -> String, trim() -> String
+// join(Vec<String>, separator: String) -> String, repeat(int) -> String
+// +, +=, ==, !=, <, <=, >=, >, 
+
 // nan and infinite for floats
 // handle integer overflow
+// math stdlib
+// hashmap stdlib
+// file i/o?
+// proof of concept
+
 // escape analysis for immediates
-// stdlib
-    // math + vec + string + io + hashmap
+// private field and public fn of same name throws err
 // default traits such as Drop, Clone, Default, ToString
 // maybe add prelude system
 
+import { String } from "stdlib/string.ps";
 import { println } from "stdlib/io.ps";
 
-println(8493);
+let r = String.from_str("Hello");
+let s = String.from_str(" world.");
+let t = r + s;
+
+println(t);

@@ -47,6 +47,54 @@ impl String {
     public fn get(&self, i: int): char {
         *self.chars.get(i)
     }
+
+    // Pushes a character `c` to the end of the string.
+    public fn push(&mut self, c: char) {
+        self.chars.push(c);
+    }
+
+    // Pushes a string `s` to the end of the string.
+    public fn push_string(&mut self, s: &String) {
+        for (let i = 0; i < s.length(); i += 1) {
+            self.chars.push(s.get(i));
+        }
+    }
+}
+
+impl Clone for String {
+    fn clone(&self): Self {
+        String { chars: [Vec<char> as Clone].clone(&self.chars) }
+    }
+}
+
+impl Add<char> for String {
+    type Output = String;
+    fn add(self, other: char): String {
+        let string = [String as Clone].clone(&self);
+        string.push(other);
+        string
+    }
+}
+
+impl AddAssign<char> for String {
+    fn add_assign(&mut self, other: char) {
+        self.push(other);
+    }
+}
+
+impl Add<String> for String {
+    type Output = String;
+    fn add(self, other: String): String {
+        let string = [String as Clone].clone(&self);
+        string.push_string(&other);
+        string
+    }
+}
+
+impl AddAssign<String> for String {
+    fn add_assign(&mut self, other: String) {
+        self.push_string(&other);
+    }
 }
 
 trait ToString {
@@ -85,6 +133,40 @@ impl ToString for int {
     }
 }
 
+/*impl ToString for float {
+    fn to_string(&self): String {
+        let mut n = *self;
+
+        // TODO: nan, inf, -inf
+
+        let negative = n < 0.0;
+        if negative {
+            n = -n;
+        }
+
+        let int_part = n as int;
+        let s = [int as ToString].to_string(&int);
+
+        let mut frac = n - int_part as float;
+        if (frac > 0.0) {
+            s.push('.');
+            for (let i = 0; i < 6; i += 1) {
+                frac *= 10.0;
+                let digit = frac as int;
+                s.push(('0' as int + digit) as char);
+                frac -= digit as float;
+            }
+        }
+
+        if negative {
+            let with_sign = String::from_str("-");
+            with_sign.push_str(&s);
+            return with_sign;
+        }
+
+        s
+    }
+}*/
 
 impl ToString for str {
     fn to_string(&self): String {

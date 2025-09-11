@@ -473,15 +473,11 @@ impl SymbolTable {
                     None,
                 )
                 .unwrap();
-            let output_type_id = self
-                .add_type_symbol(
-                    "Output",
-                    TypeSymbolKind::TypeAlias((None, None)),
-                    vec![],
-                    QualifierKind::Public,
-                    None,
-                )
-                .unwrap();
+            let output_type_id = if op.is_assignment() {
+                self.find_type_symbol("void").unwrap().id
+            } else {
+                self.add_type_symbol("Output", TypeSymbolKind::TypeAlias((None, None)), vec![], QualifierKind::Public, None).unwrap()
+            };
 
             let trait_generics = if is_unary { vec![] } else { vec!["Rhs"] };
             let trait_generic_ids: Vec<TypeSymbolId> = trait_generics
@@ -501,7 +497,12 @@ impl SymbolTable {
             let func_scope_id = self.enter_scope(ScopeKind::Function);
             self.exit_scope();
 
-            let mut params = vec![Type::new_base(self_type_id)];
+            let base_ty = Type::new_base(self_type_id);
+            let receiver_ty = if op.is_assignment() {
+                Type::MutableReference { inner: Box::new(base_ty) }
+            } else { base_ty };
+            
+            let mut params = vec![receiver_ty];
             if !is_unary {
                 params.push(Type::new_base(trait_generic_ids[0]));
             }
@@ -576,7 +577,11 @@ impl SymbolTable {
                 .unwrap();
                 self.add_type_symbol(
                     "Output",
-                    TypeSymbolKind::TypeAlias((None, Some(Type::new_base(output_id)))),
+                    TypeSymbolKind::TypeAlias((None, if op.is_assignment() {
+                        Some(Type::new_base(self.find_type_symbol("void").unwrap().id))
+                    } else {
+                        Some(Type::new_base(output_id))
+                    })),
                     vec![],
                     QualifierKind::Public,
                     None,
