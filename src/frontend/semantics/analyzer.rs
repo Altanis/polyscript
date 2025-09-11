@@ -117,7 +117,7 @@ pub enum TypeSymbolKind {
     FunctionSignature {
         params: Vec<Type>,
         return_type: Type,
-        instance: Option<ReferenceKind>,
+        instance: bool
     },
     Generic(Vec<TypeSymbolId>),
     UnificationVariable(TypeSymbolId),
@@ -143,40 +143,26 @@ pub enum ScopeKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
-    Base { symbol: TypeSymbolId, args: Vec<Type> },
-    Reference { inner: Box<Type> },
-    MutableReference { inner: Box<Type> },
+pub struct Type {
+    pub symbol: TypeSymbolId,
+    pub args: Vec<Type>
 }
 
 impl Type {
-    pub fn new_base(symbol: TypeSymbolId) -> Self {
-        Type::Base { symbol, args: vec![] }
-    }
-
-    pub fn is_base(&self) -> bool {
-        matches!(self, Type::Base { .. })
-    }
-
-    pub fn get_base_symbol(&self) -> TypeSymbolId {
-        match self {
-            Type::Base { symbol, .. } => *symbol,
-            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner.get_base_symbol(),
+    pub fn from_no_args(symbol: TypeSymbolId) -> Self {
+        Type {
+            symbol,
+            args: vec![]
         }
     }
 
     /// Recursively traverses a type to check if it contains any generic type variables from a given set.
     pub fn contains_generics(&self, generics: &HashSet<TypeSymbolId>) -> bool {
-        match self {
-            Type::Base { symbol, args } => {
-                if generics.contains(symbol) {
-                    return true;
-                }
-
-                args.iter().any(|arg| arg.contains_generics(generics))
-            },
-            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner.contains_generics(generics)
+        if generics.contains(&self.symbol) {
+            return true;
         }
+
+        self.args.iter().any(|arg| arg.contains_generics(generics))
     }
 }
 
@@ -239,7 +225,6 @@ pub struct Scope {
     pub kind: ScopeKind,
     pub parent: Option<ScopeId>,
     pub id: ScopeId,
-    pub receiver_kind: Option<ReferenceKind>,
     pub trait_id: Option<TypeSymbolId>,
 }
 
@@ -296,7 +281,6 @@ impl SymbolTable {
             parent: None,
             id: root_scope_id,
             kind: ScopeKind::Root,
-            receiver_kind: None,
             trait_id: None,
         };
         table.scopes.insert(root_scope_id, root_scope);
@@ -320,7 +304,6 @@ impl SymbolTable {
             parent: Some(root_scope_id),
             id: intrinsics_scope_id,
             kind: ScopeKind::Block,
-            receiver_kind: None,
             trait_id: None,
         };
         table.scopes.insert(intrinsics_scope_id, intrinsics_scope);
@@ -335,7 +318,6 @@ impl SymbolTable {
             parent: Some(root_scope_id),
             id: init_scope_id,
             kind: ScopeKind::Block,
-            receiver_kind: None,
             trait_id: None,
         };
 
@@ -351,11 +333,11 @@ impl SymbolTable {
         let old_scope = self.current_scope_id;
         self.current_scope_id = self.intrinsics_scope_id;
 
-        let int_type = Type::new_base(self.find_type_symbol("int").unwrap().id);
-        let char_type = Type::new_base(self.find_type_symbol("char").unwrap().id);
-        let str_type = Type::new_base(self.find_type_symbol("str").unwrap().id);
-        let void_type = Type::new_base(self.find_type_symbol("void").unwrap().id);
-        let never_type = Type::new_base(self.find_type_symbol("never").unwrap().id);
+        let int_type = Type::from_no_args(self.find_type_symbol("int").unwrap().id);
+        let char_type = Type::from_no_args(self.find_type_symbol("char").unwrap().id);
+        let str_type = Type::from_no_args(self.find_type_symbol("str").unwrap().id);
+        let void_type = Type::from_no_args(self.find_type_symbol("void").unwrap().id);
+        let never_type = Type::from_no_args(self.find_type_symbol("never").unwrap().id);
 
         let mut add_intrinsic = |name: &str, params: Vec<Type>, ret: Type| {
             let fn_scope_id = self.enter_scope(ScopeKind::Function);
@@ -367,7 +349,7 @@ impl SymbolTable {
                     TypeSymbolKind::FunctionSignature {
                         params,
                         return_type: ret.clone(),
-                        instance: None,
+                        instance: false
                     },
                     vec![],
                     QualifierKind::Public,
@@ -381,7 +363,7 @@ impl SymbolTable {
                     ValueSymbolKind::Function(fn_scope_id, HashSet::new()),
                     false,
                     QualifierKind::Public,
-                    Some(Type::new_base(fn_sig_type_id)),
+                    Some(Type::from_no_args(fn_sig_type_id)),
                     None,
                 )
                 .unwrap();
@@ -405,7 +387,7 @@ impl SymbolTable {
         add_intrinsic("strlen", vec![str_type.clone()], int_type.clone());
         add_intrinsic("strget", vec![str_type.clone(), int_type.clone()], char_type.clone());
         let t_generic_id = self.add_type_symbol("#T_intrinsic_drop", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
-        let t_type = Type::new_base(t_generic_id);
+        let t_type = Type::from_no_args(t_generic_id);
 
         let fn_scope_id = self.enter_scope(ScopeKind::Function);
         self.exit_scope();
@@ -416,7 +398,7 @@ impl SymbolTable {
                 TypeSymbolKind::FunctionSignature {
                     params: vec![t_type],
                     return_type: void_type.clone(),
-                    instance: None,
+                    instance: false
                 },
                 vec![t_generic_id],
                 QualifierKind::Public,
@@ -430,7 +412,7 @@ impl SymbolTable {
                 ValueSymbolKind::Function(fn_scope_id, HashSet::new()),
                 false,
                 QualifierKind::Public,
-                Some(Type::new_base(fn_sig_type_id)),
+                Some(Type::from_no_args(fn_sig_type_id)),
                 None,
             )
             .unwrap();
@@ -497,22 +479,19 @@ impl SymbolTable {
             let func_scope_id = self.enter_scope(ScopeKind::Function);
             self.exit_scope();
 
-            let base_ty = Type::new_base(self_type_id);
-            let receiver_ty = if op.is_assignment() {
-                Type::MutableReference { inner: Box::new(base_ty) }
-            } else { base_ty };
+            let receiver_ty = Type::from_no_args(self_type_id);
             
             let mut params = vec![receiver_ty];
             if !is_unary {
-                params.push(Type::new_base(trait_generic_ids[0]));
+                params.push(Type::from_no_args(trait_generic_ids[0]));
             }
 
             let fn_sig_type_id = self.add_type_symbol(
                 &fn_name,
                 TypeSymbolKind::FunctionSignature {
                     params,
-                    return_type: Type::new_base(output_type_id),
-                    instance: Some(ReferenceKind::Value),
+                    return_type: Type::from_no_args(output_type_id),
+                    instance: true
                 },
                 vec![],
                 QualifierKind::Private,
@@ -525,7 +504,7 @@ impl SymbolTable {
                 ValueSymbolKind::Function(func_scope_id, HashSet::new()),
                 false,
                 QualifierKind::Public,
-                Some(Type::new_base(fn_sig_type_id)),
+                Some(Type::from_no_args(fn_sig_type_id)),
                 None,
             )
             .unwrap();
@@ -569,7 +548,7 @@ impl SymbolTable {
 
                 self.add_type_symbol(
                     "Self",
-                    TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))),
+                    TypeSymbolKind::TypeAlias((None, Some(Type::from_no_args(self_id)))),
                     vec![],
                     QualifierKind::Public,
                     None,
@@ -578,9 +557,9 @@ impl SymbolTable {
                 self.add_type_symbol(
                     "Output",
                     TypeSymbolKind::TypeAlias((None, if op.is_assignment() {
-                        Some(Type::new_base(self.find_type_symbol("void").unwrap().id))
+                        Some(Type::from_no_args(self.find_type_symbol("void").unwrap().id))
                     } else {
-                        Some(Type::new_base(output_id))
+                        Some(Type::from_no_args(output_id))
                     })),
                     vec![],
                     QualifierKind::Public,
@@ -590,7 +569,7 @@ impl SymbolTable {
                 if !is_unary {
                     self.add_type_symbol(
                         trait_generics[0],
-                        TypeSymbolKind::TypeAlias((None, Some(Type::new_base(self_id)))),
+                        TypeSymbolKind::TypeAlias((None, Some(Type::from_no_args(self_id)))),
                         vec![],
                         QualifierKind::Public,
                         None,
@@ -604,7 +583,7 @@ impl SymbolTable {
                     ValueSymbolKind::Variable,
                     false,
                     QualifierKind::Public,
-                    Some(Type::new_base(self_id)),
+                    Some(Type::from_no_args(self_id)),
                     None,
                 )
                 .unwrap();
@@ -614,24 +593,24 @@ impl SymbolTable {
                         ValueSymbolKind::Variable,
                         false,
                         QualifierKind::Public,
-                        Some(Type::new_base(self_id)),
+                        Some(Type::from_no_args(self_id)),
                         None,
                     )
                     .unwrap();
                 }
 
                 let concrete_sig_params = if is_unary {
-                    vec![Type::new_base(self_id)]
+                    vec![Type::from_no_args(self_id)]
                 } else {
-                    vec![Type::new_base(self_id), Type::new_base(self_id)]
+                    vec![Type::from_no_args(self_id), Type::from_no_args(self_id)]
                 };
                 let concrete_sig_id = self
                     .add_type_symbol(
                         &fn_name,
                         TypeSymbolKind::FunctionSignature {
                             params: concrete_sig_params,
-                            return_type: Type::new_base(output_id),
-                            instance: Some(ReferenceKind::Value),
+                            return_type: Type::from_no_args(output_id),
+                            instance: true
                         },
                         vec![],
                         QualifierKind::Public,
@@ -644,7 +623,7 @@ impl SymbolTable {
                     ValueSymbolKind::Function(func_scope_id, HashSet::new()),
                     false,
                     QualifierKind::Public,
-                    Some(Type::new_base(concrete_sig_id)),
+                    Some(Type::from_no_args(concrete_sig_id)),
                     None,
                 )
                 .unwrap();
@@ -667,16 +646,14 @@ impl SymbolTable {
         let func_scope_id = self.enter_scope(ScopeKind::Function);
         self.exit_scope();
 
-        let params = vec![Type::MutableReference {
-            inner: Box::new(Type::new_base(self_type_id)),
-        }];
+        let params = vec![Type::from_no_args(self_type_id)];
 
         let fn_sig_type_id = self.add_type_symbol(
             "drop",
             TypeSymbolKind::FunctionSignature {
                 params,
-                return_type: Type::new_base(self.find_type_symbol("void").unwrap().id),
-                instance: Some(ReferenceKind::MutableReference),
+                return_type: Type::from_no_args(self.find_type_symbol("void").unwrap().id),
+                instance: true
             },
             vec![],
             QualifierKind::Private,
@@ -688,7 +665,7 @@ impl SymbolTable {
             ValueSymbolKind::Function(func_scope_id, HashSet::new()),
             false,
             QualifierKind::Public,
-            Some(Type::new_base(fn_sig_type_id)),
+            Some(Type::from_no_args(fn_sig_type_id)),
             None,
         ).unwrap();
 
@@ -717,16 +694,14 @@ impl SymbolTable {
         let func_scope_id = self.enter_scope(ScopeKind::Function);
         self.exit_scope();
 
-        let params = vec![Type::Reference {
-            inner: Box::new(Type::new_base(self_type_id)),
-        }];
+        let params = vec![Type::from_no_args(self_type_id)];
 
         let fn_sig_type_id = self.add_type_symbol(
             "clone",
             TypeSymbolKind::FunctionSignature {
                 params,
-                return_type: Type::new_base(self_type_id),
-                instance: Some(ReferenceKind::Reference),
+                return_type: Type::from_no_args(self_type_id),
+                instance: true
             },
             vec![],
             QualifierKind::Private,
@@ -738,7 +713,7 @@ impl SymbolTable {
             ValueSymbolKind::Function(func_scope_id, HashSet::new()),
             false,
             QualifierKind::Public,
-            Some(Type::new_base(fn_sig_type_id)),
+            Some(Type::from_no_args(fn_sig_type_id)),
             None,
         ).unwrap();
 
@@ -753,123 +728,6 @@ impl SymbolTable {
         ).unwrap();
 
         trait_registry.default_traits.insert("Clone".to_string(), trait_id);
-
-        // --- Deref Trait ---
-        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
-        let self_type_id = self.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-        let target_type_id = self.add_type_symbol(
-            "Target",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None
-        ).unwrap();
-
-        let func_scope_id = self.enter_scope(ScopeKind::Function);
-        self.exit_scope();
-
-        let params = vec![Type::Reference {
-            inner: Box::new(Type::new_base(self_type_id)),
-        }];
-        let return_type = Type::Reference {
-            inner: Box::new(Type::new_base(target_type_id)),
-        };
-
-        let fn_sig_type_id = self.add_type_symbol(
-            "deref",
-            TypeSymbolKind::FunctionSignature {
-                params,
-                return_type,
-                instance: Some(ReferenceKind::Reference),
-            },
-            vec![],
-            QualifierKind::Private,
-            None,
-        ).unwrap();
-
-        self.add_value_symbol(
-            "deref",
-            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
-            false,
-            QualifierKind::Public,
-            Some(Type::new_base(fn_sig_type_id)),
-            None,
-        ).unwrap();
-        self.exit_scope();
-
-        let trait_id = self.add_type_symbol(
-            "Deref",
-            TypeSymbolKind::Trait(trait_scope_id),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-        trait_registry.default_traits.insert("Deref".to_string(), trait_id);
-
-
-        // --- DerefMut Trait ---
-        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
-        let self_type_id = self.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-        let target_type_id = self.add_type_symbol(
-            "Target",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None
-        ).unwrap();
-
-        let func_scope_id = self.enter_scope(ScopeKind::Function);
-        self.exit_scope();
-
-        let params = vec![Type::MutableReference {
-            inner: Box::new(Type::new_base(self_type_id)),
-        }];
-        let return_type = Type::MutableReference {
-            inner: Box::new(Type::new_base(target_type_id)),
-        };
-
-        let fn_sig_type_id = self.add_type_symbol(
-            "deref_mut",
-            TypeSymbolKind::FunctionSignature {
-                params,
-                return_type,
-                instance: Some(ReferenceKind::MutableReference),
-            },
-            vec![],
-            QualifierKind::Private,
-            None,
-        ).unwrap();
-
-        self.add_value_symbol(
-            "deref_mut",
-            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
-            false,
-            QualifierKind::Public,
-            Some(Type::new_base(fn_sig_type_id)),
-            None,
-        ).unwrap();
-        self.exit_scope();
-
-        let trait_id = self.add_type_symbol(
-            "DerefMut",
-            TypeSymbolKind::Trait(trait_scope_id),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-        trait_registry.default_traits.insert("DerefMut".to_string(), trait_id);
 
         self.current_scope_id = old_scope;
     }
@@ -1155,7 +1013,6 @@ impl SymbolTable {
             parent: Some(parent_id),
             id: new_id,
             kind,
-            receiver_kind: None,
             trait_id: None,
         };
 
@@ -1260,10 +1117,6 @@ pub enum Constraint {
     FullyQualifiedAccess(Type, Type, Option<Type>, String),
     /// The initial type must be validly castable to the other.
     Cast(Type, Type),
-    /// The first type must be a reference to the second type.
-    Dereference(Type, Type),
-    /// A mutable dereference used as the target of an assignment.
-    MutableDereference(Type, Type),
     /// The type of an expression statement, conditional on its inner expression.
     ExpressionStatement(Type, Type)
 }
@@ -1302,7 +1155,7 @@ impl UnificationContext {
             )
             .unwrap();
 
-        Type::Base { symbol, args: vec![] }
+        Type::from_no_args(symbol)
     }
 
     pub fn register_constraint(&mut self, constraint: Constraint, info: ConstraintInfo) {
@@ -1359,7 +1212,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn is_copy_type(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Reference { .. } | Type::MutableReference { .. })
+        matches!(self.symbol_table.get_type_symbol(ty.symbol).unwrap().kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. })
     }
 
     pub fn is_ancestor_of(&self, ancestor_id: ScopeId, child_id: ScopeId) -> bool {
@@ -1560,76 +1413,63 @@ impl SymbolTable {
     }
 
     pub fn display_type<'a>(&'a self, ty: &'a Type) -> String {
-        match ty {
-            Type::Base { symbol, args } => {
-                let type_symbol = &self.registry.type_symbols[symbol];
-                match &type_symbol.kind {
-                    TypeSymbolKind::FunctionSignature {
-                        params,
-                        return_type,
-                        ..
-                    } => {
-                        let generic_params_str = if !type_symbol.generic_parameters.is_empty() {
-                            let params_list = type_symbol
-                                .generic_parameters
-                                .iter()
-                                .map(|p_id| {
-                                    self.get_type_name(self.get_type_symbol(*p_id).unwrap().name_id)
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!("<{}>", params_list)
-                        } else {
-                            "".to_string()
-                        };
+        let type_symbol = &self.registry.type_symbols[&ty.symbol];
+        match &type_symbol.kind {
+            TypeSymbolKind::FunctionSignature {
+                params,
+                return_type,
+                ..
+            } => {
+                let generic_params_str = if !type_symbol.generic_parameters.is_empty() {
+                    let params_list = type_symbol
+                        .generic_parameters
+                        .iter()
+                        .map(|p_id| {
+                            self.get_type_name(self.get_type_symbol(*p_id).unwrap().name_id)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("<{}>", params_list)
+                } else {
+                    "".to_string()
+                };
 
-                        let params_str = params
-                            .iter()
-                            .map(|p_ty| self.display_type(p_ty))
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                let params_str = params
+                    .iter()
+                    .map(|p_ty| self.display_type(p_ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
 
-                        let is_null_return = if let Type::Base {
-                            symbol: ret_symbol, ..
-                        } = &return_type
-                        {
-                            if let Some(symbol) = self.get_type_symbol(*ret_symbol) {
-                                matches!(symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void))
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
+                let is_null_return = if let Some(symbol) = self.get_type_symbol(return_type.symbol) {
+                    matches!(symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void))
+                } else {
+                    false
+                };
 
-                        if is_null_return {
-                            format!("fn{}({})", generic_params_str, params_str)
-                        } else {
-                            format!(
-                                "fn{}({}) -> {}",
-                                generic_params_str,
-                                params_str,
-                                self.display_type(return_type)
-                            )
-                        }
-                    }
-                    _ => {
-                        let base_name = self.get_type_name(type_symbol.name_id);
-                        if args.is_empty() {
-                            base_name.to_string()
-                        } else {
-                            let arg_str = args
-                                .iter()
-                                .map(|arg| self.display_type(arg))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!("{}<{}>", base_name, arg_str)
-                        }
-                    }
+                if is_null_return {
+                    format!("fn{}({})", generic_params_str, params_str)
+                } else {
+                    format!(
+                        "fn{}({}) -> {}",
+                        generic_params_str,
+                        params_str,
+                        self.display_type(return_type)
+                    )
                 }
             }
-            Type::Reference { inner } => format!("&{}", self.display_type(inner)),
-            Type::MutableReference { inner } => format!("&mut {}", self.display_type(inner)),
+            _ => {
+                let base_name = self.get_type_name(type_symbol.name_id);
+                if ty.args.is_empty() {
+                    base_name.to_string()
+                } else {
+                    let arg_str = ty.args
+                        .iter()
+                        .map(|arg| self.display_type(arg))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base_name, arg_str)
+                }
+            }
         }
     }
 
@@ -1833,18 +1673,6 @@ impl Constraint {
                         self.t.display_type(initial).yellow(),
                         self.t.display_type(r#final).yellow()
                     ),
-                    Dereference(operand, result) => write!(
-                        f,
-                        "{} = *{}",
-                        self.t.display_type(result).yellow(),
-                        self.t.display_type(operand).yellow()
-                    ),
-                    MutableDereference(operand, assigned) => write!(
-                        f,
-                        "*{} = {}",
-                        self.t.display_type(operand).yellow(),
-                        self.t.display_type(assigned).yellow()
-                    ),
                     ExpressionStatement(inner, result) => write!(
                         f,
                         "{} = {};",
@@ -1879,7 +1707,7 @@ impl UnificationContext {
                         let uv_name = self.tbl.get_type_name(self.tbl.get_type_symbol(*uv_symbol_id).unwrap().name_id);
                         let lhs = uv_name.red().bold();
                         let rhs = self.tbl.display_type(sym).green();
-                        writeln!(f, "    {} {} [{}]({})", lhs, "->".blue(), rhs, sym.get_base_symbol())?;
+                        writeln!(f, "    {} {} [{}]({})", lhs, "->".blue(), rhs, sym.symbol)?;
                     }
                 }
 
@@ -1941,22 +1769,16 @@ impl std::fmt::Display for SemanticAnalyzer {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Type::Base { symbol, args } => {
-                let base_name = format!("TypeSymbol({})", symbol);
-                if args.is_empty() {
-                    write!(f, "{}", base_name)
-                } else {
-                    let arg_str = args
-                        .iter()
-                        .map(|arg| format!("{}", arg))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    write!(f, "{}<{}>", base_name, arg_str)
-                }
+            let base_name = format!("TypeSymbol({})", self.symbol);
+            if self.args.is_empty() {
+                write!(f, "{}", base_name)
+            } else {
+                let arg_str = self.args
+                    .iter()
+                    .map(|arg| format!("{}", arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{}<{}>", base_name, arg_str)
             }
-            Type::Reference { inner } => write!(f, "&{}", inner),
-            Type::MutableReference { inner } => write!(f, "&mut {}", inner),
-        }
     }
 }

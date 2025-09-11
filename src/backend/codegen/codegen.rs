@@ -11,7 +11,7 @@ use std::fmt::Write;
 
 use crate::frontend::semantics::analyzer::{NameInterner, PrimitiveKind, ScopeId, ScopeKind, SemanticAnalyzer, TraitImpl, Type, TypeSymbolId, TypeSymbolKind, ValueSymbol, ValueSymbolId, ValueSymbolKind};
 use crate::mir::ir_node::{BoxedMIRNode, CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind};
-use crate::utils::kind::{Operation, ReferenceKind};
+use crate::utils::kind::Operation;
 
 pub type StringLiteralId = usize;
 
@@ -27,7 +27,6 @@ fn get_base_variable(node: &MIRNode) -> Option<usize> {
     match &node.kind {
         MIRNodeKind::Identifier(_) => node.value_id,
         MIRNodeKind::FieldAccess { left, .. } => get_base_variable(left),
-        MIRNodeKind::UnaryOperation { operator: Operation::Dereference, .. } => None,
         _ => None,
     }
 }
@@ -235,14 +234,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn is_heap_type(&self, ty: &Type) -> bool {
-        if let Type::Base { symbol, .. } = ty {
-            let sym = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if matches!(sym.kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. }) {
-                return false;
-            }
-        }
-
-        matches!(ty, Type::Base { .. })
+        !self.analyzer.is_copy_type(ty)
     }
 
     fn is_rvalue(&self, expr: &MIRNode) -> bool {
@@ -296,7 +288,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
-        let type_id = ty.get_base_symbol();
+        let type_id = ty.symbol;
     
         if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
             && let Some(impls_for_type) = impls_for_trait.get(&type_id)
@@ -310,15 +302,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .find_value_symbol_in_scope("drop", imp.impl_scope_id)
                     .unwrap();
                 
-                let generic_drop_fn_type_id = drop_fn_symbol.type_id.as_ref().unwrap().get_base_symbol();
+                let generic_drop_fn_type_id = drop_fn_symbol.type_id.as_ref().unwrap().symbol;
                 
-                let drop_fn_val = if let Type::Base { args, .. } = ty {
-                    if !args.is_empty() {
-                        let mangled_name = self.mangle_monomorph_name(generic_drop_fn_type_id, args);
-                        self.module.get_function(&mangled_name).unwrap()
-                    } else {
-                        self.functions.get(&drop_fn_symbol.id).copied().unwrap()
-                    }
+                let drop_fn_val = if !ty.args.is_empty() {
+                    let mangled_name = self.mangle_monomorph_name(generic_drop_fn_type_id, &ty.args);
+                    self.module.get_function(&mangled_name).unwrap()
                 } else {
                     self.functions.get(&drop_fn_symbol.id).copied().unwrap()
                 };
@@ -330,28 +318,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        if let Type::Base { symbol, .. } = ty {
-            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
-                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+            let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+            
+            let mut field_symbols: Vec<_> = scope.values.values().map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap()).collect();
+            field_symbols.sort_by_key(|s| s.span.unwrap().start);
+
+            let struct_val = value.into_struct_value();
+
+            for (i, field_symbol) in field_symbols.iter().enumerate() {
+                let field_type = field_symbol.type_id.as_ref().unwrap();
+                let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
                 
-                let mut field_symbols: Vec<_> = scope.values.values().map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap()).collect();
-                field_symbols.sort_by_key(|s| s.span.unwrap().start);
-
-                let struct_val = value.into_struct_value();
-
-                for (i, field_symbol) in field_symbols.iter().enumerate() {
-                    let field_type = field_symbol.type_id.as_ref().unwrap();
-                    let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
-                    
-                    let field_val = self.builder.build_extract_value(
-                        struct_val,
-                        i as u32,
-                        &format!("field_val_for_drop_{}", field_name)
-                    ).unwrap();
-                    
-                    self.build_destructor_call(field_type, field_val);
-                }
+                let field_val = self.builder.build_extract_value(
+                    struct_val,
+                    i as u32,
+                    &format!("field_val_for_drop_{}", field_name)
+                ).unwrap();
+                
+                self.build_destructor_call(field_type, field_val);
             }
         }
     }
@@ -552,7 +538,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         rc_ptr_generic.set_name("rc_ptr_generic");
 
         let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
-        let type_id = ty.get_base_symbol();
+        let type_id = ty.symbol;
         if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&drop_trait_id)
             && let Some(impls_for_type) = impls_for_trait.get(&type_id)
             && let Some(imp) = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(ty, imp))
@@ -564,34 +550,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.build_call(drop_fn_val, &[data_ptr.into()], "user_drop_call").unwrap();
         }
 
-        if let Type::Base { symbol, .. } = ty {
-            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
-                let rc_repr = self.wrap_in_rc(ty);
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+            let rc_repr = self.wrap_in_rc(ty);
 
-                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr").unwrap();
-                let data_struct_val = self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "struct_val").unwrap().into_struct_value();
+            let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr_generic, 1, "data_ptr").unwrap();
+            let data_struct_val = self.builder.build_load(rc_repr.llvm_data_type, data_ptr, "struct_val").unwrap().into_struct_value();
 
-                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                let mut field_symbols: Vec<_> = scope.values.values()
-                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
-                    .collect();
-                field_symbols.sort_by_key(|s| s.span.unwrap().start);
+            let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+            let mut field_symbols: Vec<_> = scope.values.values()
+                .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                .collect();
+            field_symbols.sort_by_key(|s| s.span.unwrap().start);
 
-                for (i, field_symbol) in field_symbols.iter().enumerate() {
-                    let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
-                    let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
+            for (i, field_symbol) in field_symbols.iter().enumerate() {
+                let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+                let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
 
-                    if self.is_heap_type(field_semantic_type) {
-                        let field_val = self.builder.build_extract_value(
-                            data_struct_val,
-                            i as u32,
-                            &format!("{}_rc_ptr", field_name)
-                        ).unwrap();
+                if self.is_heap_type(field_semantic_type) {
+                    let field_val = self.builder.build_extract_value(
+                        data_struct_val,
+                        i as u32,
+                        &format!("{}_rc_ptr", field_name)
+                    ).unwrap();
 
-                        let decref = self.get_decref();
-                        self.builder.build_call(decref, &[field_val.into()], &format!("decref_{}", field_name)).unwrap();
-                    }
+                    let decref = self.get_decref();
+                    self.builder.build_call(decref, &[field_val.into()], &format!("decref_{}", field_name)).unwrap();
                 }
             }
         }
@@ -609,7 +593,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         original_data_ptr.set_name("original_data_ptr");
 
         let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
-        let type_id = ty.get_base_symbol();
+        let type_id = ty.symbol;
         if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&clone_trait_id)
             && let Some(impls_for_type) = impls_for_trait.get(&type_id)
         {
@@ -644,28 +628,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let rc_repr = self.wrap_in_rc(ty);
         let original_data = self.builder.build_load(rc_repr.llvm_data_type, original_data_ptr, "original_data").unwrap();
 
-        if let Type::Base { symbol, .. } = ty {
-            let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-            if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
-                let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-                let mut field_symbols: Vec<_> = scope.values.values()
-                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
-                    .collect();
-                field_symbols.sort_by_key(|s| s.span.unwrap().start);
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if let TypeSymbolKind::Struct((scope_id, _)) = type_symbol.kind {
+            let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+            let mut field_symbols: Vec<_> = scope.values.values()
+                .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                .collect();
+            field_symbols.sort_by_key(|s| s.span.unwrap().start);
 
-                for (i, field_symbol) in field_symbols.iter().enumerate() {
-                    let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
-                    if self.is_heap_type(field_semantic_type) {
-                        let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
-                        let field_val = self.builder.build_extract_value(
-                            original_data.into_struct_value(),
-                            i as u32,
-                            &format!("{}_val", field_name)
-                        ).unwrap();
+            for (i, field_symbol) in field_symbols.iter().enumerate() {
+                let field_semantic_type = field_symbol.type_id.as_ref().unwrap();
+                if self.is_heap_type(field_semantic_type) {
+                    let field_name = self.analyzer.symbol_table.get_value_name(field_symbol.name_id);
+                    let field_val = self.builder.build_extract_value(
+                        original_data.into_struct_value(),
+                        i as u32,
+                        &format!("{}_val", field_name)
+                    ).unwrap();
 
-                        let incref = self.get_incref();
-                        self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
-                    }
+                    let incref = self.get_incref();
+                    self.builder.build_call(incref, &[field_val.into()], &format!("incref_{}", field_name)).unwrap();
                 }
             }
         }
@@ -676,22 +658,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    fn is_rvo_candidate(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Base { symbol, .. } => {
-                if let Some(type_symbol) = self.analyzer.symbol_table.get_type_symbol(*symbol) {
-                    matches!(type_symbol.kind, TypeSymbolKind::Struct(_))
-                } else { false }
-            },
-            _ => false
-        }
+    fn is_rvo_candidate(&self, _: &Type) -> bool {
+        false
     }
 
     fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &TraitImpl) -> bool {
-        let instance_args = match instance_type {
-            Type::Base { args, .. } => args,
-            _ => return imp.type_specialization.is_empty(),
-        };
+        let instance_args = instance_type.args.clone();
         
         if instance_args.len() != imp.type_specialization.len() {
             return false;
@@ -702,7 +674,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 continue;
             }
     
-            if instance_arg.get_base_symbol() != impl_target_arg_id {
+            if instance_arg.symbol != impl_target_arg_id {
                 return false;
             }
         }
@@ -720,68 +692,61 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// Maps a semantic type from the analyzer to a concrete LLVM type.
     fn map_inner_semantic_type(&mut self, ty: &Type) -> Option<BasicTypeEnum<'ctx>> {
-        match ty {
-            Type::Base { symbol, .. } => {
-                if let Some(&llvm_ty) = self.type_map.get(symbol) {
-                    return Some(llvm_ty);
+        if let Some(&llvm_ty) = self.type_map.get(&ty.symbol) {
+            return Some(llvm_ty);
+        }
+
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        let llvm_ty = match &type_symbol.kind {
+            TypeSymbolKind::Primitive(p) => match p {
+                PrimitiveKind::Int => self.context.i64_type().as_basic_type_enum(),
+                PrimitiveKind::Float => self.context.f64_type().as_basic_type_enum(),
+                PrimitiveKind::Bool => self.context.bool_type().as_basic_type_enum(),
+                PrimitiveKind::Char => self.context.i8_type().as_basic_type_enum(),
+                PrimitiveKind::StaticString => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
+                PrimitiveKind::Void | PrimitiveKind::Never => return None,
+            },
+            TypeSymbolKind::Struct((scope_id, _)) => {
+                let struct_name = self.analyzer.symbol_table.get_type_name(type_symbol.name_id);
+                if let Some(existing) = self.module.get_struct_type(struct_name) {
+                    return Some(existing.as_basic_type_enum());
                 }
 
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                let llvm_ty = match &type_symbol.kind {
-                    TypeSymbolKind::Primitive(p) => match p {
-                        PrimitiveKind::Int => self.context.i64_type().as_basic_type_enum(),
-                        PrimitiveKind::Float => self.context.f64_type().as_basic_type_enum(),
-                        PrimitiveKind::Bool => self.context.bool_type().as_basic_type_enum(),
-                        PrimitiveKind::Char => self.context.i8_type().as_basic_type_enum(),
-                        PrimitiveKind::StaticString => self.context.ptr_type(AddressSpace::default()).as_basic_type_enum(),
-                        PrimitiveKind::Void | PrimitiveKind::Never => return None,
-                    },
-                    TypeSymbolKind::Struct((scope_id, _)) => {
-                        let struct_name = self.analyzer.symbol_table.get_type_name(type_symbol.name_id);
-                        if let Some(existing) = self.module.get_struct_type(struct_name) {
-                            return Some(existing.as_basic_type_enum());
-                        }
+                let llvm_struct = self.context.opaque_struct_type(struct_name);
+                self.type_map.insert(ty.symbol, llvm_struct.as_basic_type_enum());
 
-                        let llvm_struct = self.context.opaque_struct_type(struct_name);
-                        self.type_map.insert(*symbol, llvm_struct.as_basic_type_enum());
-    
-                        let scope = self.analyzer.symbol_table.get_scope(*scope_id).unwrap();
-                        let mut field_symbols: Vec<_> = scope.values.values()
-                            .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
-                            .collect();
-                        field_symbols.sort_by_key(|s| s.span.unwrap().start);
-    
-                        let field_types: Vec<_> = field_symbols.iter()
-                            .map(|field_symbol| self.map_semantic_type(field_symbol.type_id.as_ref().unwrap()).unwrap())
-                            .collect();
-                        
-                        llvm_struct.set_body(&field_types, false);
-                        llvm_struct.as_basic_type_enum()
-                    },
-                    TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
-                    TypeSymbolKind::FunctionSignature { .. } => {
-                        // Represent functions as fat pointer `{fn_ptr, env_λ_ptr}`.
-                        let fn_ptr_type = self.context.ptr_type(AddressSpace::default());
-                        let env_ptr_type = self.context.ptr_type(AddressSpace::default());
-                        self.context
-                            .struct_type(&[fn_ptr_type.into(), env_ptr_type.into()], false)
-                            .as_basic_type_enum()
-                    },
-                    TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
-                    _ => unimplemented!("cannot map semantic type to LLVM type: {} {:#?}", self.analyzer.symbol_table.display_type_symbol(type_symbol), type_symbol.span),
-                };
+                let scope = self.analyzer.symbol_table.get_scope(*scope_id).unwrap();
+                let mut field_symbols: Vec<_> = scope.values.values()
+                    .map(|&id| self.analyzer.symbol_table.get_value_symbol(id).unwrap())
+                    .collect();
+                field_symbols.sort_by_key(|s| s.span.unwrap().start);
 
-                self.type_map.insert(*symbol, llvm_ty);
-                Some(llvm_ty)
+                let field_types: Vec<_> = field_symbols.iter()
+                    .map(|field_symbol| self.map_semantic_type(field_symbol.type_id.as_ref().unwrap()).unwrap())
+                    .collect();
+                
+                llvm_struct.set_body(&field_types, false);
+                llvm_struct.as_basic_type_enum()
             },
-            Type::Reference { .. } | Type::MutableReference { .. } 
-                => Some(self.context.ptr_type(AddressSpace::default()).as_basic_type_enum())
-        }
+            TypeSymbolKind::Enum(_) => self.context.i64_type().as_basic_type_enum(),
+            TypeSymbolKind::FunctionSignature { .. } => {
+                // Represent functions as fat pointer `{fn_ptr, env_λ_ptr}`.
+                let fn_ptr_type = self.context.ptr_type(AddressSpace::default());
+                let env_ptr_type = self.context.ptr_type(AddressSpace::default());
+                self.context
+                    .struct_type(&[fn_ptr_type.into(), env_ptr_type.into()], false)
+                    .as_basic_type_enum()
+            },
+            TypeSymbolKind::TypeAlias((_, Some(aliased_type))) => return self.map_semantic_type(aliased_type),
+            _ => unimplemented!("cannot map semantic type to LLVM type: {} {:#?}", self.analyzer.symbol_table.display_type_symbol(type_symbol), type_symbol.span),
+        };
+
+        self.type_map.insert(ty.symbol, llvm_ty);
+        Some(llvm_ty)
     }
 
     fn map_semantic_fn_type(&mut self, ty: &Type, is_closure: bool) -> FunctionType<'ctx> {
-        let Type::Base { symbol, .. } = ty else { unreachable!(); };
-        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
         let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &type_symbol.kind else { unreachable!(); };
 
         let mut llvm_params: Vec<_> = params
@@ -812,13 +777,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn is_primitive(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Base { symbol, .. } => {
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                matches!(type_symbol.kind, TypeSymbolKind::Primitive(_))
-            },
-            _ => false
-        }
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        matches!(type_symbol.kind, TypeSymbolKind::Primitive(_))
     }
 
     fn trait_name_to_fn_name(&self, trait_name: &str) -> String {
@@ -837,7 +797,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn find_trait_fn_symbol(&mut self, instance_type: &Type, trait_name: &str, fn_name: &str, rhs_type: Option<&Type>) -> Option<&'a ValueSymbol> {
         let trait_id = *self.analyzer.trait_registry.default_traits.get(trait_name)?;
-        let type_id = instance_type.get_base_symbol();
+        let type_id = instance_type.symbol;
 
         let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
         let impls_for_type = impls_for_trait.get(&type_id)?;
@@ -846,7 +806,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             match rhs_type {
                 Some(the_rhs_type) => {
                     if let Some(&impl_rhs_symbol_id) = imp.trait_generic_specialization.first() {
-                        return impl_rhs_symbol_id == the_rhs_type.get_base_symbol();
+                        return impl_rhs_symbol_id == the_rhs_type.symbol;
                     }
                     false
                 },
@@ -1000,54 +960,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let var_id = node.value_id.unwrap();
                 self.variables.get(&var_id).copied()
             },
-            MIRNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
-                let operand_type = operand.type_id.as_ref().unwrap();
-
-                if self.is_heap_type(operand_type) {
-                    let rc_ptr = self.compile_node(operand).unwrap().into_pointer_value();
-                    let rc_repr = self.wrap_in_rc(operand_type);
-                    return Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap());
-                }
-
-                match operand_type {
-                    Type::Reference { .. } | Type::MutableReference { .. } => {
-                        let is_heap = self.is_heap_type(operand_type);
-                        let ptr = self.compile_node(operand).unwrap().into_pointer_value();
-
-                        if is_heap {
-                            let inner_type = match operand_type {
-                                Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => inner,
-                                _ => unreachable!(),
-                            };
-                            let rc_repr = self.wrap_in_rc(inner_type);
-                            Some(self.builder.build_struct_gep(rc_repr.rc_struct_type, ptr, 1, "rc.data_ptr").unwrap())
-                        } else {
-                            Some(ptr)
-                        }
-                    },
-                    _ => {
-                        let trait_name = "DerefMut".to_string();
-                        let fn_name = "deref_mut".to_string();
-
-                        let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
-                        let operand_ptr = self.compile_place_expression(operand).unwrap();
-                        
-                        let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_mut_call").unwrap();
-                        call.try_as_basic_value().left().map(|v| v.into_pointer_value())
-                    }
-                }
-            },
             MIRNodeKind::FieldAccess { left, .. } => {
                 let mut struct_ptr = self.compile_place_expression(left)?;
     
-                let left_type = left.type_id.as_ref().unwrap();
-                let base_type = if let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = left_type {
-                    let loaded_ptr_type = self.map_semantic_type(left_type).unwrap();
-                    struct_ptr = self.builder.build_load(loaded_ptr_type, struct_ptr, "gep.base.load").unwrap().into_pointer_value();
-                    &**inner
-                } else {
-                    left_type
-                };
+                let base_type = left.type_id.as_ref().unwrap();
 
                 if self.is_heap_type(base_type) {
                     let llvm_ptr_type = self.map_semantic_type(base_type).unwrap();
@@ -1098,113 +1014,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_unary_operation(&mut self, operator: Operation, operand_node: &BoxedMIRNode, parent_node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
-        if operator == Operation::ImmutableAddressOf || operator == Operation::MutableAddressOf {
-            let ptr = self.compile_place_expression(operand_node).unwrap();
-            return Some(ptr.as_basic_value_enum());
-        }
-
-        if operator == Operation::Dereference {
-            let operand_type = operand_node.type_id.as_ref().unwrap();
-
-            if self.is_heap_type(operand_type) {
-                let rc_ptr = self.compile_node(operand_node).unwrap().into_pointer_value();
-                let rc_repr = self.wrap_in_rc(operand_type);
-                let data_ptr = self.builder.build_struct_gep(rc_repr.rc_struct_type, rc_ptr, 1, "rc.data_ptr").unwrap();
-
-                if self.analyzer.is_copy_type(operand_type) {
-                    let llvm_inner_type = self.map_inner_semantic_type(operand_type).unwrap();
-                    return Some(self.builder.build_load(llvm_inner_type, data_ptr, "heap.deref.load_copy").unwrap());
-                } else {
-                    let clone_fn = rc_repr.clone_data_fn;
-                    let call = self.builder.build_call(clone_fn, &[data_ptr.into()], "cloned_val").unwrap();
-                    return call.try_as_basic_value().left();
-                }
-            }
-    
-            match operand_type {
-                Type::Reference { .. } | Type::MutableReference { .. } => {
-                    let operand = self.compile_node(operand_node).unwrap();
-                    let ptr = operand.into_pointer_value();
-
-                    let inner_type = match operand_type {
-                        Type::Reference { inner } => &**inner,
-                        Type::MutableReference { inner } => &**inner,
-                        _ => unreachable!(),
-                    };
-                    
-                    if self.analyzer.is_copy_type(inner_type) {
-                        let pointee_type = self.map_semantic_type(inner_type).unwrap();
-                        return Some(self.builder.build_load(pointee_type, ptr, "deref").unwrap());
-                    } else {
-                        let clone_trait_name = "Clone".to_string();
-                        let clone_fn_name = "clone".to_string();
-                        
-                        if let Some(callee) = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None) {
-                            if self.is_rvo_candidate(inner_type) {
-                                let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
-                                let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
-                                
-                                let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), ptr.into()];
-                                
-                                self.builder.build_call(callee, &args, "").unwrap();
-                                let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
-                                return Some(cloned_val);
-                            } else {
-                                let call = self.builder.build_call(callee, &[ptr.into()], "deref.clone").unwrap();
-                                return call.try_as_basic_value().left();
-                            }
-                        } else {
-                            let pointee_type = self.map_semantic_type(inner_type).unwrap();
-                            return Some(self.builder.build_load(pointee_type, ptr, "deref.bitwise_copy").unwrap());
-                        }
-                    }
-                },
-                _ => {
-                    let trait_name = "Deref".to_string();
-                    let fn_name = "deref".to_string();
-
-                    let callee = self.find_trait_fn(operand_type, &trait_name, &fn_name, None).unwrap();
-                    let operand_ptr = self.compile_place_expression(operand_node).unwrap();
-                    
-                    let call = self.builder.build_call(callee, &[operand_ptr.into()], "deref_call").unwrap();
-                    let result_ptr = call.try_as_basic_value().left().unwrap().into_pointer_value();
-
-                    let inner_type = parent_node.type_id.as_ref().unwrap();
-
-                    if self.analyzer.is_copy_type(inner_type) {
-                        let pointee_type = self.map_semantic_type(inner_type).unwrap();
-                        let loaded_val = self.builder.build_load(pointee_type, result_ptr, "deref.load").unwrap();
-                        return Some(loaded_val);
-                    } else {
-                        let clone_trait_name = "Clone".to_string();
-                        let clone_fn_name = "clone".to_string();
-                        let clone_callee = self.find_trait_fn(inner_type, &clone_trait_name, &clone_fn_name, None).unwrap();
-
-                        if self.is_rvo_candidate(inner_type) {
-                            let return_llvm_type = self.map_semantic_type(inner_type).unwrap();
-                            let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "deref.clone.rvo_ret_ptr").unwrap();
-                            
-                            let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), result_ptr.into()];
-                            
-                            self.builder.build_call(clone_callee, &args, "").unwrap();
-                            let cloned_val = self.builder.build_load(return_llvm_type, rvo_return_ptr, "deref.clone.cloned_val").unwrap();
-                            return Some(cloned_val);
-                        } else {
-                            let call = self.builder.build_call(clone_callee, &[result_ptr.into()], "deref.clone").unwrap();
-                            return call.try_as_basic_value().left();
-                        }
-                    }
-                }
-            }
-        }
-    
         let operand_type = operand_node.type_id.as_ref().unwrap();
         if !self.is_primitive(operand_type) && let Some((trait_name, _)) = operator.to_trait_data() {
             let fn_name = self.trait_name_to_fn_name(&trait_name);
             let callee_symbol = self.find_trait_fn_symbol(operand_type, &trait_name, &fn_name, None).unwrap();
             let callee = *self.functions.get(&callee_symbol.id).unwrap();
 
-            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().symbol;
             let callee_type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type_id).unwrap();
 
             let return_type = if let TypeSymbolKind::FunctionSignature { return_type, .. } = &callee_type_symbol.kind {
@@ -1328,7 +1144,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let callee_symbol = self.find_trait_fn_symbol(left_type, &trait_name, &fn_name, Some(right_type)).unwrap();
             let callee = *self.functions.get(&callee_symbol.id).unwrap();
 
-            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().get_base_symbol();
+            let callee_type_id = callee_symbol.type_id.as_ref().unwrap().symbol;
             let callee_type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type_id).unwrap();
 
             let return_type = if let TypeSymbolKind::FunctionSignature { return_type, .. } = &callee_type_symbol.kind {
@@ -1415,7 +1231,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let left = self.compile_node(left_node).unwrap();
         let right = self.compile_node(right_node).unwrap();
-        let is_float = left_node.type_id.as_ref().is_some_and(|t| matches!(t, Type::Base { symbol, .. } if self.analyzer.symbol_table.get_type_symbol(*symbol).is_some_and(|s| matches!(s.kind, TypeSymbolKind::Primitive(PrimitiveKind::Float)))));
+        let is_float = left_node.type_id.as_ref().is_some_and(|t| self.analyzer.symbol_table.get_type_symbol(t.symbol).is_some_and(|s| matches!(s.kind, TypeSymbolKind::Primitive(PrimitiveKind::Float))));
 
         let left_data = if self.is_heap_type(left_type) {
             let rc_ptr = left.into_pointer_value();
@@ -1438,7 +1254,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let result_data = self.compile_core_binary_op(operator, left_data, right_data, is_float);
 
         let result_type = if operator.is_conditional() {
-            &Type::new_base(self.analyzer.get_primitive_type(PrimitiveKind::Bool))
+            &Type::from_no_args(self.analyzer.get_primitive_type(PrimitiveKind::Bool))
         } else {
             left_type
         };
@@ -1619,7 +1435,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(merge_block);
 
         if let Some(ty) = return_type
-            && !matches!(self.analyzer.symbol_table.get_type_symbol(ty.get_base_symbol()).unwrap().kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never))
+            && !matches!(self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap().kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never))
             && !incoming_phis.is_empty()
         {
             let llvm_type = self.map_semantic_type(ty).unwrap();
@@ -1718,28 +1534,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         None
     }
 
-    fn compile_type_cast_base(&mut self, expr: &BoxedMIRNode, target_type: &Type, source_val: BasicValueEnum<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_type_cast_base(
+        &mut self,
+        expr: &BoxedMIRNode,
+        target_type: &Type,
+        source_val: BasicValueEnum<'ctx>,
+    ) -> Option<BasicValueEnum<'ctx>> {
         let source_type = expr.type_id.as_ref().unwrap();
         let llvm_target_type = self.map_semantic_type(target_type).unwrap();
-        let int_symbol_id = self.analyzer.get_primitive_type(PrimitiveKind::Int);
 
-        match (source_type, target_type) {
-            (Type::Base { symbol, .. }, Type::Reference { .. }) |
-            (Type::Base { symbol, .. }, Type::MutableReference { .. }) if *symbol == int_symbol_id => {
-                let int_val = source_val.into_int_value();
-                let ptr_type = llvm_target_type.into_pointer_type();
-                return Some(self.builder.build_int_to_ptr(int_val, ptr_type, "int_to_ptr").unwrap().into());
-            }
-            (Type::Reference { .. }, Type::Base { symbol, .. }) |
-            (Type::MutableReference { .. }, Type::Base { symbol, .. }) if *symbol == int_symbol_id => {
-                let ptr_val = source_val.into_pointer_value();
-                let int_type = llvm_target_type.into_int_type();
-                return Some(self.builder.build_ptr_to_int(ptr_val, int_type, "ptr_to_int").unwrap().into());
-            }
-            _ => {}
-        }
-
-        #[derive(Debug)]
+        #[derive(Debug, Clone, Copy)]
         enum CastableKind {
             Int,
             Float,
@@ -1748,47 +1552,68 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let get_kind = |ty: &Type| {
-            if let Type::Base { symbol, .. } = ty {
-                let sym = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                return match sym.kind {
-                    TypeSymbolKind::Primitive(PrimitiveKind::Int) => Some(CastableKind::Int),
-                    TypeSymbolKind::Primitive(PrimitiveKind::Float) => Some(CastableKind::Float),
-                    TypeSymbolKind::Primitive(PrimitiveKind::Char) => Some(CastableKind::Char),
-                    TypeSymbolKind::Enum(_) => Some(CastableKind::Enum),
-                    _ => None,
-                };
+            let sym = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+            match sym.kind {
+                TypeSymbolKind::Primitive(PrimitiveKind::Int) => Some(CastableKind::Int),
+                TypeSymbolKind::Primitive(PrimitiveKind::Float) => Some(CastableKind::Float),
+                TypeSymbolKind::Primitive(PrimitiveKind::Char) => Some(CastableKind::Char),
+                TypeSymbolKind::Enum(_) => Some(CastableKind::Enum),
+                _ => None,
             }
-            None
         };
 
         let source_kind = get_kind(source_type);
         let target_kind = get_kind(target_type);
 
         match (source_kind, target_kind) {
-            (Some(CastableKind::Int), Some(CastableKind::Float)) => Some(self.builder.build_signed_int_to_float(
-                source_val.into_int_value(), 
-                llvm_target_type.into_float_type(), 
-                "sitofp"
-            ).unwrap().into()),
-            (Some(CastableKind::Float), Some(CastableKind::Int)) => Some(self.builder.build_float_to_signed_int(
-                source_val.into_float_value(), 
-                llvm_target_type.into_int_type(), 
-                "fptosi"
-            ).unwrap().into()),
-            (Some(CastableKind::Int), Some(CastableKind::Int)) |
-            (Some(CastableKind::Char), Some(CastableKind::Int)) |
-            (Some(CastableKind::Int), Some(CastableKind::Char)) |
-            (Some(CastableKind::Enum), Some(CastableKind::Int)) => Some(self.builder.build_int_cast_sign_flag(
-                source_val.into_int_value(),
-                llvm_target_type.into_int_type(), 
-                true, "intcast"
-            ).unwrap().into()),
-            (Some(CastableKind::Float), Some(CastableKind::Float)) => Some(self.builder.build_float_cast(
-                source_val.into_float_value(),
-                llvm_target_type.into_float_type(), "fpcast"
-            ).unwrap().into()),
-            (s, t) => panic!("codegen cannot handle cast from {:?} to {:?}", s, t)
+            (Some(CastableKind::Int), Some(CastableKind::Float)) => {
+                return Some(self.builder.build_signed_int_to_float(
+                    source_val.into_int_value(),
+                    llvm_target_type.into_float_type(),
+                    "sitofp",
+                ).unwrap().into())
+            }
+            (Some(CastableKind::Float), Some(CastableKind::Int)) => {
+                return Some(self.builder.build_float_to_signed_int(
+                    source_val.into_float_value(),
+                    llvm_target_type.into_int_type(),
+                    "fptosi",
+                ).unwrap().into())
+            }
+            (Some(CastableKind::Int), Some(CastableKind::Int))
+            | (Some(CastableKind::Char), Some(CastableKind::Int))
+            | (Some(CastableKind::Int), Some(CastableKind::Char))
+            | (Some(CastableKind::Enum), Some(CastableKind::Int)) => {
+                return Some(self.builder.build_int_cast_sign_flag(
+                    source_val.into_int_value(),
+                    llvm_target_type.into_int_type(),
+                    true,
+                    "intcast",
+                ).unwrap().into())
+            }
+            (Some(CastableKind::Float), Some(CastableKind::Float)) => {
+                return Some(self.builder.build_float_cast(
+                    source_val.into_float_value(),
+                    llvm_target_type.into_float_type(),
+                    "fpcast",
+                ).unwrap().into())
+            },
+            _ => {}
         }
+
+        if let Some(CastableKind::Int) = source_kind {
+            let int_val = source_val.into_int_value();
+            let ptr_type = llvm_target_type.into_pointer_type();
+            return Some(self.builder.build_int_to_ptr(int_val, ptr_type, "int_to_ptr").unwrap().into());
+        }
+
+        if let Some(CastableKind::Int) = target_kind {
+            let ptr_val = source_val.into_pointer_value();
+            let int_type = llvm_target_type.into_int_type();
+            return Some(self.builder.build_ptr_to_int(ptr_val, int_type, "ptr_to_int").unwrap().into());
+        }
+
+        panic!("codegen cannot handle cast from {:?} to {:?}", source_kind, target_kind)
     }
 
     fn compile_type_cast(&mut self, expr: &BoxedMIRNode, target_type: &Type) -> Option<BasicValueEnum<'ctx>> {
@@ -1805,7 +1630,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let MIRNodeKind::EnumDeclaration { name, variants } = &enum_node.kind else { unreachable!(); };
 
         let enum_type_symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(enum_node.scope_id, name).unwrap();
-        let enum_llvm_type = self.map_inner_semantic_type(&Type::new_base(enum_type_symbol.id)).unwrap().into_int_type();
+        let enum_llvm_type = self.map_inner_semantic_type(&Type::from_no_args(enum_type_symbol.id)).unwrap().into_int_type();
 
         let TypeSymbolKind::Enum((scope_id, _)) = enum_type_symbol.kind else { unreachable!(); };
 
@@ -1858,8 +1683,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_type = fn_symbol.type_id.as_ref().unwrap();
         let is_closure = !captures.is_empty();
 
-        let Type::Base { symbol, .. } = fn_type else { unreachable!() };
-        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(fn_type.symbol).unwrap();
         let TypeSymbolKind::FunctionSignature { return_type, .. } = &type_symbol.kind else { unreachable!() };
         let use_rvo = self.is_rvo_candidate(return_type);
 
@@ -1949,8 +1773,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let llvm_struct_type = self.map_inner_semantic_type(struct_type).unwrap().into_struct_type();
         let mut aggregate = llvm_struct_type.get_undef();
 
-        let Type::Base { symbol, .. } = struct_type else { unreachable!() };
-        let struct_type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+        let struct_type_symbol = self.analyzer.symbol_table.get_type_symbol(struct_type.symbol).unwrap();
         let TypeSymbolKind::Struct((scope_id, _)) = struct_type_symbol.kind else { unreachable!() };
 
         let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
@@ -1985,30 +1808,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
         
         Some(aggregate.into())
-    }
-
-    fn compile_instance_argument(&mut self, instance_node: &MIRNode, instance_kind: ReferenceKind) -> BasicValueEnum<'ctx> {
-        match instance_kind {
-            ReferenceKind::Value => self.compile_node(instance_node).unwrap(),
-            ReferenceKind::Reference | ReferenceKind::MutableReference => {
-                if let MIRNodeKind::UnaryOperation { operator: op, .. } = &instance_node.kind
-                    && (*op == Operation::ImmutableAddressOf || *op == Operation::MutableAddressOf)
-                {
-                    return self.compile_node(instance_node).unwrap();
-                }
-                
-                if self.is_rvalue(instance_node) {
-                    let val = self.compile_node(instance_node).unwrap();
-                    let alloca = self.builder.build_alloca(val.get_type(), "autoref.temp").unwrap();
-                    self.builder.build_store(alloca, val).unwrap();
-                    alloca.as_basic_value_enum()
-                } else {
-                    let place_ptr = self.compile_place_expression(instance_node).unwrap();
-                    let place_type = self.map_semantic_type(instance_node.type_id.as_ref().unwrap()).unwrap();
-                    self.builder.build_load(place_type, place_ptr, "instance.load").unwrap()
-                }
-            }
-        }
     }
 
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
@@ -2173,49 +1972,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let is_clone = if let Some(trait_id) = impl_scope.trait_id { trait_id == clone_trait_id } else { impl_scope.id == clone_scope_id };
                 let is_drop = if let Some(trait_id) = impl_scope.trait_id { trait_id == drop_trait_id } else { impl_scope.id == drop_scope_id };
 
-                match ty_id {
-                    Type::Reference { inner } | Type::MutableReference { inner } => {
-                        let rc_ptr = if self.is_heap_type(inner) {
-                            let rc_ptr_ptr = self.compile_node(argument).unwrap().into_pointer_value();
-                            Some(self.builder.build_load(self.context.ptr_type(AddressSpace::default()), rc_ptr_ptr, "rc_ptr").unwrap())
-                        } else {
-                            None
-                        };
-        
-                        if fn_name == "clone" && is_clone {
-                            if let Some(rc_ptr) = rc_ptr {
-                                let incref_fn = self.get_incref();
-                                self.builder.build_call(incref_fn, &[rc_ptr.into()], "heap.clone.incref").unwrap();
-                                return Some(rc_ptr);
-                            } else {
-                                let ptr = self.compile_node(argument).unwrap().into_pointer_value();
-                                let inner_type = match argument.type_id.as_ref().unwrap() {
-                                    Type::Reference { inner } | Type::MutableReference { inner } => inner,
-                                    _ => unreachable!()
-                                };
-                                let llvm_type = self.map_semantic_type(inner_type).unwrap();
-                                let loaded_val = self.builder.build_load(llvm_type, ptr, "clone.primitive_load").unwrap();
-                                return Some(loaded_val);
-                            }
-                        }
-        
-                        if fn_name == "drop" && is_drop {
-                            if let Some(rc_ptr) = rc_ptr {
-                                let decref_fn = self.get_decref();
-                                self.builder.build_call(decref_fn, &[rc_ptr.into()], "heap.drop.decref").unwrap();
-                            }
 
-                            return None;
-                        }
-                    },
-                    _ => {}
+                let rc_ptr = if self.is_heap_type(ty_id) {
+                    let rc_ptr_ptr = self.compile_node(argument).unwrap().into_pointer_value();
+                    Some(self.builder.build_load(self.context.ptr_type(AddressSpace::default()), rc_ptr_ptr, "rc_ptr").unwrap())
+                } else {
+                    None
+                };
+
+                if fn_name == "clone" && is_clone {
+                    if let Some(rc_ptr) = rc_ptr {
+                        let incref_fn = self.get_incref();
+                        self.builder.build_call(incref_fn, &[rc_ptr.into()], "heap.clone.incref").unwrap();
+                        return Some(rc_ptr);
+                    } else {
+                        let ptr = self.compile_node(argument).unwrap().into_pointer_value();
+                        let llvm_type = self.map_semantic_type(argument.type_id.as_ref().unwrap()).unwrap();
+                        let loaded_val = self.builder.build_load(llvm_type, ptr, "clone.primitive_load").unwrap();
+                        return Some(loaded_val);
+                    }
+                }
+
+                if fn_name == "drop" && is_drop {
+                    if let Some(rc_ptr) = rc_ptr {
+                        let decref_fn = self.get_decref();
+                        self.builder.build_call(decref_fn, &[rc_ptr.into()], "heap.drop.decref").unwrap();
+                    }
+
+                    return None;
                 }
             }
         }
 
         let callee_type = function.type_id.as_ref().unwrap();
-        let Type::Base { symbol: fn_sig_id, .. } = callee_type else { unreachable!() };
-        let type_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_sig_id).unwrap();
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type.symbol).unwrap();
         let TypeSymbolKind::FunctionSignature { return_type, instance, .. } = &type_symbol.kind else { unreachable!() };
         
         let mut final_args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
@@ -2251,9 +2041,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return_ptr = Some(ptr);
         }
 
-        if let Some(instance_kind) = instance {
+        if *instance {
             let (instance_node, rest_args) = arguments.split_first().expect("Instance method call with no arguments");
-            let instance_arg = self.compile_instance_argument(instance_node, *instance_kind);
+            let instance_arg = self.compile_node(instance_node).unwrap();
             final_args.push(instance_arg.into());
             explicit_args = rest_args;
         }

@@ -8,7 +8,7 @@ use crate::{
         syntax::ast::{AstNode, AstNodeKind},
     },
     mir::ir_node::{CaptureStrategy, MIRDirectiveKind, MIRNode, MIRNodeKind},
-    utils::kind::{DirectiveKind, Operation, QualifierKind, ReferenceKind, Span},
+    utils::kind::{DirectiveKind, QualifierKind, Span},
 };
 
 #[derive(Default)]
@@ -73,24 +73,18 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn apply_substitutions(ty: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
-        match ty {
-            Type::Base { symbol, args } => {
-                if let Some(concrete_type) = substitutions.get(symbol) {
-                    return Self::apply_substitutions(concrete_type, substitutions);
-                }
+        if let Some(concrete_type) = substitutions.get(&ty.symbol) {
+            return Self::apply_substitutions(concrete_type, substitutions);
+        }
 
-                let new_args = args
-                    .iter()
-                    .map(|arg| Self::apply_substitutions(arg, substitutions))
-                    .collect();
+        let new_args = ty.args
+            .iter()
+            .map(|arg| Self::apply_substitutions(arg, substitutions))
+            .collect();
 
-                Type::Base {
-                    symbol: *symbol,
-                    args: new_args,
-                }
-            },
-            Type::Reference { inner } => Type::Reference { inner: Box::new(Self::apply_substitutions(inner, substitutions)) },
-            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(Self::apply_substitutions(inner, substitutions)) }
+        Type {
+            symbol: ty.symbol,
+            args: new_args,
         }
     }
 }
@@ -100,13 +94,13 @@ impl<'a> MIRBuilder<'a> {
         let TypeSymbolKind::FunctionSignature { params, return_type, .. } = &fn_sig_symbol.kind else { return None; };
         
         let has_trait_self = |ty: &Type| -> Option<ScopeId> {
-            let base_symbol_id = ty.get_base_symbol();
+            let base_symbol_id = ty.symbol;
             let mut current_id = base_symbol_id;
             loop {
                 let base_symbol = self.analyzer.symbol_table.get_type_symbol(current_id).unwrap();
                 match &base_symbol.kind {
                     &TypeSymbolKind::TraitSelf(id) => return Some(id),
-                    TypeSymbolKind::TypeAlias((_, Some(alias))) => current_id = alias.get_base_symbol(),
+                    TypeSymbolKind::TypeAlias((_, Some(alias))) => current_id = alias.symbol,
                     _ => return None
                 }
             }
@@ -122,10 +116,7 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn check_trait_impl_applicability_mir(&self, instance_type: &Type, imp: &crate::frontend::semantics::analyzer::TraitImpl) -> bool {
-        let instance_args = match instance_type {
-            Type::Base { args, .. } => args,
-            _ => return imp.type_specialization.is_empty(),
-        };
+        let instance_args = &instance_type.args;
         
         if instance_args.len() != imp.type_specialization.len() {
             return false;
@@ -136,7 +127,7 @@ impl<'a> MIRBuilder<'a> {
                 continue;
             }
     
-            if instance_arg.get_base_symbol() != impl_target_arg_id {
+            if instance_arg.symbol != impl_target_arg_id {
                 return false;
             }
         }
@@ -145,40 +136,23 @@ impl<'a> MIRBuilder<'a> {
     }
 
     pub fn type_is_fully_concrete(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Base { symbol, args } => {
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf(_)) {
-                    return false;
-                }
-
-                args.iter().all(|arg| self.type_is_fully_concrete(arg))
-            },
-            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => {
-                self.type_is_fully_concrete(inner)
-            }
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if matches!(type_symbol.kind, TypeSymbolKind::Generic(_) | TypeSymbolKind::TraitSelf(_)) {
+            return false;
         }
+
+        ty.args.iter().all(|arg| self.type_is_fully_concrete(arg))
     }
 
     fn get_type_from_ast(&self, node: &AstNode, scope_id: ScopeId) -> Result<Type, ()> {
-        match &node.kind {
-            AstNodeKind::TypeReference { type_name, generic_types, .. } => {
-                let symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(scope_id, type_name).ok_or(())?;
-                let args = generic_types.iter().map(|arg| self.get_type_from_ast(arg, scope_id)).collect::<Result<Vec<_>, _>>()?;
+        if let AstNodeKind::TypeReference { type_name, generic_types, .. } = &node.kind {
+            let symbol = self.analyzer.symbol_table.find_type_symbol_from_scope(scope_id, type_name).ok_or(())?;
+            let args = generic_types.iter().map(|arg| self.get_type_from_ast(arg, scope_id)).collect::<Result<Vec<_>, _>>()?;
 
-                Ok(Type::Base { symbol: symbol.id, args })
-            },
-            AstNodeKind::ReferenceType { mutable, inner } => {
-                let inner_type = self.get_type_from_ast(inner, scope_id)?;
-                
-                if *mutable {
-                    Ok(Type::MutableReference { inner: Box::new(inner_type) })
-                } else {
-                    Ok(Type::Reference { inner: Box::new(inner_type) })
-                }
-            },
-            _ => Err(())
+            return Ok(Type { symbol: symbol.id, args });
         }
+
+        Err(())
     }
 
     fn propagate_monomorphizations(&mut self, program: &mut AstNode) {
@@ -193,7 +167,7 @@ impl<'a> MIRBuilder<'a> {
 
                 if let TypeSymbolKind::FunctionSignature { .. } = &template_symbol.kind
                     && let Some(value_symbol) = self.analyzer.symbol_table.registry.value_symbols.values()
-                        .find(|vs| vs.type_id.as_ref().is_some_and(|ty| ty.get_base_symbol() == *template_symbol_id)).cloned()
+                        .find(|vs| vs.type_id.as_ref().is_some_and(|ty| ty.symbol == *template_symbol_id)).cloned()
                     && let Some(span) = value_symbol.span
                 {
                     let func_node = find_node_by_span_mut(program, span).unwrap();
@@ -242,19 +216,14 @@ impl<'a> MIRBuilder<'a> {
                                 let concrete_type_for_struct_generic = specialization_map.get(struct_generic_id).unwrap();
                                 let impl_generic_type = self.get_type_from_ast(impl_generic_arg_node, imp.scope_id).unwrap();
                                 
-                                if let Type::Base { symbol: impl_generic_symbol_id, .. } = impl_generic_type {
-                                    if imp.generic_params.contains(&impl_generic_symbol_id) {
-                                        if let Some(existing) = impl_substitutions.get(&impl_generic_symbol_id) {
-                                            if existing != concrete_type_for_struct_generic {
-                                                consistent = false;
-                                                break;
-                                            }
-                                        } else {
-                                            impl_substitutions.insert(impl_generic_symbol_id, concrete_type_for_struct_generic.clone());
+                                if imp.generic_params.contains(&impl_generic_type.symbol) {
+                                    if let Some(existing) = impl_substitutions.get(&impl_generic_type.symbol) {
+                                        if existing != concrete_type_for_struct_generic {
+                                            consistent = false;
+                                            break;
                                         }
-                                    } else if &impl_generic_type != concrete_type_for_struct_generic {
-                                        consistent = false;
-                                        break;
+                                    } else {
+                                        impl_substitutions.insert(impl_generic_type.symbol, concrete_type_for_struct_generic.clone());
                                     }
                                 } else if &impl_generic_type != concrete_type_for_struct_generic {
                                     consistent = false;
@@ -274,7 +243,7 @@ impl<'a> MIRBuilder<'a> {
                             for func_node in associated_functions {
                                 let func_value_id = func_node.value_id.unwrap();
                                 let func_symbol = self.analyzer.symbol_table.get_value_symbol(func_value_id).unwrap();
-                                let func_type_id = func_symbol.type_id.as_ref().unwrap().get_base_symbol();
+                                let func_type_id = func_symbol.type_id.as_ref().unwrap().symbol;
                                 
                                 let instantiations_for_func = self.monomorphization_ctx.instantiations.entry(func_type_id).or_default();
                                 if instantiations_for_func.insert(impl_substitutions.clone()) {
@@ -298,7 +267,7 @@ impl<'a> MIRBuilder<'a> {
                                     .iter()
                                     .map(|gid| specialization_map.get(gid).unwrap().clone())
                                     .collect();
-                                let concrete_instance_type = Type::Base {
+                                let concrete_instance_type = Type {
                                     symbol: *template_symbol_id,
                                     args: concrete_args,
                                 };
@@ -306,20 +275,16 @@ impl<'a> MIRBuilder<'a> {
                                 let mut impl_substitutions = BTreeMap::new();
                                 let mut is_applicable = true;
 
-                                if let Type::Base { args: instance_args, .. } = &concrete_instance_type {
-                                    if instance_args.len() == trait_impl.type_specialization.len() {
-                                        for (instance_arg, &impl_spec_id) in instance_args.iter().zip(&trait_impl.type_specialization) {
-                                            if trait_impl.impl_generic_params.contains(&impl_spec_id) {
-                                                impl_substitutions.insert(impl_spec_id, instance_arg.clone());
-                                            } else if instance_arg.get_base_symbol() != impl_spec_id {
-                                                is_applicable = false;
-                                                break;
-                                            }
+                                if concrete_instance_type.args.len() == trait_impl.type_specialization.len() {
+                                    for (instance_arg, &impl_spec_id) in concrete_instance_type.args.iter().zip(&trait_impl.type_specialization) {
+                                        if trait_impl.impl_generic_params.contains(&impl_spec_id) {
+                                            impl_substitutions.insert(impl_spec_id, instance_arg.clone());
+                                        } else if instance_arg.symbol != impl_spec_id {
+                                            is_applicable = false;
+                                            break;
                                         }
-                                    } else {
-                                        is_applicable = false;
                                     }
-                                } else if !trait_impl.type_specialization.is_empty() {
+                                } else {
                                     is_applicable = false;
                                 }
 
@@ -336,7 +301,7 @@ impl<'a> MIRBuilder<'a> {
                                 for &func_value_id in impl_scope.values.values() {
                                     let func_symbol = self.analyzer.symbol_table.get_value_symbol(func_value_id).unwrap();
                                     if let ValueSymbolKind::Function(_, _) = func_symbol.kind
-                                        && let Some(func_type_id) = func_symbol.type_id.as_ref().map(|t| t.get_base_symbol())
+                                        && let Some(func_type_id) = func_symbol.type_id.as_ref().map(|t| t.symbol)
                                     {
                                         let instantiations_for_func = self.monomorphization_ctx.instantiations.entry(func_type_id).or_default();
                                         if instantiations_for_func.insert(impl_substitutions.clone()) {
@@ -371,63 +336,32 @@ impl<'a> MIRBuilder<'a> {
             concrete_ty.clone()
         };
 
-        if let Type::Base { symbol: template_symbol, .. } = template_ty {
-            let template_type_symbol = self
-                .analyzer
-                .symbol_table
-                .get_type_symbol(*template_symbol)
-                .unwrap();
+        let template_type_symbol = self.analyzer.symbol_table.get_type_symbol(template_ty.symbol).unwrap();
 
-            if let TypeSymbolKind::Generic(_) = template_type_symbol.kind {
-                substitutions.insert(*template_symbol, concrete_ty.clone());
-                return;
-            }
+        if let TypeSymbolKind::Generic(_) = template_type_symbol.kind {
+            substitutions.insert(template_ty.symbol, concrete_ty.clone());
+            return;
         }
 
-        match (&concrete_ty, template_ty) {
-            (
-                Type::Base {
-                    symbol: concrete_symbol,
-                    args: concrete_args,
-                },
-                Type::Base {
-                    symbol: template_symbol,
-                    args: template_args,
-                },
-            ) => {
-                if concrete_symbol == template_symbol && concrete_args.len() == template_args.len() {
-                    for (c_arg, t_arg) in concrete_args.iter().zip(template_args.iter()) {
-                        self.collect_generic_mappings(c_arg, t_arg, substitutions);
-                    }
-                }
-            },
-            (Type::Reference { inner: c_inner, .. }, Type::Reference { inner: t_inner, .. })
-                | (Type::MutableReference { inner: c_inner, .. }, Type::MutableReference { inner: t_inner, .. })
-                | (Type::MutableReference { inner: c_inner, .. }, Type::Reference { inner: t_inner, .. })
-            => {
-                self.collect_generic_mappings(c_inner, t_inner, substitutions);
-            },
-            _ => {}
+        if concrete_ty == *template_ty {
+            for (c_arg, t_arg) in concrete_ty.args.iter().zip(template_ty.args.iter()) {
+                self.collect_generic_mappings(c_arg, t_arg, substitutions);
+            }
         }
     }
 
     fn collect_generic_ids(&self, ty: &Type, out: &mut Vec<TypeSymbolId>) {
-        match ty {
-            Type::Base { symbol, args } => {
-                match self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().kind {
-                    TypeSymbolKind::Generic(_) => {
-                        if !out.contains(symbol) {
-                            out.push(*symbol);
-                        }
-                    },
-                    _ => {
-                        for a in args {
-                            self.collect_generic_ids(a, out);
-                        }
-                    }
+        match self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap().kind {
+            TypeSymbolKind::Generic(_) => {
+                if !out.contains(&ty.symbol) {
+                    out.push(ty.symbol);
                 }
             },
-            Type::Reference { inner, .. } | Type::MutableReference { inner, .. } => self.collect_generic_ids(inner, out)
+            _ => {
+                for a in ty.args.iter() {
+                    self.collect_generic_ids(a, out);
+                }
+            }
         }
     }
 
@@ -441,8 +375,7 @@ impl<'a> MIRBuilder<'a> {
                 let Some(fn_value_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) else { return; };
                 let Some(template_fn_type) = fn_value_symbol.type_id.as_ref() else { return; };
 
-                let Type::Base { symbol: fn_symbol_id, .. } = template_fn_type else { return; };
-                let fn_symbol = self.analyzer.symbol_table.get_type_symbol(*fn_symbol_id).unwrap();
+                let fn_symbol = self.analyzer.symbol_table.get_type_symbol(template_fn_type.symbol).unwrap();
                 let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return, .. } = &fn_symbol.kind else { return; };
 
                 let mut generic_id_to_concrete_type = HashMap::new();
@@ -462,15 +395,8 @@ impl<'a> MIRBuilder<'a> {
                         concrete_receiver_ty = Self::apply_substitutions(&concrete_receiver_ty, subs);
                     }
 
-                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = concrete_receiver_ty {
-                        concrete_receiver_ty = inner.as_ref().clone();
-                    }
-                
                     let template_receiver_ty = &template_params[0];
-                    let mut base_template_receiver_ty = template_receiver_ty;
-                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_template_receiver_ty {
-                        base_template_receiver_ty = inner;
-                    }
+                    let base_template_receiver_ty = template_receiver_ty;
                 
                     self.collect_generic_mappings(
                         &concrete_receiver_ty,
@@ -511,10 +437,7 @@ impl<'a> MIRBuilder<'a> {
 
                 if has_receiver {
                     let template_receiver_ty = &template_params[0];
-                    let mut base_template_receiver_ty = template_receiver_ty;
-                    while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_template_receiver_ty {
-                        base_template_receiver_ty = inner;
-                    }
+                    let base_template_receiver_ty = template_receiver_ty;
                     self.collect_generic_ids(base_template_receiver_ty, &mut ordered_generic_ids);
                 }
 
@@ -554,33 +477,33 @@ impl<'a> MIRBuilder<'a> {
 
                     self.monomorphization_ctx
                         .instantiations
-                        .entry(*fn_symbol_id)
+                        .entry(template_fn_type.symbol)
                         .or_default()
                         .insert(instantiation_map);
                 }
             },
             AstNodeKind::StructLiteral { generic_arguments, .. } | AstNodeKind::TypeReference { generic_arguments, .. } => {
-                if let Some(Type::Base { symbol, args, .. }) = &node.type_id {
-                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
+                if let Some(ty) = &node.type_id {
+                    let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
                     
-                    if type_symbol.generic_parameters.is_empty() || args.is_empty() {
+                    if type_symbol.generic_parameters.is_empty() || ty.args.is_empty() {
                         return;
                     }
 
-                    if args.iter().all(|arg| self.type_is_fully_concrete(arg)) {
-                        *generic_arguments = args.clone();
+                    if ty.args.iter().all(|arg| self.type_is_fully_concrete(arg)) {
+                        *generic_arguments = ty.args.clone();
 
                         let instantiation_map: BTreeMap<TypeSymbolId, Type> = type_symbol
                             .generic_parameters
                             .iter()
-                            .zip(args.iter())
+                            .zip(ty.args.iter())
                             .map(|(&gid, ty)| (gid, ty.clone()))
                             .collect();
                         
                         if !instantiation_map.is_empty() {
                             self.monomorphization_ctx
                                 .instantiations
-                                .entry(*symbol)
+                                .entry(ty.symbol)
                                 .or_default()
                                 .insert(instantiation_map);
                         }
@@ -650,57 +573,51 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn substitute_type(&mut self, generic_type: &Type, substitutions: &BTreeMap<TypeSymbolId, Type>) -> Type {
-        match generic_type {
-            Type::Base { symbol, args } => {
-                if let Some(concrete_type) = substitutions.get(symbol) {
-                    return concrete_type.clone();
-                }
+        if let Some(concrete_type) = substitutions.get(&generic_type.symbol) {
+            return concrete_type.clone();
+        }
 
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap().clone();
-                if let TypeSymbolKind::OpaqueTypeProjection { ty, tr, member } = &type_symbol.kind {
-                    let substituted_ty = self.substitute_type(ty, substitutions);
-                    let substituted_tr = self.substitute_type(tr, substitutions);
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(generic_type.symbol).unwrap().clone();
+        if let TypeSymbolKind::OpaqueTypeProjection { ty, tr, member } = &type_symbol.kind {
+            let substituted_ty = self.substitute_type(ty, substitutions);
+            let substituted_tr = self.substitute_type(tr, substitutions);
 
-                    if &substituted_ty != ty || &substituted_tr != tr {
-                        let new_opaque_type_name = format!(
-                            "[{} as {}].{}",
-                            self.analyzer.symbol_table.display_type(&substituted_ty),
-                            self.analyzer.symbol_table.display_type(&substituted_tr),
-                            member
-                        );
-                        
-                        let new_symbol_id = if let Some(sym) = self.analyzer.symbol_table.find_type_symbol(&new_opaque_type_name) {
-                            sym.id
-                        } else {
-                            self.analyzer.symbol_table.add_type_symbol(
-                                &new_opaque_type_name,
-                                TypeSymbolKind::OpaqueTypeProjection {
-                                    ty: substituted_ty, 
-                                    tr: substituted_tr,
-                                    member: member.clone()
-                                },
-                                vec![],
-                                QualifierKind::Private,
-                                type_symbol.span
-                            ).unwrap()
-                        };
+            if &substituted_ty != ty || &substituted_tr != tr {
+                let new_opaque_type_name = format!(
+                    "[{} as {}].{}",
+                    self.analyzer.symbol_table.display_type(&substituted_ty),
+                    self.analyzer.symbol_table.display_type(&substituted_tr),
+                    member
+                );
+                
+                let new_symbol_id = if let Some(sym) = self.analyzer.symbol_table.find_type_symbol(&new_opaque_type_name) {
+                    sym.id
+                } else {
+                    self.analyzer.symbol_table.add_type_symbol(
+                        &new_opaque_type_name,
+                        TypeSymbolKind::OpaqueTypeProjection {
+                            ty: substituted_ty, 
+                            tr: substituted_tr,
+                            member: member.clone()
+                        },
+                        vec![],
+                        QualifierKind::Private,
+                        type_symbol.span
+                    ).unwrap()
+                };
 
-                        return Type::new_base(new_symbol_id);
-                    }
-                }
+                return Type::from_no_args(new_symbol_id);
+            }
+        }
 
-                let new_args = args
-                    .iter()
-                    .map(|arg| self.substitute_type(arg, substitutions))
-                    .collect();
+        let new_args = generic_type.args
+            .iter()
+            .map(|arg| self.substitute_type(arg, substitutions))
+            .collect();
 
-                Type::Base {
-                    symbol: *symbol,
-                    args: new_args,
-                }
-            },
-            Type::Reference { inner } => Type::Reference { inner: Box::new(self.substitute_type(inner, substitutions)) },
-            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.substitute_type(inner, substitutions)) }
+        Type {
+            symbol: generic_type.symbol,
+            args: new_args,
         }
     }
 
@@ -724,7 +641,7 @@ impl<'a> MIRBuilder<'a> {
                     .symbol_table
                     .get_value_symbol(node.value_id.unwrap())
                     .unwrap();
-                value_symbol.type_id.as_ref().unwrap().get_base_symbol()
+                value_symbol.type_id.as_ref().unwrap().symbol
             }
             _ => return concrete_ir_nodes,
         };
@@ -844,8 +761,7 @@ impl<'a> MIRBuilder<'a> {
                 if let Some(substitutions) = self.monomorphization_ctx.substitution_ctx.clone() {
                     let template_value_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap().clone();
                     let template_type = template_value_symbol.type_id.as_ref().unwrap();
-                    let Type::Base { symbol: template_fn_sig_id, .. } = template_type else { unreachable!() };
-                    let template_fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(*template_fn_sig_id).unwrap().clone();
+                    let template_fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(template_type.symbol).unwrap().clone();
                     let TypeSymbolKind::FunctionSignature { params: template_params, return_type: template_return_type, .. } = &template_fn_sig_symbol.kind else { unreachable!() };
 
                     let mangled_name = self.mangle_name(template_fn_sig_symbol.id, substitutions.values());
@@ -919,7 +835,7 @@ impl<'a> MIRBuilder<'a> {
                         ValueSymbolKind::Function(new_fn_body_scope_id, HashSet::new()),
                         false,
                         template_value_symbol.qualifier,
-                        Some(Type::new_base(concrete_fn_sig_id)),
+                        Some(Type::from_no_args(concrete_fn_sig_id)),
                         Some(node.span),
                     ).unwrap();
 
@@ -932,7 +848,7 @@ impl<'a> MIRBuilder<'a> {
                         kind: MIRNodeKind::Function { name: mangled_name, parameters: mir_params, instance: *instance, body: mir_body, captures: vec![] },
                         span: node.span,
                         value_id: Some(concrete_fn_value_id),
-                        type_id: Some(Type::new_base(concrete_fn_sig_id)),
+                        type_id: Some(Type::from_no_args(concrete_fn_sig_id)),
                         scope_id: node.scope_id.unwrap()
                     });
                 }
@@ -1000,7 +916,6 @@ impl<'a> MIRBuilder<'a> {
                     let mut mir_arguments: Vec<MIRNode> = arguments.iter_mut().filter_map(|a| self.lower_node(a)).collect();
 
                     let fn_type = fn_value_symbol.type_id.as_ref().unwrap();
-                    let Type::Base { symbol: fn_sig_id, .. } = fn_type else { unreachable!() };
 
                     let is_instance_method_call = if let AstNodeKind::FieldAccess { left, .. } = &function.kind {
                         match &left.kind {
@@ -1017,14 +932,7 @@ impl<'a> MIRBuilder<'a> {
                         && let AstNodeKind::FieldAccess { left, .. } = &function.kind
                         && let Some(base_type) = &left.type_id
                     {
-                        let mut current_type = base_type;
-                        while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = current_type {
-                            current_type = inner;
-                        }
-                        
-                        if let Type::Base { args, .. } = current_type {
-                            needs_monomorphization = !args.is_empty();
-                        }
+                        needs_monomorphization = !base_type.args.is_empty();
                     }
 
                     if fn_value_symbol.is_intrinsic {
@@ -1042,16 +950,12 @@ impl<'a> MIRBuilder<'a> {
                                     base_type = self.substitute_type(&base_type, substitutions);
                                 }
     
-                                while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = &base_type {
-                                    base_type = (**inner).clone();
-                                }
-    
-                                if let Type::Base { args, .. } = base_type { args.clone() } else { return None; }
+                                base_type.args.clone()
                             } else {
                                 return None;
                             };
     
-                            let mangled_name = self.mangle_name(*fn_sig_id, &concrete_types_for_mangling);
+                            let mangled_name = self.mangle_name(fn_type.symbol, &concrete_types_for_mangling);
                             let parent_scope_id = self.analyzer.symbol_table.get_scope(fn_value_symbol.scope_id)?.id;
                             let monomorphized_fn_value_symbol = self.analyzer.symbol_table.find_value_symbol_from_scope(parent_scope_id, &mangled_name)?.clone();
                             let fn_type = monomorphized_fn_value_symbol.type_id?;
@@ -1076,28 +980,12 @@ impl<'a> MIRBuilder<'a> {
 
                         if self.type_is_fully_concrete(&concrete_base_type) {
                             let trait_type = trait_ty_node.as_ref().unwrap().type_id.as_ref().unwrap();
-                            let trait_id = trait_type.get_base_symbol();
-                            let concrete_type_id = concrete_base_type.get_base_symbol();
+                            let trait_id = trait_type.symbol;
+                            let concrete_type_id = concrete_base_type.symbol;
 
                             if self.analyzer.is_copy_type(&concrete_base_type) {
                                 let clone_arg = arguments.get_mut(0).unwrap();
-                                let mir_arg = self.lower_node(clone_arg)?;
-
-                                match &clone_arg.type_id.as_ref().unwrap() {
-                                    Type::MutableReference { inner } | Type::Reference { inner } => {
-                                        return Some(MIRNode {
-                                            kind: MIRNodeKind::UnaryOperation {
-                                                operator: Operation::Dereference,
-                                                operand: Box::new(mir_arg),
-                                            },
-                                            span: node.span,
-                                            value_id: None,
-                                            type_id: Some(inner.as_ref().clone()),
-                                            scope_id: node.scope_id.unwrap()
-                                        });
-                                    },
-                                    _ => {}
-                                }
+                                return self.lower_node(clone_arg);
                             } else if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
                                 && let Some(impls_for_type) = impls_for_trait.get(&concrete_type_id)
                                 && let Some(imp) = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_base_type, imp))
@@ -1115,46 +1003,7 @@ impl<'a> MIRBuilder<'a> {
                     let mir_function_expr = if is_instance_method_call {
                         let AstNodeKind::FieldAccess { left, .. } = &mut function.kind else { unreachable!(); };
 
-                        let fn_sig_symbol = self.analyzer.symbol_table.get_type_symbol(mir_fn_type.get_base_symbol()).unwrap();
-                        let instance_kind = if let TypeSymbolKind::FunctionSignature { instance, .. } = fn_sig_symbol.kind {
-                            instance
-                        } else {
-                            None
-                        };
-
-                        let mut instance_mir = self.lower_node(left).unwrap();
-                        let left_type = left.type_id.as_ref().unwrap();
-
-                        if !matches!(left_type, Type::Reference { .. } | Type::MutableReference { .. }) && let Some(instance_kind) = instance_kind {
-                            match instance_kind {
-                                ReferenceKind::Reference => {
-                                    instance_mir = MIRNode {
-                                        kind: MIRNodeKind::UnaryOperation {
-                                            operator: Operation::ImmutableAddressOf,
-                                            operand: Box::new(instance_mir),
-                                        },
-                                        span: left.span,
-                                        value_id: None,
-                                        type_id: Some(Type::Reference { inner: Box::new(left_type.clone()) }),
-                                        scope_id: left.scope_id.unwrap(),
-                                    };
-                                },
-                                ReferenceKind::MutableReference => {
-                                    instance_mir = MIRNode {
-                                        kind: MIRNodeKind::UnaryOperation {
-                                            operator: Operation::MutableAddressOf,
-                                            operand: Box::new(instance_mir),
-                                        },
-                                        span: left.span,
-                                        value_id: None,
-                                        type_id: Some(Type::MutableReference { inner: Box::new(left_type.clone()) }),
-                                        scope_id: left.scope_id.unwrap(),
-                                    };
-                                },
-                                ReferenceKind::Value => {}
-                            }
-                        }
-                        
+                        let instance_mir = self.lower_node(left).unwrap();                        
                         mir_arguments.insert(0, instance_mir);
 
                         MIRNode {
@@ -1262,7 +1111,7 @@ impl<'a> MIRBuilder<'a> {
                         kind: MIRNodeKind::StructDeclaration { name: mangled_name, fields: ir_fields },
                         span: node.span,
                         value_id: node.value_id,
-                        type_id: Some(Type::new_base(new_type_symbol_id)),
+                        type_id: Some(Type::from_no_args(new_type_symbol_id)),
                         scope_id: node.scope_id.unwrap()
                     };
 
@@ -1337,7 +1186,7 @@ impl<'a> MIRBuilder<'a> {
                     return Some(MIRNode {
                         span: node.span,
                         value_id: None,
-                        type_id: Some(Type::new_base(concrete_type_symbol_id)),
+                        type_id: Some(Type::from_no_args(concrete_type_symbol_id)),
                         scope_id: node.scope_id.unwrap(),
                         kind: MIRNodeKind::StructLiteral {
                             name: mangled_name,
@@ -1442,10 +1291,9 @@ impl<'a> MIRBuilder<'a> {
             | AstNodeKind::TraitConstant { .. }
             | AstNodeKind::TraitType(_)
             | AstNodeKind::PathQualifier { .. }
-            | AstNodeKind::ReferenceType { .. }
             | AstNodeKind::TypeReference { .. }
             | AstNodeKind::FunctionPointer { .. }
-            | AstNodeKind::SelfType(_)
+            | AstNodeKind::SelfType
             | AstNodeKind::GenericParameter { .. } 
             | AstNodeKind::ImportStatement { .. }
             | AstNodeKind::ExportStatement { .. } => return None,
@@ -1463,8 +1311,8 @@ impl<'a> MIRBuilder<'a> {
 
 impl<'a> MIRBuilder<'a> {
     fn find_concrete_associated_type(&mut self, ty: &Type, tr: &Type, member_name: &str) -> Option<Type> {
-        let type_id = ty.get_base_symbol();
-        let trait_id = tr.get_base_symbol();
+        let type_id = ty.symbol;
+        let trait_id = tr.symbol;
         
         let impls_for_trait = self.analyzer.trait_registry.register.get(&trait_id)?;
         let impls_for_type = impls_for_trait.get(&type_id)?;
@@ -1472,13 +1320,13 @@ impl<'a> MIRBuilder<'a> {
         for imp in impls_for_type {
             let mut substitutions: BTreeMap<TypeSymbolId, Type> = BTreeMap::new();
             
-            let instance_args = if let Type::Base { args, .. } = ty { args } else { continue; };
+            let instance_args = &ty.args;
             if instance_args.len() != imp.type_specialization.len() { continue; }
             let mut valid_impl = true;
             for (instance_arg, &impl_spec_id) in instance_args.iter().zip(&imp.type_specialization) {
                 if imp.impl_generic_params.contains(&impl_spec_id) {
                     substitutions.insert(impl_spec_id, instance_arg.clone());
-                } else if instance_arg.get_base_symbol() != impl_spec_id { 
+                } else if instance_arg.symbol != impl_spec_id { 
                     valid_impl = false;
                     break;
                 }
@@ -1486,7 +1334,7 @@ impl<'a> MIRBuilder<'a> {
 
             if !valid_impl { continue; }
             
-            let trait_args = if let Type::Base { args, .. } = tr { args } else { continue; };
+            let trait_args = &tr.args;
             if trait_args.len() != imp.trait_generic_specialization.len() { continue; }
             for (trait_arg, &impl_spec_id) in trait_args.iter().zip(&imp.trait_generic_specialization) {
                 if imp.impl_generic_params.contains(&impl_spec_id) {
@@ -1495,7 +1343,7 @@ impl<'a> MIRBuilder<'a> {
                     } else {
                         substitutions.insert(impl_spec_id, trait_arg.clone());
                     }
-                } else if trait_arg.get_base_symbol() != impl_spec_id {
+                } else if trait_arg.symbol != impl_spec_id {
                     valid_impl = false;
                     break;
                 }
@@ -1513,34 +1361,28 @@ impl<'a> MIRBuilder<'a> {
     }
 
     fn resolve_concrete_type_recursively(&mut self, ty: &Type) -> Type {
-        match ty {
-            Type::Base { symbol, args } => {
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr, member } = &type_symbol.kind.clone()
-                    && let Some(resolved_type) = self.find_concrete_associated_type(opaque_ty, tr, member)
-                {
-                    return self.resolve_concrete_type_recursively(&resolved_type);
-                }
-
-                let new_args: Vec<_> = args.iter().map(|a| self.resolve_concrete_type_recursively(a)).collect();
-                
-                let type_symbol = self.analyzer.symbol_table.get_type_symbol(*symbol).unwrap();
-                if !type_symbol.generic_parameters.is_empty() && !new_args.is_empty()
-                    && new_args.iter().all(|a| self.type_is_fully_concrete(a))
-                {
-                    let mangled_name = self.mangle_name(*symbol, &new_args);
-                    let decl_scope_id = self.analyzer.symbol_table.get_scope(type_symbol.scope_id).unwrap().id;
-                    
-                    if let Some(concrete_symbol) = self.analyzer.symbol_table.find_type_symbol_from_scope(decl_scope_id, &mangled_name) {
-                        return Type::new_base(concrete_symbol.id);
-                    }
-                }
-                
-                Type::Base { symbol: *symbol, args: new_args }
-            },
-            Type::Reference { inner } => Type::Reference { inner: Box::new(self.resolve_concrete_type_recursively(inner)) },
-            Type::MutableReference { inner } => Type::MutableReference { inner: Box::new(self.resolve_concrete_type_recursively(inner)) },
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr, member } = &type_symbol.kind.clone()
+            && let Some(resolved_type) = self.find_concrete_associated_type(opaque_ty, tr, member)
+        {
+            return self.resolve_concrete_type_recursively(&resolved_type);
         }
+
+        let new_args: Vec<_> = ty.args.iter().map(|a| self.resolve_concrete_type_recursively(a)).collect();
+        
+        let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+        if !type_symbol.generic_parameters.is_empty() && !new_args.is_empty()
+            && new_args.iter().all(|a| self.type_is_fully_concrete(a))
+        {
+            let mangled_name = self.mangle_name(ty.symbol, &new_args);
+            let decl_scope_id = self.analyzer.symbol_table.get_scope(type_symbol.scope_id).unwrap().id;
+            
+            if let Some(concrete_symbol) = self.analyzer.symbol_table.find_type_symbol_from_scope(decl_scope_id, &mangled_name) {
+                return Type::from_no_args(concrete_symbol.id);
+            }
+        }
+        
+        Type { symbol: ty.symbol, args: new_args }
     }
 
     fn concretize_node(&mut self, node: &mut MIRNode) {
@@ -1584,18 +1426,13 @@ impl<'a> MIRBuilder<'a> {
         }
         
         if let MIRNodeKind::FieldAccess { left, .. } = &mut node.kind {
-            let mut base_ty = left.type_id.as_ref().unwrap();
-            while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = base_ty {
-                base_ty = inner;
-            }
-
-            let Type::Base { symbol: concrete_base_id, .. } = base_ty else { return; };
+            let base_ty = left.type_id.as_ref().unwrap();
 
             let generic_member_symbol = self.analyzer.symbol_table.get_value_symbol(node.value_id.unwrap()).unwrap();
             let generic_member_scope = self.analyzer.symbol_table.get_scope(generic_member_symbol.scope_id).unwrap();
 
             if generic_member_scope.kind == ScopeKind::Struct {
-                let concrete_base_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_base_id).unwrap();
+                let concrete_base_symbol = self.analyzer.symbol_table.get_type_symbol(base_ty.symbol).unwrap();
                 if let TypeSymbolKind::Struct((concrete_scope_id, _)) = concrete_base_symbol.kind {
                     let field_name = self.analyzer.symbol_table.get_value_name(generic_member_symbol.name_id);
                     if let Some(concrete_field_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope(field_name, concrete_scope_id) {
@@ -1605,9 +1442,8 @@ impl<'a> MIRBuilder<'a> {
                 }
             } else {
                 let concrete_member_type = node.type_id.as_ref().unwrap();
-                let Type::Base { symbol: concrete_member_type_id, .. } = concrete_member_type else { return; };
-                
-                let concrete_member_type_symbol = self.analyzer.symbol_table.get_type_symbol(*concrete_member_type_id).unwrap();
+
+                let concrete_member_type_symbol = self.analyzer.symbol_table.get_type_symbol(concrete_member_type.symbol).unwrap();
                 let concrete_member_name = self.analyzer.symbol_table.get_type_name(concrete_member_type_symbol.name_id);
                 
                 let mut search_scope = generic_member_scope;
@@ -1656,7 +1492,7 @@ impl<'a> MIRBuilder<'a> {
             let mut was_changed = false;
 
             let new_generics: Vec<TypeSymbolId> = symbol_clone.generic_parameters.iter()
-                .map(|&p_id| self.resolve_concrete_type_recursively(&Type::new_base(p_id)).get_base_symbol())
+                .map(|&p_id| self.resolve_concrete_type_recursively(&Type::from_no_args(p_id)).symbol)
                 .collect();
             
             if symbol_clone.generic_parameters != new_generics {

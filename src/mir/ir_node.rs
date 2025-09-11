@@ -80,7 +80,7 @@ pub enum MIRNodeKind {
     Function {
         name: String,
         parameters: Vec<MIRNode>,
-        instance: Option<ReferenceKind>,
+        instance: bool,
         body: Option<Box<MIRNode>>,
         captures: Vec<MIRNode>
     },
@@ -660,7 +660,7 @@ impl MIRNode {
         }
 
         if let (Some(ty), Some(table)) = (&self.type_id, table) {
-            if let Some(type_symbol) = table.get_type_symbol(ty.get_base_symbol())
+            if let Some(type_symbol) = table.get_type_symbol(ty.symbol)
                 && matches!(type_symbol.kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never))
             {
                 return Ok(());
@@ -669,8 +669,8 @@ impl MIRNode {
             let type_str = table.display_type(ty);
             write!(f, " {}", format!("<{}>", type_str).cyan())?;
         } else if let Some(ty) = &self.type_id {
-            if ty.get_base_symbol() == PrimitiveKind::Void as usize
-                || ty.get_base_symbol() == PrimitiveKind::Never as usize
+            if ty.symbol == PrimitiveKind::Void as usize
+                || ty.symbol == PrimitiveKind::Never as usize
             {
                 return Ok(());
             }

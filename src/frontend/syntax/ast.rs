@@ -78,7 +78,7 @@ pub enum AstNodeKind {
         generic_parameters: Vec<AstNode>,
         parameters: Vec<AstNode>,
         return_type: Option<BoxedAstNode>,
-        instance: Option<ReferenceKind>,
+        instance: bool,
         body: Option<BoxedAstNode>
     },
     /// A type that denotes the signature of a function.
@@ -139,7 +139,7 @@ pub enum AstNodeKind {
     SelfExpr,
     /// `Self`, used as the type annotation for `self`, `&self`, and `&mut self`
     /// in an associated function.
-    SelfType(ReferenceKind),
+    SelfType,
 
     /// A member access operation (i.e. `x.y`).
     FieldAccess {
@@ -171,10 +171,6 @@ pub enum AstNodeKind {
         constraints: Vec<AstNode>,
     },
 
-    ReferenceType {
-        mutable: bool,
-        inner: BoxedAstNode
-    },
     TypeReference {
         type_name: String,
         generic_types: Vec<AstNode>,
@@ -254,7 +250,6 @@ impl AstNode {
 
             AstNodeKind::GenericParameter { name, .. } => Some(name.clone()),
 
-            AstNodeKind::ReferenceType { inner, .. } => inner.get_name(),
             AstNodeKind::TypeReference { type_name, .. } => Some(type_name.clone()),
             AstNodeKind::TypeDeclaration { name, .. } => Some(name.clone()),
 
@@ -540,15 +535,7 @@ impl AstNode {
             }
 
             AstNodeKind::SelfExpr => write!(f, "{}self", indent_str)?,
-            AstNodeKind::SelfType(operation) => {
-                let operation_str = match operation {
-                    ReferenceKind::Reference => "&",
-                    ReferenceKind::MutableReference => "&mut ",
-                    ReferenceKind::Value => "",
-                };
-
-                write!(f, "{}{operation_str}Self", indent_str)?
-            }
+            AstNodeKind::SelfType => write!(f, "{}Self", indent_str)?,
 
             AstNodeKind::IfStatement {
                 condition,
@@ -703,11 +690,6 @@ impl AstNode {
                 write!(f, "{}{}", indent_str, "}".dimmed())?
             }
             AstNodeKind::EnumVariant(name) => write!(f, "{}", name)?,
-            AstNodeKind::ReferenceType { mutable, inner } => {
-                write!(f, "{}", indent_str)?;
-                if *mutable { write!(f, "&mut ")?; } else { write!(f, "& ")?; }
-                inner.fmt_with_indent(f, 0, table)?;
-            },
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,
@@ -889,14 +871,14 @@ impl AstNode {
         }
 
         if let (Some(ty), Some(table)) = (&self.type_id, table) {
-            if ty.get_base_symbol() == PrimitiveKind::Void as usize {
+            if ty.symbol == PrimitiveKind::Void as usize {
                 return Ok(());
             }
             
             let type_str = table.display_type(ty);
-            write!(f, " {}", format!("<{} [{}]>", type_str, ty.get_base_symbol()).cyan())?;
+            write!(f, " {}", format!("<{} [{}]>", type_str, ty.symbol).cyan())?;
         } else if let Some(ty) = &self.type_id {
-            if ty.get_base_symbol() == PrimitiveKind::Void as usize {
+            if ty.symbol == PrimitiveKind::Void as usize {
                 return Ok(());
             }
 
@@ -924,7 +906,7 @@ impl AstNode {
             | Identifier(_)
             | EnumVariant(_)
             | SelfExpr
-            | SelfType(_) => vec![],
+            | SelfType => vec![],
 
             Program(statements) => statements.iter_mut().collect(),
 
@@ -1182,7 +1164,6 @@ impl AstNode {
 
             TraitType(_) => vec![],
 
-            ReferenceType { inner, .. } => vec![inner.as_mut()],
             TypeReference { generic_types, .. } => generic_types.iter_mut().collect(),
 
             TypeDeclaration {
@@ -1237,7 +1218,7 @@ impl AstNode {
             | Identifier(_)
             | EnumVariant(_)
             | SelfExpr
-            | SelfType(_) => vec![],
+            | SelfType => vec![],
 
             Program(statements) => statements.iter().collect(),
 
@@ -1495,7 +1476,6 @@ impl AstNode {
 
             TraitType(_) => vec![],
 
-            ReferenceType { inner, .. } => vec![inner.as_ref()],
             TypeReference { generic_types, .. } => generic_types.iter().collect(),
 
             TypeDeclaration {

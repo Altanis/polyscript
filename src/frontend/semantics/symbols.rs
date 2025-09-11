@@ -125,7 +125,7 @@ impl SemanticAnalyzer {
         &mut self,
         node: &mut AstNode,
     ) -> Result<(Option<ValueSymbolId>, Option<Type>), BoxedError> {
-        let (is_declaration, qualifier, name, generic_parameters, parameters, return_type, body, instance) =
+        let (is_declaration, qualifier, name, generic_parameters, parameters, return_type, body) =
             if let AstNodeKind::Function {
                 qualifier,
                 name,
@@ -133,7 +133,6 @@ impl SemanticAnalyzer {
                 parameters,
                 return_type,
                 body,
-                instance,
                 ..
             } = &mut node.kind
             {
@@ -144,8 +143,7 @@ impl SemanticAnalyzer {
                     generic_parameters,
                     parameters,
                     return_type,
-                    body,
-                    instance,
+                    body
                 )
             } else {
                 unreachable!();
@@ -153,9 +151,6 @@ impl SemanticAnalyzer {
 
         let scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
         node.scope_id = Some(scope_id);
-
-        let scope = self.symbol_table.get_scope_mut(scope_id).unwrap();
-        scope.receiver_kind = *instance;
 
         self.collect_generic_parameters(generic_parameters)?;
         self.collect_function_parameters(parameters)?;
@@ -231,7 +226,7 @@ impl SemanticAnalyzer {
             Some(span),
         )?;
 
-        Ok((None, Some(Type::new_base(type_id))))
+        Ok((None, Some(Type::from_no_args(type_id))))
     }
 
     fn collect_enum_symbols(
@@ -265,7 +260,7 @@ impl SemanticAnalyzer {
             Some(span),
         )?;
 
-        Ok((None, Some(Type::new_base(type_id))))
+        Ok((None, Some(Type::from_no_args(type_id))))
     }
 
     fn collect_trait_symbols(
@@ -313,7 +308,7 @@ impl SemanticAnalyzer {
                     QualifierKind::Public,
                     Some(type_node.span),
                 )?;
-                type_node.type_id = Some(Type::new_base(type_id));
+                type_node.type_id = Some(Type::from_no_args(type_id));
             }
         }
 
@@ -332,15 +327,15 @@ impl SemanticAnalyzer {
                     name,
                     TypeSymbolKind::FunctionSignature {
                         params: vec![],
-                        return_type: Type::new_base(self.get_primitive_type(PrimitiveKind::Void)),
-                        instance: *instance,
+                        return_type: Type::from_no_args(self.get_primitive_type(PrimitiveKind::Void)),
+                        instance: *instance
                     },
                     sig_generic_param_ids,
                     QualifierKind::Public,
                     Some(signature.span),
                 )?;
 
-                signature.type_id = Some(Type::new_base(sig_type_id));
+                signature.type_id = Some(Type::from_no_args(sig_type_id));
             }
         }
 
@@ -353,7 +348,7 @@ impl SemanticAnalyzer {
             QualifierKind::Public,
             Some(span),
         )?;
-        Ok((None, Some(Type::new_base(trait_type_id))))
+        Ok((None, Some(Type::from_no_args(trait_type_id))))
     }
 
     fn collect_generic_parameters(
@@ -371,7 +366,7 @@ impl SemanticAnalyzer {
                     QualifierKind::Public,
                     Some(param.span),
                 )?;
-                param.type_id = Some(Type::new_base(id));
+                param.type_id = Some(Type::from_no_args(id));
                 ids.push(id);
             }
         }
@@ -445,7 +440,7 @@ impl SemanticAnalyzer {
             QualifierKind::Public,
             Some(span),
         )?;
-        Ok((None, Some(Type::new_base(type_id))))
+        Ok((None, Some(Type::from_no_args(type_id))))
     }
 
     fn collect_optional_node(&mut self, node: &mut Option<BoxedAstNode>) -> Result<(), BoxedError> {
@@ -542,7 +537,7 @@ impl SemanticAnalyzer {
 
         let type_symbol = self
             .symbol_table
-            .get_type_symbol_mut(node.type_id.as_ref().unwrap().get_base_symbol())
+            .get_type_symbol_mut(node.type_id.as_ref().unwrap().symbol)
             .unwrap();
 
         if let TypeSymbolKind::Generic(constraints) = &mut type_symbol.kind {
@@ -605,14 +600,6 @@ impl SemanticAnalyzer {
 
     fn get_type_from_ast(&mut self, node: &mut AstNode) -> Result<Type, BoxedError> {
         match &mut node.kind {
-            AstNodeKind::ReferenceType { mutable, inner } => {
-                let inner_type = self.get_type_from_ast(inner)?;
-                Ok(if *mutable {
-                    Type::MutableReference { inner: Box::new(inner_type) }
-                } else {
-                    Type::Reference { inner: Box::new(inner_type) }
-                })
-            },
             AstNodeKind::TypeReference {
                 type_name,
                 generic_types,
@@ -634,12 +621,7 @@ impl SemanticAnalyzer {
                         )
                     })?;
 
-                let base_type = Type::Base {
-                    symbol: base_symbol.id,
-                    args,
-                };
-
-                Ok(base_type)
+                Ok(Type { symbol: base_symbol.id, args })
             },
             AstNodeKind::FunctionPointer { params, return_type } => {
                 let param_types = params
@@ -650,7 +632,7 @@ impl SemanticAnalyzer {
                 let return_type_val = if let Some(rt_node) = return_type {
                     self.get_type_from_ast(rt_node)?
                 } else {
-                    Type::new_base(self.get_primitive_type(PrimitiveKind::Void))
+                    Type::from_no_args(self.get_primitive_type(PrimitiveKind::Void))
                 };
 
                 let fn_ptr_id = self.symbol_table.add_type_symbol(
@@ -658,14 +640,14 @@ impl SemanticAnalyzer {
                     TypeSymbolKind::FunctionSignature {
                         params: param_types,
                         return_type: return_type_val,
-                        instance: None,
+                        instance: false
                     },
                     vec![],
                     QualifierKind::Private,
                     Some(node.span),
                 )?;
 
-                Ok(Type::new_base(fn_ptr_id))
+                Ok(Type::from_no_args(fn_ptr_id))
             },
             _ => Err(self.create_error(ErrorKind::ExpectedType, node.span, &[node.span])),
         }
@@ -798,9 +780,9 @@ impl SemanticAnalyzer {
             self.symbol_table.get_scope_mut(impl_scope_id).unwrap().trait_id = Some(trait_id);
 
             let (implementing_type_id, type_specialization) = self.resolve_type_ref_from_ast(type_reference)?;
-            let self_type = Type::Base {
+            let self_type = Type {
                 symbol: implementing_type_id,
-                args: type_specialization.iter().map(|id| Type::new_base(*id)).collect()
+                args: type_specialization.iter().map(|id| Type::from_no_args(*id)).collect()
             };
 
             self.symbol_table.add_type_symbol(
@@ -827,9 +809,9 @@ impl SemanticAnalyzer {
             let (base_type_id, specialization) = self.resolve_type_ref_from_ast(type_reference)?;
 
             let base_type_symbol = self.symbol_table.get_type_symbol(base_type_id).unwrap();
-            let self_type = Type::Base {
+            let self_type = Type {
                 symbol: base_type_symbol.id,
-                args: specialization.iter().map(|id| Type::new_base(*id)).collect()
+                args: specialization.iter().map(|id| Type::from_no_args(*id)).collect()
             };
 
             self.symbol_table.add_type_symbol(
@@ -885,16 +867,12 @@ impl SemanticAnalyzer {
                 generic_parameters,
                 parameters,
                 body,
-                instance,
                 return_type,
                 ..
             } = &mut func_node.kind
             {
                 let func_scope_id = self.symbol_table.enter_scope(ScopeKind::Function);
                 func_node.scope_id = Some(func_scope_id);
-
-                let scope = self.symbol_table.get_scope_mut(func_scope_id).unwrap();
-                scope.receiver_kind = *instance;
 
                 self.collect_generic_parameters(generic_parameters)?;
                 for generic in generic_parameters.iter_mut() {
@@ -947,7 +925,7 @@ impl SemanticAnalyzer {
                     *qualifier,
                     Some(type_node.span),
                 )?;
-                type_node.type_id = Some(Type::new_base(type_id));
+                type_node.type_id = Some(Type::from_no_args(type_id));
 
                 self.symbol_collector_check_node(value)?;
             }

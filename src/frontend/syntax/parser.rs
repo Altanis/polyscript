@@ -322,20 +322,6 @@ impl Parser {
                 }
 
                 let _ = self.advance();
-                let mut operator = match operator {
-                    Operation::Mul => Operation::Dereference,
-                    Operation::BitwiseAnd => Operation::ImmutableAddressOf,
-                    Operation::Minus => Operation::Neg,
-                    _ => operator,
-                };
-
-                if operator == Operation::ImmutableAddressOf
-                    && self.peek().get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
-                {
-                    self.advance();
-                    operator = Operation::MutableAddressOf;
-                }
-
                 let operand = boxed!(self.parse_binding_power(Operation::Not.binding_power().0)?);
 
                 Ok(AstNode {
@@ -685,8 +671,6 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<AstNode, BoxedError> {
-        let start_span = self.peek().get_span();
-
         if self.peek().get_token_kind() == TokenKind::Operator(Operation::And) {
             let span = self.peek().get_span();
             let amp = Token::new(
@@ -696,23 +680,6 @@ impl Parser {
             );
             self.tokens[self.current] = amp.clone();
             self.tokens.insert(self.current + 1, amp);
-        }
-
-        if self.match_token(TokenKind::Operator(Operation::BitwiseAnd)) {
-            let mutable = self.match_token(TokenKind::Keyword(KeywordKind::Mut));
-            let inner_type = self.parse_type()?;
-            let span = start_span.set_end_from_span(inner_type.span);
-            return Ok(AstNode {
-                kind: AstNodeKind::ReferenceType {
-                    mutable,
-                    inner: boxed!(inner_type)
-                },
-                span,
-                type_id: None,
-                value_id: None,
-                scope_id: None,
-                id: self.get_next_node_id(),
-            });
         }
 
         self.spanned_node(|parser| {
@@ -853,16 +820,7 @@ impl Parser {
         is_expression: bool,
         is_associated: bool,
         allow_generics: bool,
-    ) -> Result<
-        (
-            String,
-            Vec<AstNode>,
-            Vec<AstNode>,
-            Option<BoxedAstNode>,
-            Option<ReferenceKind>,
-        ),
-        BoxedError,
-    > {
+    ) -> Result<(String, Vec<AstNode>, Vec<AstNode>, Option<BoxedAstNode>, bool), BoxedError> {
         self.consume(TokenKind::Keyword(KeywordKind::Fn))?;
 
         let name = if !is_expression {
@@ -880,7 +838,7 @@ impl Parser {
         let (parameters, instance) = if is_associated {
             self.parse_associated_function_parameter_list()?
         } else {
-            (self.parse_function_parameter_list()?, None)
+            (self.parse_function_parameter_list()?, false)
         };
 
         let mut return_type = None;
@@ -927,54 +885,17 @@ impl Parser {
         })
     }
 
-    fn parse_parameter(
-        &mut self,
-        allow_this: bool,
-        is_first: bool,
-    ) -> Result<(AstNode, Option<ReferenceKind>), BoxedError> {
-        let mut self_kind: Option<ReferenceKind> = None;
+    fn parse_parameter(&mut self, allow_this: bool, is_first: bool) -> Result<(AstNode, bool), BoxedError> {
+        let mut instance = false;
 
         let node = self.spanned_node(|parser| {
             if allow_this && is_first {
                 let current_token_kind = parser.peek().get_token_kind();
-                if current_token_kind == TokenKind::Operator(Operation::BitwiseAnd) {
-                    let next_token_is_mut = parser.tokens.get(parser.current + 1).is_some_and(|t| {
-                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::Mut)
-                    });
-                    let next_token_is_this = parser.tokens.get(parser.current + 1).is_some_and(|t| {
-                        t.get_token_kind() == TokenKind::Keyword(KeywordKind::SelfKw)
-                    });
-                    let third_token_is_this = next_token_is_mut
-                        && parser.tokens.get(parser.current + 2).is_some_and(|t| {
-                            t.get_token_kind() == TokenKind::Keyword(KeywordKind::SelfKw)
-                        });
-
-                    if next_token_is_this || third_token_is_this {
-                        parser.advance();
-
-                        let (_, kind) = if parser.match_token(TokenKind::Keyword(KeywordKind::Mut)) {
-                            (Operation::MutableAddressOf, ReferenceKind::MutableReference)
-                        } else {
-                            (Operation::ImmutableAddressOf, ReferenceKind::Reference)
-                        };
-
-                        parser.consume(TokenKind::Keyword(KeywordKind::SelfKw))?;
-                        self_kind = Some(kind);
-
-                        let type_annotation =
-                            boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(kind)))?);
-                        return Ok(AstNodeKind::FunctionParameter {
-                            name: "self".to_string(),
-                            type_annotation,
-                            mutable: false,
-                        });
-                    }
-                } else if current_token_kind == TokenKind::Keyword(KeywordKind::SelfKw) {
+                if current_token_kind == TokenKind::Keyword(KeywordKind::SelfKw) {
+                    instance = true;
                     parser.advance();
-                    self_kind = Some(ReferenceKind::Value);
 
-                    let type_annotation =
-                        boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType(ReferenceKind::Value)))?);
+                    let type_annotation = boxed!(parser.spanned_node(|_| Ok(AstNodeKind::SelfType))?);
                     return Ok(AstNodeKind::FunctionParameter {
                         name: "self".to_string(),
                         type_annotation,
@@ -995,7 +916,7 @@ impl Parser {
             })
         })?;
 
-        Ok((node, self_kind))
+        Ok((node, instance))
     }
 
     fn parse_function_parameter_list(&mut self) -> Result<Vec<AstNode>, BoxedError> {
@@ -1024,19 +945,17 @@ impl Parser {
         Ok(parameters)
     }
 
-    fn parse_associated_function_parameter_list(
-        &mut self,
-    ) -> Result<(Vec<AstNode>, Option<ReferenceKind>), BoxedError> {
+    fn parse_associated_function_parameter_list(&mut self) -> Result<(Vec<AstNode>, bool), BoxedError> {
         let mut parameters = vec![];
-        let mut instance_kind: Option<ReferenceKind> = None;
+        let mut instance = false;
 
         self.consume(TokenKind::OpenParenthesis)?;
 
         let mut first = true;
         while self.peek().get_token_kind() != TokenKind::CloseParenthesis {
-            let (param, self_kind) = self.parse_parameter(true, first)?;
-            if self_kind.is_some() {
-                instance_kind = self_kind;
+            let (param, i) = self.parse_parameter(true, first)?;
+            if i {
+                instance = true;
             }
             parameters.push(param);
             first = false;
@@ -1049,7 +968,7 @@ impl Parser {
         }
 
         self.consume(TokenKind::CloseParenthesis)?;
-        Ok((parameters, instance_kind))
+        Ok((parameters, instance))
     }
 
     fn parse_generic_parameter_list(&mut self, allow_constraints: bool) -> Result<Vec<AstNode>, BoxedError> {

@@ -113,11 +113,6 @@ pub enum Operation {
     FieldAccess,
     FunctionCall,
 
-    // POINTER OPS
-    Dereference,
-    ImmutableAddressOf,
-    MutableAddressOf,
-
     // CAST
     As
 }
@@ -133,9 +128,6 @@ impl Operation {
                 | Operation::Minus
                 | Operation::Mul
                 | Operation::BitwiseAnd
-                | Operation::Dereference
-                | Operation::ImmutableAddressOf
-                | Operation::MutableAddressOf
         )
     }
 
@@ -242,9 +234,7 @@ impl Operation {
             Operation::Not | Operation::Neg | Operation::BitwiseNegate => (13, 14),
 
             Operation::FunctionCall => (14, 0),
-            Operation::FieldAccess => (14, 15),
-
-            Operation::Dereference | Operation::ImmutableAddressOf | Operation::MutableAddressOf => (15, 16),
+            Operation::FieldAccess => (14, 15)
         }
     }
 
@@ -286,9 +276,6 @@ impl Operation {
             Operation::Equivalence => Some(("Equivalence".to_string(), true)),
             Operation::FieldAccess => None,
             Operation::FunctionCall => None,
-            Operation::Dereference => None,
-            Operation::ImmutableAddressOf => None,
-            Operation::MutableAddressOf => None,
             Operation::Assign => None,
             Operation::As => None
         }
@@ -312,8 +299,7 @@ impl Operation {
                 PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShiftEq | LeftBitShiftEq => Some(Void),
 
-                Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf 
-                | MutableAddressOf | As => None,
+                Assign | FieldAccess | FunctionCall | As => None,
             },
 
             Float => match self {
@@ -330,8 +316,7 @@ impl Operation {
                 PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq => Some(Void),
 
                 Assign | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq | RightBitShiftEq 
-                | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference 
-                | ImmutableAddressOf | MutableAddressOf | As => None,
+                | LeftBitShiftEq | FieldAccess | FunctionCall | As => None,
             },
 
             Bool => match self {
@@ -341,8 +326,7 @@ impl Operation {
                 Neg | Assign | BitwiseNegate | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq
                 | DivEq | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | GreaterThan | Geq | LessThan | Leq | RightBitShift | LeftBitShift
-                | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | Dereference
-                | ImmutableAddressOf | MutableAddressOf | As => None,
+                | RightBitShiftEq | LeftBitShiftEq | FieldAccess | FunctionCall | As => None,
             },
 
             StaticString => match self {
@@ -351,8 +335,7 @@ impl Operation {
                 Neg | Not | BitwiseNegate | Minus | Mul | Div | Mod | Exp | MinusEq | MulEq | DivEq
                 | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
                 | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | And
-                | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf | As | Plus | PlusEq => None,
+                | Or | Assign | FieldAccess | FunctionCall | As | Plus | PlusEq => None,
             },
 
             Char => match self {
@@ -361,8 +344,7 @@ impl Operation {
                 Neg | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
                 | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
                 | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
-                | And | Or | Assign | FieldAccess | FunctionCall | Dereference | ImmutableAddressOf
-                | MutableAddressOf | As => None,
+                | And | Or | Assign | FieldAccess | FunctionCall | As => None,
             },
 
             Void | Never => None,
@@ -379,12 +361,12 @@ impl std::fmt::Display for Operation {
 
             Operation::Plus => ADD_TOKEN.to_string(),
             Operation::Minus => SUB_TOKEN.to_string(),
-            Operation::Mul | Operation::Dereference => MUL_TOKEN.to_string(),
+            Operation::Mul => MUL_TOKEN.to_string(),
             Operation::Exp => format!("{}{}", MUL_TOKEN, MUL_TOKEN),
             Operation::Div => DIV_TOKEN.to_string(),
             Operation::Mod => MOD_TOKEN.to_string(),
 
-            Operation::BitwiseAnd | Operation::ImmutableAddressOf => BITWISE_AND_TOKEN.to_string(),
+            Operation::BitwiseAnd => BITWISE_AND_TOKEN.to_string(),
             Operation::BitwiseOr => BITWISE_OR_TOKEN.to_string(),
             Operation::BitwiseXor => BITWISE_XOR_TOKEN.to_string(),
             Operation::RightBitShift => format!("{}{}", GREATER_THAN_TOKEN, GREATER_THAN_TOKEN),
@@ -418,7 +400,6 @@ impl std::fmt::Display for Operation {
 
             Operation::FieldAccess => FIELD_ACCESS_TOKEN.to_string(),
             Operation::FunctionCall => "()".to_string(),
-            Operation::MutableAddressOf => "&mut".to_string(),
 
             Operation::As => AS_KEYWORD.to_string()
         };
@@ -741,11 +722,4 @@ impl std::fmt::Display for Token {
             self.span
         )
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ReferenceKind {
-    Value,
-    Reference,
-    MutableReference,
 }
