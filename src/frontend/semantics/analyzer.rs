@@ -418,6 +418,56 @@ impl SymbolTable {
             .unwrap();
         self.get_value_symbol_mut(value_id).unwrap().is_intrinsic = true;
 
+        let t_generic_ref_id = self.add_type_symbol("#T_intrinsic_ref", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
+        let t_type_ref = Type::from_no_args(t_generic_ref_id);
+        let fn_scope_id_ref = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+        let fn_sig_type_id_ref = self.add_type_symbol(
+            "#intrinsic_ref_sig",
+            TypeSymbolKind::FunctionSignature {
+                params: vec![t_type_ref],
+                return_type: int_type.clone(),
+                instance: false
+            },
+            vec![t_generic_ref_id],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        let value_id_ref = self.add_value_symbol(
+            "ref",
+            ValueSymbolKind::Function(fn_scope_id_ref, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::from_no_args(fn_sig_type_id_ref)),
+            None,
+        ).unwrap();
+        self.get_value_symbol_mut(value_id_ref).unwrap().is_intrinsic = true;
+
+        let t_generic_deref_id = self.add_type_symbol("#T_intrinsic_deref", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
+        let t_type_deref = Type::from_no_args(t_generic_deref_id);
+        let fn_scope_id_deref = self.enter_scope(ScopeKind::Function);
+        self.exit_scope();
+        let fn_sig_type_id_deref = self.add_type_symbol(
+            "#intrinsic_deref_sig",
+            TypeSymbolKind::FunctionSignature {
+                params: vec![t_type_deref.clone()],
+                return_type: t_type_deref,
+                instance: false
+            },
+            vec![t_generic_deref_id],
+            QualifierKind::Public,
+            None,
+        ).unwrap();
+        let value_id_deref = self.add_value_symbol(
+            "deref",
+            ValueSymbolKind::Function(fn_scope_id_deref, HashSet::new()),
+            false,
+            QualifierKind::Public,
+            Some(Type::from_no_args(fn_sig_type_id_deref)),
+            None,
+        ).unwrap();
+        self.get_value_symbol_mut(value_id_deref).unwrap().is_intrinsic = true;
+
         self.current_scope_id = old_scope;
     }
 

@@ -39,77 +39,77 @@ impl String {
     }
 
     // Gets the length of the string.
-    public fn length(&self): int {
+    public fn length(self): int {
         self.chars.length()
     }
 
     // Gets the `i`-th character in the string.
-    public fn get(&self, i: int): char {
-        *self.chars.get(i)
+    public fn get(self, i: int): char {
+        self.chars.get(i)
     }
 
     // Pushes a character `c` to the end of the string.
-    public fn push(&mut self, c: char) {
+    public fn push(self, c: char) {
         self.chars.push(c);
     }
 
     // Pushes a string `s` to the end of the string.
-    public fn push_string(&mut self, s: &String) {
+    public fn push_string(self, s: String) {
         for (let i = 0; i < s.length(); i += 1) {
             self.chars.push(s.get(i));
         }
     }
 }
 
-impl Clone for String {
-    fn clone(&self): Self {
-        String { chars: [Vec<char> as Clone].clone(&self.chars) }
+/*impl Clone for String {
+    fn clone(self): Self {
+        String { chars: [Vec<char> as Clone].clone(self.chars) }
     }
 }
 
 impl Add<char> for String {
     type Output = String;
     fn add(self, other: char): String {
-        let string = [String as Clone].clone(&self);
+        let string = [String as Clone].clone(self);
         string.push(other);
         string
-    }
-}
-
-impl AddAssign<char> for String {
-    fn add_assign(&mut self, other: char) {
-        self.push(other);
     }
 }
 
 impl Add<String> for String {
     type Output = String;
     fn add(self, other: String): String {
-        let string = [String as Clone].clone(&self);
-        string.push_string(&other);
+        let string = [String as Clone].clone(self);
+        string.push_string(other);
         string
+    }
+}*/
+
+impl AddAssign<char> for String {
+    fn add_assign(self, other: char) {
+        self.push(other);
     }
 }
 
 impl AddAssign<String> for String {
-    fn add_assign(&mut self, other: String) {
-        self.push_string(&other);
+    fn add_assign(self, other: String) {
+        self.push_string(other);
     }
 }
 
 trait ToString {
-    fn to_string(&self): String;
+    fn to_string(self): String;
 }
 
 impl ToString for int {
-    fn to_string(&self): String {
-        if (*self == 0) { return String.from_str("0"); };
+    fn to_string(self): String {
+        if (self == 0) { return String.from_str("0"); };
 
-        let n = *self;
+        let n = self;
         let negative = false;
         if (n < 0) {
             negative = true;
-            n = -n;
+            n = 0 - n;
         };
 
         let digits = [Vec<char>].new();
@@ -126,7 +126,7 @@ impl ToString for int {
 
         let chars = [Vec<char>].from_capacity(digits.length());
         for (let i = digits.length() - 1; i >= 0; i -= 1) {
-            chars.push(*digits.get(i));
+            chars.push(digits.get(i));
         }
 
         String { chars }
@@ -134,18 +134,18 @@ impl ToString for int {
 }
 
 /*impl ToString for float {
-    fn to_string(&self): String {
-        let mut n = *self;
+    fn to_string(self): String {
+        let mut n = self;
 
         // TODO: nan, inf, -inf
 
         let negative = n < 0.0;
         if negative {
-            n = -n;
+            n = 0 - n;
         }
 
         let int_part = n as int;
-        let s = [int as ToString].to_string(&int);
+        let s = [int as ToString].to_string(int);
 
         let mut frac = n - int_part as float;
         if (frac > 0.0) {
@@ -160,7 +160,7 @@ impl ToString for int {
 
         if negative {
             let with_sign = String::from_str("-");
-            with_sign.push_str(&s);
+            with_sign.push_str(s);
             return with_sign;
         }
 
@@ -169,20 +169,20 @@ impl ToString for int {
 }*/
 
 impl ToString for str {
-    fn to_string(&self): String {
-        String.from_str(*self)
+    fn to_string(self): String {
+        String.from_str(self)
     }
 }
 
 impl ToString for char {
-    fn to_string(&self): String {
-        String.from_char(*self)
+    fn to_string(self): String {
+        String.from_char(self)
     }
 }
 
 impl ToString for bool {
-    fn to_string(&self): String {
-        if (*self) {
+    fn to_string(self): String {
+        if (self) {
             String.from_str("true")
         } else {
             String.from_str("false")
@@ -191,8 +191,8 @@ impl ToString for bool {
 }
 
 impl ToString for String {
-    fn to_string(&self): String {
-        *self
+    fn to_string(self): String {
+        self
     }
 }
 

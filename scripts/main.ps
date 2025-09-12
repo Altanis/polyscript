@@ -20,12 +20,46 @@
 // default traits such as Drop, Clone, Default, ToString
 // maybe add prelude system
 
-/*
-import { String } from "stdlib/string.ps";
-import { println } from "stdlib/io.ps";
+/*import { ref, deref, print_char, eprint } from "@intrinsics";
 
-let r = String.from_str("Hello");
-let s = String.from_str(" world.");
-r += s;
+struct Data<T> {
+    private data: int;
+}
 
-println(r);*/
+impl<T> Data<T> {
+    public fn from_char(c: T): Self {
+        Self { data: ref(c) }
+    }
+
+    public fn get(self): T {
+        eprint("Pre");
+        deref(self.data as T)
+    }
+}
+
+let s = [Data<char>].from_char('H');
+print_char(s.get());*/
+
+import { ref, deref, print_char, eprint, calloc, memcpy } from "@intrinsics";
+
+struct Data<T> {
+    private ptr: int;
+}
+
+impl<T> Data<T> {
+    public fn new(c: T): Self {
+        let size = sizeof T;
+        let ptr = calloc(1, size);
+        memcpy(ptr, ref(c), size);
+
+        Self { ptr }
+    }
+
+    public fn get(self): T {
+        deref(self.ptr as T)
+    }
+}
+
+let s = [Data<char>].new('w');
+print_char(s.get());
+print_char('\n');

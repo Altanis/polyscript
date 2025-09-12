@@ -1,4 +1,6 @@
-import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, print_int, eprint_char, endproc, endproc, drop, strlen, strget } from "@intrinsics";
+import { print_char, eprint_char } from "@intrinsics";
+import { strlen, strget } from "@intrinsics";
+import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, print_int, endproc, endproc, drop, strlen, strget, ref, deref } from "@intrinsics";
 
 // Constant pointing to 0x0 for NULL.
 const nullptr: int = 0x0;
@@ -39,8 +41,8 @@ impl<T> Vec<T> {
     // Adjusts the capacity of the vector. 
     // * Returns `true` if successful, `false` otherwise.
     // * This function returns false if `new_capacity` is less than or equal to the current capacity.
-    public fn reserve(&mut self, new_capacity: int): bool {
-        if (new_capacity <= self.capacity) { print_int(new_capacity); print_int(self.capacity); return false; };
+    public fn reserve(self, new_capacity: int): bool {
+        if (new_capacity <= self.capacity) { return false; };
 
         let bytes = self.element_size * new_capacity;
         let new_data = realloc(self.data, bytes);
@@ -53,14 +55,14 @@ impl<T> Vec<T> {
     }
 
     // Pushes an element to the end of a vector.
-    public fn push(&mut self, element: T) {
+    public fn push(self, element: T) {
         if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
             eprint("oom: couldn't reserve memory for vector\n");
             endproc(1);
         };
 
         let dst = self.data + self.size * self.element_size;
-        memcpy(dst, (&element) as int, self.element_size);
+        memcpy(dst, ref(element), self.element_size);
         self.size += 1;
     }
 
@@ -68,7 +70,7 @@ impl<T> Vec<T> {
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The replaced element is dropped.
-    public fn replace(&mut self, idx: int, element: T): bool {
+    public fn replace(self, idx: int, element: T): bool {
         if (idx < 0 || idx >= self.size) {
             return false;
         };
@@ -76,31 +78,31 @@ impl<T> Vec<T> {
         let dst = self.data + idx * self.element_size;
 
         if #IS_REFCOUNTED#{T} {
-            decref(*(dst as &int));
+            decref(dst);
         } else {
-            drop(*(dst as &mut T));
+            drop(deref(dst as T));
         };
 
-        memcpy(dst, (&element) as int, self.element_size);
+        memcpy(dst, ref(element), self.element_size);
         true
     }
 
     // Gets the element at index `idx`.
     // * Panics if `idx` is out of bounds.
-    public fn get(&self, idx: int): &T {
+    public fn get(self, idx: int): T {
         if (idx < 0 || idx >= self.size) {
             eprint("oob access in vector\n");
             endproc(1);
         };
 
-        (self.data + idx * self.element_size) as &T
+        deref((self.data + idx * self.element_size) as T)
     }
 
     // Removes the element at index `idx`.
     // * Returns true if successful, false otherwise.
     // * This function returns false if `idx` is out of the bounds of the allocated vector.
     // * The removed element is dropped.
-    public fn remove(&mut self, idx: int): bool {
+    public fn remove(self, idx: int): bool {
         if (idx < 0 || idx >= self.size) {
             return false;
         };
@@ -108,9 +110,9 @@ impl<T> Vec<T> {
         let dst = self.data + idx * self.element_size;
 
         if #IS_REFCOUNTED#{T} {
-            decref(*(dst as &int));
+            decref(dst);
         } else {
-            drop(*(dst as &mut T));
+            drop(deref(dst));
         };
 
         let src = self.data + (idx + 1) * self.element_size;
@@ -124,16 +126,15 @@ impl<T> Vec<T> {
 
     // Clears the vector.
     // * All elements in the vector are dropped.
-    public fn clear(&mut self) {
+    public fn clear(self) {
         while (self.size > 0) {
             let last = self.size - 1;
             let dst = self.data + last * self.element_size;
 
             if #IS_REFCOUNTED#{T} {
-                let old_ptr: int = *(dst as &int);
-                decref(old_ptr);
+                decref(dst);
             } else {
-                drop(*(dst as &mut T));
+                drop(deref(dst));
             };
 
             self.size = last;
@@ -141,13 +142,13 @@ impl<T> Vec<T> {
     }
 
     // Gets the length of the vector.
-    public fn length(&self): int {
+    public fn length(self): int {
         self.size
     }
 }
 
 impl<T> Drop for Vec<T> {
-    fn drop(&mut self) {
+    fn drop(self) {
         if (self.capacity != 0) {
             self.clear();
             free(self.data);
@@ -160,12 +161,12 @@ impl<T> Drop for Vec<T> {
 }
 
 impl<T: Clone> Clone for Vec<T> {
-    fn clone(&self): Self {
+    fn clone(self): Self {
         let vec: Vec<T> = [Vec<T>].new();
         vec.reserve(self.size);
 
         for (let i = 0; i < self.size; i += 1) {
-            let element: &T = self.get(i);
+            let element: T = self.get(i);
             vec.push([T as Clone].clone(element));
         }
         
@@ -175,7 +176,7 @@ impl<T: Clone> Clone for Vec<T> {
 
 // A structure representing a mutable, extensible String.
 struct String {
-    // The internal representation 
+    // The internal representation of the string, in characters.
     private chars: Vec<char>;
 }
 
@@ -190,12 +191,9 @@ impl String {
         Self { chars: [Vec<char>].from_capacity(n) }
     }
     
-    // Constructs a new string from a constant `str`.
+    // Constructs a new string from a constant str `s`.
     public fn from_str(s: str): Self {
         let len = strlen(s);
-        eprint(s);
-        eprint_char('\n');
-        print_int(len);
         let chars = [Vec<char>].from_capacity(len);
 
         for (let i = 0; i < len; i += 1) {
@@ -205,148 +203,174 @@ impl String {
         Self { chars }
     }
 
-    // Gets the length of the string.
-    public fn length(&self): int {
-        self.chars.length()
-    }
-
-    // Gets the `i`-th character in the string.
-    public fn get(&self, i: int): char {
-        *self.chars.get(i)
-    }
-}
-
-trait ToString {
-    fn to_string(&self): String;
-}
-
-impl ToString for str {
-    fn to_string(&self): String {
-        String.from_str(*self)
-    }
-}
-
-fn print<T: ToString>(data: T) {
-
-}
-
-fn println<T: ToString>(data: T) {
-    let string = [T as ToString].to_string(&data);
-    for (let i = 0; i < string.length(); i += 1) {
-        print_char(string.get(i));
-    }
-    print_char('\n');
-}
-
-println("Hello world.");
-
-
-
-
-
-
-
-import { calloc, realloc, memcpy, memmove, free, decref, print_char, eprint, endproc, endproc, drop, strlen, strget } from "@intrinsics";
-
-const nullptr: int = 0x0;
-
-struct Vec<T> {
-    public size: int;
-    private capacity: int;
-    private element_size: int;
-    private data: int;
-}
-
-impl<T> Vec<T> {
-    public fn from_capacity(n: int): Self {
-        Self {
-            size: 0,
-            capacity: n,
-            element_size: sizeof T,
-            data: if (n == 0) { nullptr } else { calloc(n, sizeof T) }
-        }
-    }
-
-    public fn reserve(&mut self, new_capacity: int): bool {
-        if (new_capacity <= self.capacity) { return false; };
-
-        let bytes = self.element_size * new_capacity;
-        let new_data = realloc(self.data, bytes);
-        if (new_data == nullptr) { return false; };
-
-        self.data = new_data;
-        self.capacity = new_capacity;
-
-        true
-    }
-
-    public fn push(&mut self, element: T) {
-        if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
-            eprint("oom: couldn't reserve memory for vector\n");
-            endproc(1);
-        };
-
-        let dst = self.data + self.size * self.element_size;
-        memcpy(dst, (&element) as int, self.element_size);
-        self.size += 1;
-    }
-
-    public fn get(&self, idx: int): &T {
-        if (idx < 0 || idx >= self.size) {
-            eprint("oob access in vector\n");
-            endproc(1);
-        };
-
-        (self.data + idx * self.element_size) as &T
-    }
-
-    public fn length(&self): int {
-        self.size
-    }
-}
-
-struct String {
-    private chars: Vec<char>;
-}
-
-impl String {
-    public fn from_capacity(n: int): Self {
-        Self { chars: [Vec<char>].from_capacity(n) }
-    }
-    
-    public fn from_str(s: str): Self {
-        let len = strlen(s);
-        let chars = [Vec<char>].from_capacity(len);
-
-        for (let i = 0; i < len; i += 1) {
-            let c = strget(s, i);
-            chars.push(c);
-        }
+    // Constructs a new string from a character `c`.
+    public fn from_char(c: char): Self {
+        let chars = [Vec<char>].from_capacity(1);
+        chars.push(c);
 
         Self { chars }
     }
 
-    public fn length(&self): int {
+    // Gets the length of the string.
+    public fn length(self): int {
         self.chars.length()
     }
 
-    public fn get(&self, i: int): char {
-        *self.chars.get(i)
+    // Gets the `i`-th character in the string.
+    public fn get(self, i: int): char {
+        self.chars.get(i)
+    }
+
+    // Pushes a character `c` to the end of the string.
+    public fn push(self, c: char) {
+        self.chars.push(c);
+    }
+
+    // Pushes a string `s` to the end of the string.
+    public fn push_string(self, s: String) {
+        for (let i = 0; i < s.length(); i += 1) {
+            self.chars.push(s.get(i));
+        }
+    }
+}
+
+/*impl Clone for String {
+    fn clone(self): Self {
+        String { chars: [Vec<char> as Clone].clone(self.chars) }
+    }
+}
+
+impl Add<char> for String {
+    type Output = String;
+    fn add(self, other: char): String {
+        let string = [String as Clone].clone(self);
+        string.push(other);
+        string
+    }
+}
+
+impl Add<String> for String {
+    type Output = String;
+    fn add(self, other: String): String {
+        let string = [String as Clone].clone(self);
+        string.push_string(other);
+        string
+    }
+}*/
+
+impl AddAssign<char> for String {
+    fn add_assign(self, other: char) {
+        self.push(other);
+    }
+}
+
+impl AddAssign<String> for String {
+    fn add_assign(self, other: String) {
+        self.push_string(other);
     }
 }
 
 trait ToString {
-    fn to_string(&self): String;
+    fn to_string(self): String;
 }
 
+impl ToString for int {
+    fn to_string(self): String {
+        if (self == 0) { return String.from_str("0"); };
+
+        let n = self;
+        let negative = false;
+        if (n < 0) {
+            negative = true;
+            n = 0 - n;
+        };
+
+        let digits = [Vec<char>].new();
+
+        while (n > 0) {
+            let d = (n % 10) as char;
+            digits.push(('0' as int + d as int) as char);
+            n /= 10;
+        }
+
+        if (negative) {
+            digits.push('-');
+        };
+
+        let chars = [Vec<char>].from_capacity(digits.length());
+        for (let i = digits.length() - 1; i >= 0; i -= 1) {
+            chars.push(digits.get(i));
+        }
+
+        String { chars }
+    }
+}
+
+/*impl ToString for float {
+    fn to_string(self): String {
+        let mut n = self;
+
+        // TODO: nan, inf, -inf
+
+        let negative = n < 0.0;
+        if negative {
+            n = 0 - n;
+        }
+
+        let int_part = n as int;
+        let s = [int as ToString].to_string(int);
+
+        let mut frac = n - int_part as float;
+        if (frac > 0.0) {
+            s.push('.');
+            for (let i = 0; i < 6; i += 1) {
+                frac *= 10.0;
+                let digit = frac as int;
+                s.push(('0' as int + digit) as char);
+                frac -= digit as float;
+            }
+        }
+
+        if negative {
+            let with_sign = String::from_str("-");
+            with_sign.push_str(s);
+            return with_sign;
+        }
+
+        s
+    }
+}*/
+
 impl ToString for str {
-    fn to_string(&self): String {
-        String.from_str(*self)
+    fn to_string(self): String {
+        String.from_str(self)
+    }
+}
+
+impl ToString for char {
+    fn to_string(self): String {
+        String.from_char(self)
+    }
+}
+
+impl ToString for bool {
+    fn to_string(self): String {
+        if (self) {
+            String.from_str("true")
+        } else {
+            String.from_str("false")
+        }
+    }
+}
+
+impl ToString for String {
+    fn to_string(self): String {
+        self
     }
 }
 
 fn print<T: ToString>(data: T) {
-    let string = [T as ToString].to_string(&data);
+    let string = [T as ToString].to_string(data);
     for (let i = 0; i < string.length(); i += 1) {
         print_char(string.get(i));
     }
@@ -357,4 +381,5 @@ fn println<T: ToString>(data: T) {
     print_char('\n');
 }
 
-println("Hello world.\n");
+let r = String.from_str("Hello ");
+println(r);

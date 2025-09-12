@@ -1958,6 +1958,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.build_destructor_call(value_to_drop_type, compiled_arg);
                         None
                     },
+                    "ref" => {
+                        let arg_node = &arguments[0];
+                        let arg_val = compiled_args[0];
+                        let arg_type = arg_node.type_id.as_ref().unwrap();
+
+                        let llvm_type = self.map_semantic_type(arg_type).unwrap();
+                        let ptr = self.builder.build_alloca(llvm_type, "ref_arg_ptr").unwrap();
+                        self.builder.build_store(ptr, arg_val).unwrap();
+
+                        Some(self.builder.build_ptr_to_int(ptr, self.context.i64_type(), "ref_addr").unwrap().into())
+                    },
+                    "deref" => {
+                        let arg_node = &arguments[0];
+                        if let MIRNodeKind::TypeCast { expr: ptr_expr, target_type } = &arg_node.kind {
+                            let ptr_as_int = self.compile_node(ptr_expr).unwrap().into_int_value();
+
+                            let llvm_type_to_load = self.map_semantic_type(target_type).unwrap();
+                            let llvm_ptr_type = self.context.ptr_type(AddressSpace::default());
+                            
+                            let ptr = self.builder.build_int_to_ptr(ptr_as_int, llvm_ptr_type, "deref_ptr").unwrap();
+
+                            Some(self.builder.build_load(llvm_type_to_load, ptr, "deref_load").unwrap())
+                        } else { unreachable!(); }
+                    },
                     _ => unreachable!()
                 };
             }

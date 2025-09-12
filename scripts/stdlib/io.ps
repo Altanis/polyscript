@@ -2,7 +2,7 @@ import { print_char, eprint_char } from "@intrinsics";
 import { String, ToString } from "stdlib/string.ps";
 
 fn print<T: ToString>(data: T) {
-    let string = [T as ToString].to_string(&data);
+    let string = [T as ToString].to_string(data);
     for (let i = 0; i < string.length(); i += 1) {
         print_char(string.get(i));
     }
@@ -14,7 +14,7 @@ fn println<T: ToString>(data: T) {
 }
 
 fn eprint<T: ToString>(data: T) {
-    let string = [T as ToString].to_string(&data);
+    let string = [T as ToString].to_string(data);
     for (let i = 0; i < string.length(); i += 1) {
         eprint_char(string.get(i));
     }
