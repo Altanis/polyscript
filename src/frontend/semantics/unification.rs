@@ -460,7 +460,7 @@ impl SemanticAnalyzer {
     /// Checks if a unification variable `uv_id` occurs within a type `ty`.
     /// https://en.wikipedia.org/wiki/Occurs_check
     fn occurs_check(&mut self, uv_id: TypeSymbolId, ty: &Type) -> bool {
-        let resolved_ty = self.resolve_type(ty);
+        let _resolved_ty = self.resolve_type(ty);
 
         if ty.symbol == uv_id {
             return true;
@@ -640,73 +640,51 @@ impl SemanticAnalyzer {
         info: ConstraintInfo,
     ) -> Result<(), BoxedError> {
         let concrete_ty = self.resolve_type(concrete_ty);
-
-        match (concrete_ty.clone(), template_ty.clone()) {
-            (_, Type::Base { symbol: s, .. }) if fn_generics.contains(&s) => {
-                if let Some(existing_sub) = substitutions.get(&s) {
-                    self.unify(existing_sub.clone(), concrete_ty, info)?;
-                } else {
-                    substitutions.insert(s, concrete_ty);
-                }
-
-                Ok(())
-            },
-            (concrete_ty, Type::Base { symbol: ts, .. }) if self.is_opaque_type_projection(ts) => {
-                let opaque_symbol = self.symbol_table.get_type_symbol(ts).unwrap().clone();
-                if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } = opaque_symbol.kind {
-                    let substituted_opaque_ty = self.apply_substitution(&opaque_ty, substitutions);
-
-                    if substituted_opaque_ty.contains_generics(fn_generics) {
-                        return Ok(());
-                    }
-
-                    if let Some(resolution) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
-                        match resolution {
-                            MemberResolution::Type(resolved_member_type, _)
-                                => self.unify(concrete_ty, resolved_member_type, info)?,
-                            MemberResolution::Value(_, _, _) => unreachable!()
-                        };
-                    } else {
-                        return Err(self.create_error(
-                            ErrorKind::UnimplementedTrait(
-                                self.symbol_table.display_type(&opaque_tr),
-                                self.symbol_table.display_type(&substituted_opaque_ty)
-                            ),
-                            info.span,
-                            &[info.span]
-                        ));
-                    }
-                }
-                Ok(())
-            },
-            (Type::Base { symbol: cs, args: ca }, Type::Base { symbol: ts, args: ta}) => {
-                if cs != ts || ca.len() != ta.len() {
-                    return Ok(());
-                }
-
-                for (c_arg, t_arg) in ca.iter().zip(ta.iter()) {
-                    self.collect_substitutions(c_arg, t_arg, substitutions, fn_generics, info)?;
-                }
-
-                Ok(())
-            },
-            (Type::Reference { inner: ci, .. }, Type::Reference { inner: ti, .. }) => {
-                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
-            },
-            (Type::MutableReference { inner: ci, .. }, Type::MutableReference { inner: ti, .. }) => {
-                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
-            },
-            (Type::MutableReference { inner: ci, .. }, Type::Reference { inner: ti, .. }) => {
-                self.collect_substitutions(&ci, &ti, substitutions, fn_generics, info)
-            },
-            (c @ Type::Base { .. }, Type::Reference { inner: ti, .. } | Type::MutableReference { inner: ti, .. }) => {
-                self.collect_substitutions(&c, &ti, substitutions, fn_generics, info)
-            },
-            (Type::Reference { inner: ci, .. } | Type::MutableReference { inner: ci, .. }, t @ Type::Base { .. }) => {
-                self.collect_substitutions(&ci, &t, substitutions, fn_generics, info)
-            },
-            _ => Ok(())
+    
+        if fn_generics.contains(&template_ty.symbol) {
+            if let Some(existing_sub) = substitutions.get(&template_ty.symbol) {
+                self.unify(existing_sub.clone(), concrete_ty, info)?;
+            } else {
+                substitutions.insert(template_ty.symbol, concrete_ty);
+            }
+            return Ok(());
         }
+    
+        let template_symbol = self.symbol_table.get_type_symbol(template_ty.symbol).unwrap();
+        if let TypeSymbolKind::OpaqueTypeProjection { ty: opaque_ty, tr: opaque_tr, member } = template_symbol.kind.clone() {
+            let substituted_opaque_ty = self.apply_substitution(&opaque_ty, substitutions);
+    
+            if substituted_opaque_ty.contains_generics(fn_generics) {
+                return Ok(());
+            }
+    
+            if let Some(resolution) = self.find_member_in_trait_impl(&substituted_opaque_ty, &opaque_tr, &member, info)? {
+                match resolution {
+                    MemberResolution::Type(resolved_member_type, _) => {
+                        self.unify(concrete_ty, resolved_member_type, info)?;
+                    },
+                    MemberResolution::Value(_, _, _) => unreachable!()
+                };
+            } else {
+                return Err(self.create_error(
+                    ErrorKind::UnimplementedTrait(
+                        self.symbol_table.display_type(&opaque_tr),
+                        self.symbol_table.display_type(&substituted_opaque_ty)
+                    ),
+                    info.span,
+                    &[info.span]
+                ));
+            }
+            return Ok(());
+        }
+    
+        if concrete_ty.symbol == template_ty.symbol && concrete_ty.args.len() == template_ty.args.len() {
+            for (c_arg, t_arg) in concrete_ty.args.iter().zip(template_ty.args.iter()) {
+                self.collect_substitutions(c_arg, t_arg, substitutions, fn_generics, info)?;
+            }
+        }
+    
+        Ok(())
     }
 }
 
@@ -1237,17 +1215,17 @@ impl SemanticAnalyzer {
     fn unify(&mut self, t1: Type, t2: Type, info: ConstraintInfo) -> Result<Type, BoxedError> {
         let t1 = self.resolve_type(&t1);
         let t2 = self.resolve_type(&t2);
-
+    
         match (t1.clone(), t2.clone()) {
             (t1, t2) if t1 == t2 => Ok(t1),
-
-            (Type::Base { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
-            (other, Type::Base { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
-
-            (Type::Base { symbol: s, .. }, other) | (other, Type::Base { symbol: s, .. })
+    
+            (Type { symbol: s, .. }, other) if self.is_uv(s) => self.unify_variable(s, other, info),
+            (other, Type { symbol: s, .. }) if self.is_uv(s) => self.unify_variable(s, other, info),
+    
+            (Type { symbol: s, .. }, other) | (other, Type { symbol: s, .. })
                 if self.is_never(s) => Ok(other.clone()),
             
-            (t1 @ Type::Base { symbol: s1, .. }, t2 @ Type::Base { symbol: s2, .. })
+            (t1 @ Type { symbol: s1, .. }, t2 @ Type { symbol: s2, .. })
                 if self.is_opaque_type_projection(s1) && self.is_opaque_type_projection(s2) =>
             {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
@@ -1270,7 +1248,7 @@ impl SemanticAnalyzer {
                     return Ok(t1.clone());
             },
             
-            (opaque_type @ Type::Base { symbol: s, .. }, other_type) | (other_type, opaque_type @ Type::Base { symbol: s, .. }) 
+            (opaque_type @ Type { symbol: s, .. }, other_type) | (other_type, opaque_type @ Type { symbol: s, .. }) 
                 if self.is_opaque_type_projection(s) =>
             {
                 let opaque_symbol = self.symbol_table.get_type_symbol(s).unwrap().clone();
@@ -1298,7 +1276,7 @@ impl SemanticAnalyzer {
                 Err(self.type_mismatch_error(&t1, &t2, info, None))
             },
 
-            (ref t1 @ Type::Base { symbol: s1, args: ref a1 }, ref t2 @ Type::Base { symbol: s2, args: ref a2 }) => {
+            (Type { symbol: s1, args: a1 }, Type { symbol: s2, args: a2 }) => {
                 let type_sym_s1 = self.symbol_table.get_type_symbol(s1).unwrap().clone();
                 let type_sym_s2 = self.symbol_table.get_type_symbol(s2).unwrap().clone();
                 
@@ -1307,13 +1285,13 @@ impl SemanticAnalyzer {
                     TypeSymbolKind::FunctionSignature { params: p2, return_type: r2, instance: i2 }
                 ) = (&type_sym_s1.kind, &type_sym_s2.kind) {
                     if type_sym_s1.generic_parameters.len() != type_sym_s2.generic_parameters.len() {
-                        return Err(self.type_mismatch_error(t1, t2, info, Some("function signatures have different number of generic parameters".to_string())));
+                        return Err(self.type_mismatch_error(&t1, &t2, info, Some("function signatures have different number of generic parameters".to_string())));
                     }
                     if i1 != i2 {
-                        return Err(self.type_mismatch_error(t1, t2, info, Some("function signatures have different instance kinds".to_string())));
+                        return Err(self.type_mismatch_error(&t1, &t2, info, Some("function signatures have different instance kinds".to_string())));
                     }
                     if p1.len() != p2.len() {
-                        return Err(self.type_mismatch_error(t1, t2, info, Some(format!("function signatures have different number of parameters: {} vs {}", p1.len(), p2.len()))));
+                        return Err(self.type_mismatch_error(&t1, &t2, info, Some(format!("function signatures have different number of parameters: {} vs {}", p1.len(), p2.len()))));
                     }
 
                     let mut substitutions = HashMap::new();
@@ -1334,7 +1312,7 @@ impl SemanticAnalyzer {
                 
                 if let Some(resultant_symbol) = type_sym_s1.unify(&type_sym_s2) {
                     if a1.len() != a2.len() {
-                        return Err(self.type_mismatch_error(t1, t2, info, Some(format!("expected {} generic arguments, but found {}", a1.len(), a2.len()))));
+                        return Err(self.type_mismatch_error(&t1, &t2, info, Some(format!("expected {} generic arguments, but found {}", a1.len(), a2.len()))));
                     }
 
                     let mut unified_args = vec![];
@@ -1342,29 +1320,14 @@ impl SemanticAnalyzer {
                         unified_args.push(self.unify(arg1.clone(), arg2.clone(), info)?);
                     }
 
-                    return Ok(Type::Base {
+                    return Ok(Type {
                         symbol: resultant_symbol,
                         args: unified_args,
                     });
                 }
 
-                Err(self.type_mismatch_error(t1, t2, info, None))
+                Err(self.type_mismatch_error(&t1, &t2, info, None))
             },
-
-            (Type::Reference { inner: inner1 }, Type::Reference { inner: inner2 }) => {
-                let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::Reference { inner: Box::new(unified) })
-            },
-            (Type::MutableReference { inner: inner1 }, Type::MutableReference { inner: inner2 }) => {
-                let unified = self.unify(*inner1, *inner2, info)?;
-                Ok(Type::MutableReference { inner: Box::new(unified) })
-            },
-            (Type::MutableReference { inner: p_inner }, Type::Reference { inner: e_inner }) => {
-                let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-                Ok(Type::Reference { inner: Box::new(unified_inner) })
-            },
-
-            (t1, t2) => Err(self.type_mismatch_error(&t1, &t2, info, None)),
         }
     }
 
@@ -1586,58 +1549,19 @@ impl SemanticAnalyzer {
     fn unify_receiver(&mut self, passed: Type, expected: Type, info: ConstraintInfo) -> Result<Option<Type>, BoxedError> {
         let resolved_passed = self.resolve_type(&passed);
         let resolved_expected = self.resolve_type(&expected);
-
+    
         if self.is_uv(resolved_passed.symbol) || self.is_uv(resolved_expected.symbol) {
             return Ok(None);
         }
-
-        let resolved_passed = match resolved_passed.clone() {
-            Type::MutableReference { inner, .. } => Type::MutableReference { inner },
-            Type::Reference { inner, .. } => Type::Reference { inner },
-            _ => resolved_passed
-        };
-
-        let resolved_expected = match resolved_expected.clone() {
-            Type::MutableReference { inner, .. } => Type::MutableReference { inner },
-            Type::Reference { inner, .. } => Type::Reference { inner },
-            _ => resolved_expected
-        };
-
-        // Direct substitution.
-        if let Ok(unified) = self.unify(resolved_passed.clone(), resolved_expected.clone(), info) {
-            return Ok(Some(unified));
-        }
-
-        // `&mut T` -> `&T`
-        if let (Type::MutableReference { inner: p_inner, .. }, Type::Reference { inner: e_inner, .. }) = (resolved_passed.clone(), resolved_expected.clone()) {
-            let unified_inner = self.unify(*p_inner, *e_inner, info)?;
-            return Ok(Some(Type::Reference { inner: Box::new(unified_inner) }));
-        }
-
-        // `&^n T` | `&^n mut T` -> `T`
-        let mut deref_passed = resolved_passed.clone();
-        while let Type::Reference { inner, .. } | Type::MutableReference { inner, .. } = deref_passed {
-            deref_passed = *inner;
-            if let Ok(unified) = self.unify(deref_passed.clone(), resolved_expected.clone(), info) {
-                return Ok(Some(unified));
-            }
-        }
-        
-        // `T` -> `&^n T` | `&^n mut T`
-        if let p @ Type::Base { .. } = resolved_passed.clone() {
-             match resolved_expected.clone() {
-                e @ Type::Reference { .. } => return self.unify(Type::Reference{ inner: Box::new(p) }, e, info).map(Some),
-                e @ Type::MutableReference { .. } => return self.unify(Type::MutableReference { inner: Box::new(p) }, e, info).map(Some),
-                _ => {}
-            }
-        }
-
-        Err(self.type_mismatch_error(
-            &resolved_passed,
-            &resolved_expected,
-            info,
-            Some("receiver type mismatch".to_string()),
-        ))
+    
+        self.unify(resolved_passed.clone(), resolved_expected.clone(), info)
+            .map(Some)
+            .map_err(|_| self.type_mismatch_error(
+                &resolved_passed,
+                &resolved_expected,
+                info,
+                Some("receiver type mismatch".to_string()),
+            ))
     }
 
     /// Unifies a member access operation (static or instance).
@@ -2114,9 +2038,13 @@ impl SemanticAnalyzer {
                 },
                 TypeSymbolKind::OpaqueTypeProjection { ty, tr, .. } => {
                     let new_ty = self.resolve_final_type(ty);
-                    let new_tr = self.resolve_final_type(tr);
-                    if *ty != new_ty || *tr != new_tr {
+                    if *ty != new_ty {
                         *ty = new_ty;
+                        was_changed = true;
+                    }
+
+                    let new_tr = self.resolve_final_type(tr);
+                    if *tr != new_tr {
                         *tr = new_tr;
                         was_changed = true;
                     }
@@ -2585,16 +2513,6 @@ impl SemanticAnalyzer {
                     ));
                 }
             },
-            AstNodeKind::UnaryOperation { operator: Operation::MutableAddressOf, operand } => {
-                 if !self.is_place_expr_and_mutable(operand)? {
-                    let name = operand.get_name().unwrap_or_default();
-                    return Err(self.create_error(
-                        ErrorKind::MutatingImmutableData(name),
-                        operand.span,
-                        &[operand.span]
-                    ));
-                }
-            },
             _ => {}
         }
 
@@ -2608,7 +2526,7 @@ impl SemanticAnalyzer {
                     if !matches!(symbol.kind, ValueSymbolKind::Variable) {
                         return Ok(false);
                     }
-
+    
                     Ok(symbol.mutable)
                 } else {
                     Err(self.create_error(ErrorKind::ExpectedValue, place.span, &[place.span]))
@@ -2620,34 +2538,17 @@ impl SemanticAnalyzer {
                 {
                         return Ok(false);
                 }
-
-                let base_type = self.resolve_type(base.type_id.as_ref().unwrap());
-                match &base_type {
-                    Type::MutableReference { .. } => Ok(true),
-                    Type::Reference { .. } => Ok(false),
-                    Type::Base { .. } => self.is_place_expr_and_mutable(base),
-                }
-            },
-            AstNodeKind::UnaryOperation { operator: Operation::Dereference, operand } => {
-                let operand_type = self.resolve_type(operand.type_id.as_ref().unwrap());
-                
-                if matches!(operand_type, Type::MutableReference { .. }) {
-                    return Ok(true);
-                }
-
-                if matches!(operand_type, Type::Reference { .. }) {
-                    return Ok(false);
-                }
-
-                let deref_mut_trait_id = self.trait_registry.get_default_trait(&"DerefMut".to_string());
-                self.does_type_implement_trait(&operand_type, deref_mut_trait_id)
+    
+                self.is_place_expr_and_mutable(base)
             },
             AstNodeKind::SelfExpr => {
-                let ty = self.resolve_type(place.type_id.as_ref().unwrap());
-                match ty {
-                    Type::MutableReference { .. } => Ok(true),
-                    Type::Reference { .. } => Ok(false),
-                    Type::Base { .. } => Ok(true)
+                if let Some(symbol) = self.symbol_table.find_value_symbol_from_scope(place.scope_id.unwrap(), "self") {
+                    if !matches!(symbol.kind, ValueSymbolKind::Variable) {
+                        return Ok(false);
+                    }
+                    Ok(symbol.mutable)
+                } else {
+                    Err(self.create_error(ErrorKind::InvalidSelf("not in scope"), place.span, &[place.span]))
                 }
             },
             _ => Ok(false)

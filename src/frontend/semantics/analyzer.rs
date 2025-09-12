@@ -1212,7 +1212,7 @@ impl SemanticAnalyzer {
     }
 
     pub fn is_copy_type(&self, ty: &Type) -> bool {
-        matches!(self.symbol_table.get_type_symbol(ty.symbol).unwrap().kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. })
+        matches!(self.symbol_table.get_type_symbol(ty.symbol).unwrap().kind, TypeSymbolKind::Primitive(_) | TypeSymbolKind::FunctionSignature { .. } | TypeSymbolKind::Enum(_))
     }
 
     pub fn is_ancestor_of(&self, ancestor_id: ScopeId, child_id: ScopeId) -> bool {

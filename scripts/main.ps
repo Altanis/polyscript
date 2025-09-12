@@ -19,6 +19,7 @@
 // default traits such as Drop, Clone, Default, ToString
 // maybe add prelude system
 
+/*
 import { String } from "stdlib/string.ps";
 import { println } from "stdlib/io.ps";
 
@@ -26,4 +27,28 @@ let r = String.from_str("Hello");
 let s = String.from_str(" world.");
 r += s;
 
-println(r);
+println(r);*/
+
+enum Difficulty {
+    Easy,
+    Medium,
+    Hard
+}
+
+impl Difficulty {
+    const LEVELS: int = 3;
+    type ReturnTy = int;
+
+    fn default_difficulty(): Self {
+        return Difficulty.Easy;
+    }
+
+    fn get_levels(self): Self.ReturnTy {
+        return Self.LEVELS;
+    }
+}
+
+
+let difficulty = Difficulty.default_difficulty();
+let levels = Difficulty.LEVELS;
+let levels_alias = difficulty.get_levels();
