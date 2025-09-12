@@ -730,54 +730,6 @@ impl SymbolTable {
         ).unwrap();
 
         trait_registry.default_traits.insert("Drop".to_string(), trait_id);
-        
-        // -- Clone Trait -- //
-        let trait_scope_id = self.enter_scope(ScopeKind::Trait);
-        let self_type_id = self.add_type_symbol(
-            "Self",
-            TypeSymbolKind::TypeAlias((None, None)),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-
-        let func_scope_id = self.enter_scope(ScopeKind::Function);
-        self.exit_scope();
-
-        let params = vec![Type::from_no_args(self_type_id)];
-
-        let fn_sig_type_id = self.add_type_symbol(
-            "clone",
-            TypeSymbolKind::FunctionSignature {
-                params,
-                return_type: Type::from_no_args(self_type_id),
-                instance: true
-            },
-            vec![],
-            QualifierKind::Private,
-            None,
-        ).unwrap();
-
-        self.add_value_symbol(
-            "clone",
-            ValueSymbolKind::Function(func_scope_id, HashSet::new()),
-            false,
-            QualifierKind::Public,
-            Some(Type::from_no_args(fn_sig_type_id)),
-            None,
-        ).unwrap();
-
-        self.exit_scope();
-
-        let trait_id = self.add_type_symbol(
-            "Clone",
-            TypeSymbolKind::Trait(trait_scope_id),
-            vec![],
-            QualifierKind::Public,
-            None,
-        ).unwrap();
-
-        trait_registry.default_traits.insert("Clone".to_string(), trait_id);
 
         self.current_scope_id = old_scope;
     }

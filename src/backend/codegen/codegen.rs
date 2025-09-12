@@ -591,39 +591,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let original_data_ptr = function.get_first_param().unwrap().into_pointer_value();
         original_data_ptr.set_name("original_data_ptr");
-
-        let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
-        let type_id = ty.symbol;
-        if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&clone_trait_id)
-            && let Some(impls_for_type) = impls_for_trait.get(&type_id)
-        {
-            let applicable_impl = impls_for_type.iter().find(|imp| {
-                self.check_trait_impl_applicability_mir(ty, imp)
-            });
-
-            if let Some(imp) = applicable_impl
-                && let Some(clone_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope("clone", imp.impl_scope_id)
-                && let Some(clone_fn_val) = self.functions.get(&clone_fn_symbol.id).copied()
-            {
-                let cloned_val = if self.is_rvo_candidate(ty) {
-                    let return_llvm_type = self.map_inner_semantic_type(ty).unwrap();
-                    let rvo_return_ptr = self.builder.build_alloca(return_llvm_type, "clone_rvo_ret_ptr").unwrap();
-
-                    let args: Vec<BasicMetadataValueEnum> = vec![rvo_return_ptr.into(), original_data_ptr.into()];
-
-                    self.builder.build_call(clone_fn_val, &args, "").unwrap();
-                    self.builder.build_load(return_llvm_type, rvo_return_ptr, "cloned_val").unwrap()
-                } else {
-                    let call = self.builder.build_call(clone_fn_val, &[original_data_ptr.into()], "user_clone_call").unwrap();
-                    call.try_as_basic_value().left().unwrap()
-                };
-
-                self.builder.build_return(Some(&cloned_val)).unwrap();
-                
-                if let Some(block) = old_block { self.builder.position_at_end(block); }
-                return;
-            }
-        }
         
         let rc_repr = self.wrap_in_rc(ty);
         let original_data = self.builder.build_load(rc_repr.llvm_data_type, original_data_ptr, "original_data").unwrap();
@@ -1989,18 +1956,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let fn_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
             let impl_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
 
-            let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
-            let TypeSymbolKind::Trait(clone_scope_id) = self.analyzer.symbol_table.get_type_symbol(clone_trait_id).unwrap().kind else { unreachable!(); };
             let drop_trait_id = *self.analyzer.trait_registry.default_traits.get("Drop").unwrap();
             let TypeSymbolKind::Trait(drop_scope_id) = self.analyzer.symbol_table.get_type_symbol(drop_trait_id).unwrap().kind else { unreachable!(); };
 
-            if (impl_scope.trait_id.is_some() || (impl_scope.id == clone_scope_id) || (impl_scope.id == drop_scope_id))
+            if (impl_scope.trait_id.is_some() || (impl_scope.id == drop_scope_id))
                 && let Some(argument) = arguments.first()
                 && let Some(ty_id) = argument.type_id.as_ref()
             {
-                let is_clone = if let Some(trait_id) = impl_scope.trait_id { trait_id == clone_trait_id } else { impl_scope.id == clone_scope_id };
                 let is_drop = if let Some(trait_id) = impl_scope.trait_id { trait_id == drop_trait_id } else { impl_scope.id == drop_scope_id };
-
 
                 let rc_ptr = if self.is_heap_type(ty_id) {
                     let rc_ptr_ptr = self.compile_node(argument).unwrap().into_pointer_value();
@@ -2008,19 +1971,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 } else {
                     None
                 };
-
-                if fn_name == "clone" && is_clone {
-                    if let Some(rc_ptr) = rc_ptr {
-                        let incref_fn = self.get_incref();
-                        self.builder.build_call(incref_fn, &[rc_ptr.into()], "heap.clone.incref").unwrap();
-                        return Some(rc_ptr);
-                    } else {
-                        let ptr = self.compile_node(argument).unwrap().into_pointer_value();
-                        let llvm_type = self.map_semantic_type(argument.type_id.as_ref().unwrap()).unwrap();
-                        let loaded_val = self.builder.build_load(llvm_type, ptr, "clone.primitive_load").unwrap();
-                        return Some(loaded_val);
-                    }
-                }
 
                 if fn_name == "drop" && is_drop {
                     if let Some(rc_ptr) = rc_ptr {

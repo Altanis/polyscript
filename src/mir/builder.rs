@@ -985,16 +985,8 @@ impl<'a> MIRBuilder<'a> {
 
                             let fn_symbol = self.analyzer.symbol_table.get_value_symbol(function.value_id.unwrap()).unwrap();
                             let method_name = self.analyzer.symbol_table.get_value_name(fn_symbol.name_id);
-                            let impl_scope = self.analyzer.symbol_table.get_scope(fn_symbol.scope_id).unwrap();
                             
-                            let clone_trait_id = *self.analyzer.trait_registry.default_traits.get("Clone").unwrap();
-                            let TypeSymbolKind::Trait(clone_scope_id) = self.analyzer.symbol_table.get_type_symbol(clone_trait_id).unwrap().kind else { unreachable!(); };
-                            let is_clone = if let Some(trait_id) = impl_scope.trait_id { trait_id == clone_trait_id } else { impl_scope.id == clone_scope_id };
-
-                            if is_clone && self.analyzer.is_copy_type(&concrete_base_type) {
-                                let clone_arg = arguments.get_mut(0).unwrap();
-                                return self.lower_node(clone_arg);
-                            } else if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
+                            if let Some(impls_for_trait) = self.analyzer.trait_registry.register.get(&trait_id)
                                 && let Some(impls_for_type) = impls_for_trait.get(&concrete_type_id)
                                 && let Some(imp) = impls_for_type.iter().find(|imp| self.check_trait_impl_applicability_mir(&concrete_base_type, imp))
                                 && let Some(concrete_fn_symbol) = self.analyzer.symbol_table.find_value_symbol_in_scope(method_name, imp.impl_scope_id)

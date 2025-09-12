@@ -581,10 +581,6 @@ impl SemanticAnalyzer {
     /// Checks if a type implements a trait.
     fn does_type_implement_trait(&mut self, ty: &Type, trait_id: TypeSymbolId) -> Result<bool, BoxedError> {
         let resolved_type = self.resolve_type(ty);
-        let clone_trait_id = self.trait_registry.get_default_trait(&"Clone".to_string());
-        if trait_id == clone_trait_id && self.is_copy_type(&resolved_type) {
-            return Ok(true);
-        }
 
         if self.is_uv(resolved_type.symbol) {
             return Ok(false);

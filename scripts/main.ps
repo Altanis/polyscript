@@ -256,27 +256,19 @@ impl String {
     }
 }
 
-impl Clone for String {
-    fn clone(self): Self {
-        String { chars: [Vec<char> as Clone].clone(self.chars) }
-    }
-}
-
 impl Add<char> for String {
     type Output = String;
     fn add(self, other: char): String {
-        let string = [String as Clone].clone(self);
-        string.push(other);
-        string
+        self.push(other);
+        self
     }
 }
 
 impl Add<String> for String {
     type Output = String;
     fn add(self, other: String): String {
-        let string = [String as Clone].clone(self);
-        string.push_string(other);
-        string
+        self.push_string(other);
+        self
     }
 }
 
