@@ -1971,10 +1971,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                     "deref" => {
                         let arg_node = &arguments[0];
-                        if let MIRNodeKind::TypeCast { expr: ptr_expr, target_type } = &arg_node.kind {
+                        if let MIRNodeKind::TypeCast { expr: ptr_expr, .. } = &arg_node.kind {
                             let ptr_as_int = self.compile_node(ptr_expr).unwrap().into_int_value();
 
-                            let llvm_type_to_load = self.map_semantic_type(target_type).unwrap();
+                            let llvm_type_to_load = self.map_semantic_type(arg_node.type_id.as_ref().unwrap()).unwrap();
                             let llvm_ptr_type = self.context.ptr_type(AddressSpace::default());
                             
                             let ptr = self.builder.build_int_to_ptr(ptr_as_int, llvm_ptr_type, "deref_ptr").unwrap();

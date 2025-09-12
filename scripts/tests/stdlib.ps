@@ -112,7 +112,7 @@ impl<T> Vec<T> {
         if #IS_REFCOUNTED#{T} {
             decref(dst);
         } else {
-            drop(deref(dst));
+            drop(deref(dst as T));
         };
 
         let src = self.data + (idx + 1) * self.element_size;
@@ -134,7 +134,7 @@ impl<T> Vec<T> {
             if #IS_REFCOUNTED#{T} {
                 decref(dst);
             } else {
-                drop(deref(dst));
+                drop(deref(dst as T));
             };
 
             self.size = last;
@@ -234,7 +234,7 @@ impl String {
     }
 }
 
-/*impl Clone for String {
+impl Clone for String {
     fn clone(self): Self {
         String { chars: [Vec<char> as Clone].clone(self.chars) }
     }
@@ -256,7 +256,7 @@ impl Add<String> for String {
         string.push_string(other);
         string
     }
-}*/
+}
 
 impl AddAssign<char> for String {
     fn add_assign(self, other: char) {
@@ -306,40 +306,43 @@ impl ToString for int {
     }
 }
 
-/*impl ToString for float {
+impl ToString for float {
     fn to_string(self): String {
-        let mut n = self;
+        let n = self;
 
         // TODO: nan, inf, -inf
 
         let negative = n < 0.0;
-        if negative {
-            n = 0 - n;
-        }
+        if (negative) {
+            n = 0.0 - n;
+        };
 
         let int_part = n as int;
-        let s = [int as ToString].to_string(int);
+        let s = [int as ToString].to_string(int_part);
 
-        let mut frac = n - int_part as float;
+        let frac = n - int_part as float;
         if (frac > 0.0) {
             s.push('.');
-            for (let i = 0; i < 6; i += 1) {
+            for (let i = 0; i < 17; i += 1) {
                 frac *= 10.0;
                 let digit = frac as int;
                 s.push(('0' as int + digit) as char);
                 frac -= digit as float;
             }
-        }
+        } else {
+            s.push('.');
+            s.push('0');
+        };
 
-        if negative {
-            let with_sign = String::from_str("-");
-            with_sign.push_str(s);
+        if (negative) {
+            let with_sign = String.from_str("-");
+            with_sign.push_string(s);
             return with_sign;
-        }
+        };
 
         s
     }
-}*/
+}
 
 impl ToString for str {
     fn to_string(self): String {
@@ -383,3 +386,12 @@ fn println<T: ToString>(data: T) {
 
 let r = String.from_str("Hello ");
 println(r);
+let s = String.from_str("world.");
+r += s;
+println(r);
+
+println("hi");
+println(true);
+println(false);
+println(1);
+println(0.1 + 0.2);

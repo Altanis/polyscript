@@ -110,7 +110,7 @@ impl<T> Vec<T> {
         if #IS_REFCOUNTED#{T} {
             decref(dst);
         } else {
-            drop(deref(dst));
+            drop(deref(dst as T));
         };
 
         let src = self.data + (idx + 1) * self.element_size;
@@ -132,7 +132,7 @@ impl<T> Vec<T> {
             if #IS_REFCOUNTED#{T} {
                 decref(dst);
             } else {
-                drop(deref(dst));
+                drop(deref(dst as T));
             };
 
             self.size = last;
