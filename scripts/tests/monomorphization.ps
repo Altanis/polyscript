@@ -3,7 +3,7 @@ struct Scalar<T> {
 }
 
 trait Numeric<T> {
-    fn get_number(&self): T;
+    fn get_number(self): T;
 }
 
 impl<T> Scalar<T> {
@@ -11,13 +11,13 @@ impl<T> Scalar<T> {
         Scalar { x }
     }
 
-    fn get_num(&self): T {
+    fn get_num(self): T {
         self.x
     }
 }
 
 impl<T> Numeric<T> for Scalar<T> {
-    fn get_number(&self): T {
+    fn get_number(self): T {
         self.x
     }
 }

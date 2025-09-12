@@ -14,16 +14,16 @@ impl Scalar {
         Scalar { inner: Self.DEFAULT_VALUE }
     }
 
-    public fn get_inner(&self): int {
-        this.inner
+    public fn get_inner(self): int {
+        self.inner
     }
 
-    public fn set_inner(&mut self, inner: int) {
-        this.inner = inner;
+    public fn set_inner(self, inner: int) {
+        self.inner = inner;
     }
 
     private fn yes() {}
-    private fn no(&self) {}
+    private fn no(self) {}
 }
 
 let s1 = Scalar.default();

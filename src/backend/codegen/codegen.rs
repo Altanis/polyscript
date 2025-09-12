@@ -1006,8 +1006,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder.build_int_neg(operand.into_int_value(), "neg").unwrap().into()
                 }
             },
-            Operation::Not | Operation::BitwiseNegate => {
-                self.builder.build_not(operand.into_int_value(), "not").unwrap().into()
+            Operation::Not => {
+                let int_val = operand.into_int_value();
+                let zero = int_val.get_type().const_int(0, false);
+                self.builder.build_int_compare(IntPredicate::EQ, int_val, zero, "logical_not").unwrap().into()
+            },
+            Operation::BitwiseNegate => {
+                self.builder.build_not(operand.into_int_value(), "bitwise_not").unwrap().into()
             },
             _ => unreachable!("Operator `{:?}` was not handled", operator),
         }

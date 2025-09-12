@@ -2290,7 +2290,11 @@ impl SemanticAnalyzer {
                 }
 
                 self.const_check_node(initializer)?;
-            }
+            },
+            AstNodeKind::AssociatedConstant { initializer, name, .. } => {
+                self.is_const_expr(initializer, name.clone())?;
+                self.const_check_node(initializer)?;
+            },
             _ => {
                 for child in node.children() {
                     self.const_check_node(child)?;

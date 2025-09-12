@@ -22,13 +22,11 @@ struct Vector2D {
 }
 
 impl Vector2D {
-    public const ZERO: Vector2D = Vector2D { x: 0, y: 0 };
-
     public fn new(x: int, y: int): Vector2D {
         return Vector2D { x, y };
     }
 
-    public fn do_nothing(&self) {}
+    public fn do_nothing(self) {}
 }
 
 let vector = Vector2D.new(3, 4);

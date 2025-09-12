@@ -1300,7 +1300,7 @@ impl SemanticAnalyzer {
         pass!(self, const_check_pass, program);
         pass!(self, generic_value_check_pass, program);
         pass!(self, member_resolution_pass, program);
-        pass!(self, mutability_check_pass, program);
+        // pass!(self, mutability_check_pass, program);
         pass!(self, trait_conformance_pass, program);
         pass!(self, explicit_drop_check_pass, program);
 

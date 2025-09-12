@@ -343,7 +343,7 @@ impl<'a> MIRBuilder<'a> {
             return;
         }
 
-        if concrete_ty == *template_ty {
+        if concrete_ty.symbol == template_ty.symbol && concrete_ty.args.len() == template_ty.args.len() {
             for (c_arg, t_arg) in concrete_ty.args.iter().zip(template_ty.args.iter()) {
                 self.collect_generic_mappings(c_arg, t_arg, substitutions);
             }

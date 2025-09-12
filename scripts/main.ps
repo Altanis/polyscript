@@ -7,6 +7,7 @@
 // join(Vec<String>, separator: String) -> String, repeat(int) -> String
 // +, +=, ==, !=, <, <=, >=, >, 
 
+// assignment in enum value position
 // nan and infinite for floats
 // handle integer overflow
 // math stdlib
@@ -28,27 +29,3 @@ let s = String.from_str(" world.");
 r += s;
 
 println(r);*/
-
-enum Difficulty {
-    Easy,
-    Medium,
-    Hard
-}
-
-impl Difficulty {
-    const LEVELS: int = 3;
-    type ReturnTy = int;
-
-    fn default_difficulty(): Self {
-        return Difficulty.Easy;
-    }
-
-    fn get_levels(self): Self.ReturnTy {
-        return Self.LEVELS;
-    }
-}
-
-
-let difficulty = Difficulty.default_difficulty();
-let levels = Difficulty.LEVELS;
-let levels_alias = difficulty.get_levels();

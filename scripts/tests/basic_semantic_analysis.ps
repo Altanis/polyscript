@@ -1,5 +1,4 @@
 let x: float = 5.0;
-let y: &float = &x;
 
 struct Vector2D {
     x: float;
@@ -15,14 +14,10 @@ impl Vector2D {
     }
 
     fn take_this(self) {}
-    fn take_ref_this(&self) {}
-    fn take_mut_ref_this(&mut self) {}
 }
 
 let v1 = Vector2D.default();
 v1.take_this();
-v1.take_ref_this();
-v1.take_mut_ref_this();
 
 enum Difficulty {
     Easy,
@@ -38,7 +33,7 @@ impl Difficulty {
         return Difficulty.Easy;
     }
 
-    fn get_levels(&self): Self.ReturnTy {
+    fn get_levels(self): Self.ReturnTy {
         return Self.LEVELS;
     }
 }

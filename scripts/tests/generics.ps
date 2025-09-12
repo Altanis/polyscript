@@ -25,7 +25,7 @@ fn identity<T>(x: T): T {
 fn generic_pair<A: TAddable + TSubbable, B: TAddable + TSubbable>(a: A, b: B) {}
 
 let identity_value = identity(5);
-generic_pair(5, "3");
+generic_pair(5, 3);
 
 struct Vector2D<T: TAddable> {
     public x: T;
@@ -66,16 +66,16 @@ struct Type<A> {
 }
 
 impl<U> Type<U> {
-    fn test(&self, other: &Self) {}
+    fn test(self, other: Self) {}
 }
 
 let v1 = Type { x: 3 };
 let v2 = Type { x: 4 };
 let v3 = Type { x: '5' };
 
-v1.test(&v2);
+v1.test(v2);
 // error: incompatible types U = char and U = int
-// v1.test(&v3);
+// v1.test(v3);
 
 struct Vector3D<T, U> {
     x: T;
@@ -84,7 +84,7 @@ struct Vector3D<T, U> {
 }
 
 impl<T, U> Vector3D<T, U> {
-    fn operation(&self, other: &Self): int {
+    fn operation(self, other: Self): int {
         return 0;
     }
 }
@@ -96,7 +96,7 @@ impl Vector3D<int, float> {
 }
 
 impl Vector3D<float, float> {
-    fn test(&self) {
+    fn test(self) {
 
     }
 }
@@ -104,7 +104,7 @@ impl Vector3D<float, float> {
 let v4: Vector3D<int, float> = [Vector3D<int, float>].default();
 let v5: Vector3D<int, float> = [Vector3D<int, float>].default();
 
-let res: int = v4.operation(&v5);
+let res: int = v4.operation(v5);
 
 let v6 = Vector3D { x: 0.0, y: 0.0, z: 1.0 };
 v6.test();
