@@ -1067,8 +1067,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Operation::Plus => self.builder.build_int_add(l, r, "add").unwrap().into(),
                 Operation::Minus => self.builder.build_int_sub(l, r, "sub").unwrap().into(),
                 Operation::Mul => self.builder.build_int_mul(l, r, "mul").unwrap().into(),
-                Operation::Div => self.builder.build_int_signed_div(l, r, "div").unwrap().into(),
-                Operation::Mod => self.builder.build_int_signed_rem(l, r, "rem").unwrap().into(),
+                Operation::Div | Operation::Mod => {
+                    let function = self.current_function.unwrap();
+
+                    let non_zero_block = self.context.append_basic_block(function, "div.non_zero");
+                    let zero_block = self.context.append_basic_block(function, "div.zero");
+
+                    let zero = r.get_type().const_int(0, false);
+                    let is_zero = self.builder.build_int_compare(IntPredicate::EQ, r, zero, "is_divisor_zero").unwrap();
+
+                    self.builder.build_conditional_branch(is_zero, zero_block, non_zero_block).unwrap();
+
+                    self.builder.position_at_end(zero_block);
+                    let fprintf = self.get_c_fprintf();
+                    let stderr = self.get_stderr();
+                    let error_msg = self.builder.build_global_string_ptr("runtime error: division by zero\n", "div_zero_err_msg").unwrap();
+                    self.builder.build_call(fprintf, &[stderr.into(), error_msg.as_pointer_value().into()], "").unwrap();
+                    let exit_func = self.get_c_exit();
+                    let exit_code = self.context.i32_type().const_int(1, false);
+                    self.builder.build_call(exit_func, &[exit_code.into()], "").unwrap();
+                    self.builder.build_unreachable().unwrap();
+
+                    self.builder.position_at_end(non_zero_block);
+                    if operator == Operation::Div {
+                        self.builder.build_int_signed_div(l, r, "div").unwrap().into()
+                    } else {
+                        self.builder.build_int_signed_rem(l, r, "rem").unwrap().into()
+                    }
+                },
                 Operation::BitwiseAnd => self.builder.build_and(l, r, "and").unwrap().into(),
                 Operation::BitwiseOr => self.builder.build_or(l, r, "or").unwrap().into(),
                 Operation::BitwiseXor => self.builder.build_xor(l, r, "xor").unwrap().into(),
