@@ -158,18 +158,4 @@ impl<T> Drop for Vec<T> {
     }
 }
 
-impl<T: Clone> Clone for Vec<T> {
-    fn clone(self): Self {
-        let vec: Vec<T> = [Vec<T>].new();
-        vec.reserve(self.size);
-
-        for (let i = 0; i < self.size; i += 1) {
-            let element: T = self.get(i);
-            vec.push([T as Clone].clone(element));
-        }
-        
-        return vec;
-    }
-}
-
 export { Vec };

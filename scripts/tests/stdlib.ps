@@ -149,6 +149,7 @@ impl<T> Vec<T> {
 
 impl<T> Drop for Vec<T> {
     fn drop(self) {
+        eprint("drop.");
         if (self.capacity != 0) {
             self.clear();
             free(self.data);
@@ -157,20 +158,6 @@ impl<T> Drop for Vec<T> {
             self.capacity = 0;
             self.data = nullptr;
         }
-    }
-}
-
-impl<T: Clone> Clone for Vec<T> {
-    fn clone(self): Self {
-        let vec: Vec<T> = [Vec<T>].new();
-        vec.reserve(self.size);
-
-        for (let i = 0; i < self.size; i += 1) {
-            let element: T = self.get(i);
-            vec.push([T as Clone].clone(element));
-        }
-        
-        return vec;
     }
 }
 
@@ -234,27 +221,19 @@ impl String {
     }
 }
 
-impl Clone for String {
-    fn clone(self): Self {
-        String { chars: [Vec<char> as Clone].clone(self.chars) }
-    }
-}
-
 impl Add<char> for String {
     type Output = String;
     fn add(self, other: char): String {
-        let string = [String as Clone].clone(self);
-        string.push(other);
-        string
+        self.push(other);
+        self
     }
 }
 
 impl Add<String> for String {
     type Output = String;
     fn add(self, other: String): String {
-        let string = [String as Clone].clone(self);
-        string.push_string(other);
-        string
+        self.push_string(other);
+        self
     }
 }
 
@@ -384,14 +363,12 @@ fn println<T: ToString>(data: T) {
     print_char('\n');
 }
 
-let r = String.from_str("Hello ");
-println(r);
-let s = String.from_str("world.");
-r += s;
-println(r);
+{
+    let r = String.from_str("Hello ");
+    let s = String.from_str("world.");
+    r += s;
+    println(r);
+    let x = [Vec<char>].new();
+}
 
-println("hi");
-println(true);
-println(false);
-println(1);
-println(0.1 + 0.2);
+println("we're serious");

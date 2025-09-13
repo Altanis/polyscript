@@ -61,29 +61,21 @@ impl String {
     }
 }
 
-/*impl Clone for String {
-    fn clone(self): Self {
-        String { chars: [Vec<char> as Clone].clone(self.chars) }
-    }
-}
-
 impl Add<char> for String {
     type Output = String;
     fn add(self, other: char): String {
-        let string = [String as Clone].clone(self);
-        string.push(other);
-        string
+        self.push(other);
+        self
     }
 }
 
 impl Add<String> for String {
     type Output = String;
     fn add(self, other: String): String {
-        let string = [String as Clone].clone(self);
-        string.push_string(other);
-        string
+        self.push_string(other);
+        self
     }
-}*/
+}
 
 impl AddAssign<char> for String {
     fn add_assign(self, other: char) {
@@ -133,40 +125,43 @@ impl ToString for int {
     }
 }
 
-/*impl ToString for float {
+impl ToString for float {
     fn to_string(self): String {
-        let mut n = self;
+        let n = self;
 
         // TODO: nan, inf, -inf
 
         let negative = n < 0.0;
-        if negative {
-            n = 0 - n;
-        }
+        if (negative) {
+            n = 0.0 - n;
+        };
 
         let int_part = n as int;
-        let s = [int as ToString].to_string(int);
+        let s = [int as ToString].to_string(int_part);
 
-        let mut frac = n - int_part as float;
+        let frac = n - int_part as float;
         if (frac > 0.0) {
             s.push('.');
-            for (let i = 0; i < 6; i += 1) {
+            for (let i = 0; i < 17; i += 1) {
                 frac *= 10.0;
                 let digit = frac as int;
                 s.push(('0' as int + digit) as char);
                 frac -= digit as float;
             }
-        }
+        } else {
+            s.push('.');
+            s.push('0');
+        };
 
-        if negative {
-            let with_sign = String::from_str("-");
-            with_sign.push_str(s);
+        if (negative) {
+            let with_sign = String.from_str("-");
+            with_sign.push_string(s);
             return with_sign;
-        }
+        };
 
         s
     }
-}*/
+}
 
 impl ToString for str {
     fn to_string(self): String {
