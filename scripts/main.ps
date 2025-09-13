@@ -10,15 +10,14 @@
 // maybe add prelude system
 
 
-import { eprint, endproc } from "@intrinsics";
+import {print_char,getchar} from "@intrinsics";
+let c = getchar();
+print_char(c);
+print_char('\n');
 
-fn unreachable(): never {
-    eprint("unreachable code detected\n");
-    endproc(1);
-}
+/*import { println, read_char, read_line } from "stdlib/io.ps";
+import { String } from "stdlib/string.ps";
 
-let x = if (1 + 1 == 2) {
-    true
-} else {
-    unreachable();
-};
+let c = read_char();
+println("");
+println(String.from_str("Read char: ") + c);*/

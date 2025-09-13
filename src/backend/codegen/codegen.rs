@@ -231,6 +231,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         self.module.add_function("strlen", fn_type, None)
     }
+
+    fn get_c_getchar(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("getchar") {
+            return func;
+        }
+
+        let i32_type = self.context.i32_type();
+        let fn_type = i32_type.fn_type(&[], false);
+        self.module.add_function("getchar", fn_type, None)
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -1568,7 +1578,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if merge_block.get_terminator().is_none() {
                     self.builder.build_unreachable().unwrap();
                 }
-                
+
                 return None;
             }
 
@@ -2093,6 +2103,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let char_val = self.builder.build_load(self.context.i8_type(), char_ptr, "char_val").unwrap();
 
                         Some(char_val)
+                    },
+                    "getchar" => {
+                        let func = self.get_c_getchar();
+                        let call = self.builder.build_call(func, &[], "getchar_call").unwrap();
+                        call.try_as_basic_value().left()
                     },
                     "drop" => {
                         let value_to_drop_node = &arguments[0];

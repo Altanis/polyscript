@@ -386,6 +386,7 @@ impl SymbolTable {
         add_intrinsic("endproc", vec![int_type.clone()], never_type.clone());
         add_intrinsic("strlen", vec![str_type.clone()], int_type.clone());
         add_intrinsic("strget", vec![str_type.clone(), int_type.clone()], char_type.clone());
+        add_intrinsic("getchar", vec![], char_type.clone());
         let t_generic_id = self.add_type_symbol("#T_intrinsic_drop", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
         let t_type = Type::from_no_args(t_generic_id);
 

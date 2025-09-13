@@ -1,4 +1,4 @@
-import { print_char, eprint_char } from "@intrinsics";
+import { print_char, eprint_char, getchar } from "@intrinsics";
 import { exit } from "stdlib/process.ps";
 import { String, ToString } from "stdlib/string.ps";
 
@@ -31,4 +31,22 @@ fn panic<T: ToString>(data: T): never {
     exit(1);
 }
 
-export { print, eprint, println, eprintln, panic };
+fn read_char(): char {
+    getchar()
+}
+
+fn read_line(): String {
+    let s = String.new();
+    while (true) {
+        let c = getchar();
+        s.push(c);
+
+        if (c == '\n') {
+            break;
+        };
+    }
+
+    s
+}
+
+export { print, eprint, println, eprintln, panic, read_char, read_line };
