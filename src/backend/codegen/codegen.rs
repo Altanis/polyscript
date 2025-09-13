@@ -1562,18 +1562,38 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.position_at_end(merge_block);
 
-        if let Some(ty) = return_type
-            && !matches!(self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap().kind, TypeSymbolKind::Primitive(PrimitiveKind::Void | PrimitiveKind::Never))
-            && !incoming_phis.is_empty()
-        {
-            let llvm_type = self.map_semantic_type(ty).unwrap();
-            let phi = self.builder.build_phi(llvm_type, "if.result").unwrap();
-
-            for (val, block) in incoming_phis {
-                phi.add_incoming(&[(&val, block)]);
+        if let Some(ty) = return_type {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+            if type_symbol.kind == TypeSymbolKind::Primitive(PrimitiveKind::Never) {
+                if merge_block.get_terminator().is_none() {
+                    self.builder.build_unreachable().unwrap();
+                }
+                
+                return None;
             }
 
-            return Some(phi.as_basic_value());
+            if type_symbol.kind == TypeSymbolKind::Primitive(PrimitiveKind::Void) {
+                return None;
+            }
+
+            if incoming_phis.len() > 1 {
+                let llvm_type = self.map_semantic_type(ty).unwrap();
+                let phi = self.builder.build_phi(llvm_type, "if.result").unwrap();
+                
+                for (val, block) in incoming_phis {
+                    phi.add_incoming(&[(&val, block)]);
+                }
+
+                return Some(phi.as_basic_value());
+            } else if let Some((val, _)) = incoming_phis.first() {
+                return Some(*val);
+            } else {
+                if merge_block.get_terminator().is_none() {
+                     self.builder.build_unreachable().unwrap();
+                }
+
+                return None;
+            }
         }
         
         None
