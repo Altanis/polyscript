@@ -53,3 +53,178 @@ let a: str = "This is a 'quote'";
 let a: str = "hello\nworld";
 let a: str = "test\ttab";
 let a: str = "foo\rbar";
+
+import { println } from "stdlib/io.ps";
+import { String } from "stdlib/string.ps";
+import { Vec } from "stdlib/vec.ps";
+
+fn test_construction() {
+    println("--- Running test_construction ---");
+    let s1 = String.new();
+    println(s1.is_empty());
+
+    let s2 = String.from_str("hello");
+    println(s2.length() == 5);
+    println(s2.get(0) == 'h');
+    println(s2.get(4) == 'o');
+
+    let s3 = String.from_char('x');
+    println(s3.length() == 1 && s3.get(0) == 'x');
+
+    let s4 = String.from_capacity(10);
+    println(s4.length() == 0);
+    println("--- Finished test_construction ---\n");
+}
+
+fn test_push_and_push_string() {
+    println("--- Running test_push_and_push_string ---");
+    let s1 = String.new();
+    s1.push('a');
+    println(s1.get(0) == 'a');
+    s1.push_string(String.from_str("bc"));
+    println(s1.length() == 3 && s1.get(2) == 'c');
+    println("--- Finished test_push_and_push_string ---\n");
+}
+
+fn test_insert_and_remove() {
+    println("--- Running test_insert_and_remove ---");
+    let s5 = String.from_str("abcd");
+    s5.insert(2, 'X');
+    println(s5.slice(0, s5.length()) == String.from_str("abXcd"));
+    s5.remove(2);
+    println(s5.slice(0, s5.length()) == String.from_str("abcd"));
+    println("--- Finished test_insert_and_remove ---\n");
+}
+
+fn test_clear_and_is_empty() {
+    println("--- Running test_clear_and_is_empty ---");
+    let s5 = String.from_str("abcd");
+    s5.clear();
+    println(s5.is_empty());
+    println("--- Finished test_clear_and_is_empty ---\n");
+}
+
+fn test_contains_starts_ends() {
+    println("--- Running test_contains_starts_ends ---");
+    let s6 = String.from_str("foobar");
+    println(s6.contains(String.from_str("foo")));
+    println(!s6.contains(String.from_str("baz")));
+    println(s6.starts_with(String.from_str("foo")));
+    println(!s6.starts_with(String.from_str("bar")));
+    println(s6.ends_with(String.from_str("bar")));
+    println(!s6.ends_with(String.from_str("foo")));
+    println("--- Finished test_contains_starts_ends ---\n");
+}
+
+fn test_index_of() {
+    println("--- Running test_index_of ---");
+    let s6 = String.from_str("foobar");
+    println(s6.index_of('f') == 0);
+    println(s6.index_of('b') == 3);
+    println(s6.index_of('z') == 0 - 1);
+    println("--- Finished test_index_of ---\n");
+}
+
+fn test_slice() {
+    println("--- Running test_slice ---");
+    let s6 = String.from_str("foobar");
+    let s7 = s6.slice(0, 3);
+    println(s7 == String.from_str("foo"));
+    println("--- Finished test_slice ---\n");
+}
+
+fn test_split() {
+    println("--- Running test_split ---");
+    let parts = String.from_str("a,b,c").split(',');
+    println(parts.length() == 3);
+    println(parts.get(0) == String.from_str("a"));
+    println(parts.get(1) == String.from_str("b"));
+    println(parts.get(2) == String.from_str("c"));
+    println("--- Finished test_split ---\n");
+}
+
+fn test_case_conversion() {
+    println("--- Running test_case_conversion ---");
+    let s8 = String.from_str("AbC");
+    println(s8.to_uppercase() == String.from_str("ABC"));
+    println(s8.to_lowercase() == String.from_str("abc"));
+    println("--- Finished test_case_conversion ---\n");
+}
+
+fn test_trim() {
+    println("--- Running test_trim ---");
+    let s9 = String.from_str("  hello  ");
+    println(s9.trim() == String.from_str("hello"));
+    println("--- Finished test_trim ---\n");
+}
+
+fn test_join() {
+    println("--- Running test_join ---");
+    let arr = [Vec<String>].new();
+    arr.push(String.from_str("a"));
+    arr.push(String.from_str("b"));
+    arr.push(String.from_str("c"));
+    let joined = String.join(arr, String.from_str("-"));
+    println(joined == String.from_str("a-b-c"));
+    println("--- Finished test_join ---\n");
+}
+
+fn test_repeat() {
+    println("--- Running test_repeat ---");
+    let s10 = String.from_str("ha");
+    println(s10.repeat(3) == String.from_str("hahaha"));
+    println("--- Finished test_repeat ---\n");
+}
+
+fn test_add_and_add_assign() {
+    println("--- Running test_add_and_add_assign ---");
+    let s11 = String.from_str("hi");
+    s11 += '!';
+    println(s11 == String.from_str("hi!"));
+    s11 += String.from_str(" there");
+    println(s11 == String.from_str("hi! there"));
+    let s12 = String.from_str("foo") + 'X';
+    println(s12 == String.from_str("fooX"));
+    let s13 = String.from_str("bar") + String.from_str("baz");
+    println(s13 == String.from_str("barbaz"));
+    println("--- Finished test_add_and_add_assign ---\n");
+}
+
+fn test_comparisons() {
+    println("--- Running test_comparisons ---");
+    println(String.from_str("abc") == String.from_str("abc"));
+    println(String.from_str("abc") != String.from_str("abcd"));
+    println(String.from_str("b") > String.from_str("a"));
+    println(String.from_str("a") < String.from_str("b"));
+    println(String.from_str("abc") >= String.from_str("abc"));
+    println(String.from_str("abc") <= String.from_str("abc"));
+    println("--- Finished test_comparisons ---\n");
+}
+
+fn test_subtract() {
+    println("--- Running test_subtract ---");
+    let s14 = String.from_str("hello world");
+    println(s14 - String.from_str("lo") == String.from_str("hel world"));
+    println(s14 - String.from_str("x") == s14); // no change
+    println("--- Finished test_subtract ---\n");
+}
+
+fn run_all_tests() {
+    test_construction();
+    test_push_and_push_string();
+    test_insert_and_remove();
+    test_clear_and_is_empty();
+    test_contains_starts_ends();
+    test_index_of();
+    test_slice();
+    test_split();
+    test_case_conversion();
+    test_trim();
+    test_join();
+    test_repeat();
+    test_add_and_add_assign();
+    test_comparisons();
+    test_subtract();
+}
+
+run_all_tests();

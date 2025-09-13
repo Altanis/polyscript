@@ -1297,8 +1297,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             _ => {
                 let left_type = left.type_id.as_ref().unwrap();
-                if !self.is_primitive(left_type) {
-                    unimplemented!("codegen for overloaded conditional operator `{:?}` on type `{}`", operator, self.analyzer.symbol_table.display_type(left_type));
+                let right_type = right.type_id.as_ref().unwrap();
+
+                if !self.is_primitive(left_type) && let Some((trait_name, _)) = operator.to_trait_data() {
+                    let fn_name = self.trait_name_to_fn_name(&trait_name);
+                    let callee_symbol = self.find_trait_fn_symbol(left_type, &trait_name, &fn_name, Some(right_type)).unwrap();
+                    let callee = *self.functions.get(&callee_symbol.id).unwrap();
+
+                    let callee_type_id = callee_symbol.type_id.as_ref().unwrap().symbol;
+                    let callee_type_symbol = self.analyzer.symbol_table.get_type_symbol(callee_type_id).unwrap();
+
+                    let return_type = if let TypeSymbolKind::FunctionSignature { return_type, .. } = &callee_type_symbol.kind {
+                        return_type
+                    } else {
+                        unreachable!();
+                    };
+
+                    let use_rvo = self.is_rvo_candidate(return_type);
+                    
+                    let left_val = self.compile_node(left).unwrap();
+                    let right_val = self.compile_node(right).unwrap();
+                    let mut args: Vec<BasicMetadataValueEnum> = vec![left_val.into(), right_val.into()];
+
+                    if use_rvo {
+                        let return_llvm_type = self.map_semantic_type(return_type).unwrap();
+                        let rvo_ptr = self.builder.build_alloca(return_llvm_type, "cond.op.rvo.ret.ptr").unwrap();
+                        args.insert(0, rvo_ptr.into());
+                        
+                        self.builder.build_call(callee, &args, "").unwrap();
+                        let loaded_val = self.builder.build_load(return_llvm_type, rvo_ptr, "cond.op.rvo.load").unwrap();
+                        return Some(loaded_val);
+                    } else {
+                        let call = self.builder.build_call(callee, &args, &format!("{}_call", fn_name)).unwrap();
+                        return call.try_as_basic_value().left();
+                    }
                 }
 
                 let left_val = self.compile_node(left).unwrap();

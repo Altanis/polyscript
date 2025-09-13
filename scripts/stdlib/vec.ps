@@ -85,6 +85,30 @@ impl<T> Vec<T> {
         true
     }
 
+    // Inserts an element at index `idx`.
+    // * Returns true if successful, false otherwise.
+    // * This function returns false if `idx` is out of the bounds of the allocated vector.
+    public fn insert(self, idx: int, element: T): bool {
+        if (idx < 0 || idx > self.size) {
+            return false;
+        };
+
+        if (self.size + 1 > self.capacity && !self.reserve(if (self.capacity == 0) { 1 } else { self.capacity * 2 })) {
+            eprint("oom: couldn't reserve memory for vector\n");
+            endproc(1);
+        };
+
+        let dst = self.data + idx * self.element_size;
+        let src = self.data + idx * self.element_size;
+        let size = self.element_size * (self.size - idx);
+
+        if (size > 0) { memmove(dst + self.element_size, src, size); };
+        memcpy(dst, ref(element), self.element_size);
+
+        self.size += 1;
+        true
+    }
+
     // Gets the element at index `idx`.
     // * Panics if `idx` is out of bounds.
     public fn get(self, idx: int): T {

@@ -59,6 +59,197 @@ impl String {
             self.chars.push(s.get(i));
         }
     }
+
+    // Inserts a character `c` at position `idx`.
+    public fn insert(self, idx: int, c: char) {
+        self.chars.insert(idx, c);
+    }
+
+    // Removes a character from a position `idx`.
+    public fn remove(self, idx: int) {
+        self.chars.remove(idx);
+    }
+
+    // Clears the string.
+    public fn clear(self) {
+        self.chars.clear();
+    }
+
+    // Checks if the string is empty.
+    public fn is_empty(self): bool {
+        self.length() == 0
+    }
+
+    // Checks if the string contains the given substring.
+    public fn contains(self, substring: String): bool {
+        if (substring.length() == 0) {
+            return true;
+        };
+
+        if (substring.length() > self.length()) {
+            return false;
+        };
+
+        for (let i = 0; i <= self.length() - substring.length(); i += 1) {
+            let matched = true;
+            for (let j = 0; j < substring.length(); j += 1) {
+                if (self.get(i + j) != substring.get(j)) {
+                    matched = false;
+                    break;
+                };
+            }
+
+            if (matched) {
+                return true;
+            };
+        }
+
+        return false;
+    }
+
+    // Checks if the string starts with the given prefix.
+    public fn starts_with(self, prefix: String): bool {
+        if (prefix.length() > self.length()) {
+            return false;
+        };
+
+        for (let i = 0; i < prefix.length(); i += 1) {
+            if (self.get(i) != prefix.get(i)) {
+                return false;
+            };
+        }
+
+        return true;
+    }
+
+    // Checks if the string ends with the given suffix.
+    public fn ends_with(self, suffix: String): bool {
+        if (suffix.length() > self.length()) {
+            return false;
+        };
+
+        let offset = self.length() - suffix.length();
+        for (let i = 0; i < suffix.length(); i += 1) {
+            if (self.get(offset + i) != suffix.get(i)) {
+                return false;
+            };
+        }
+
+        return true;
+    }
+
+    // Finds the index of the given character, or -1 if not found.
+    public fn index_of(self, c: char): int {
+        for (let i = 0; i < self.length(); i += 1) {
+            if (self.get(i) == c) {
+                return i;
+            };
+        }
+
+        return 0 - 1;
+    }
+
+    // Returns a slice of the string from start to end (exclusive).
+    public fn slice(self, start: int, end: int): String {
+        let result = String.new();
+        for (let i = start; i < end && i < self.length(); i += 1) {
+            result.push(self.get(i));
+        }
+
+        return result;
+    }
+
+    // Splits the string by the given delimiter character.
+    public fn split(self, delimiter: char): Vec<String> {
+        let parts = [Vec<String>].new();
+        let current = String.new();
+
+        for (let i = 0; i < self.length(); i += 1) {
+            let ch = self.get(i);
+            if (ch == delimiter) {
+                parts.push(current);
+                current = String.new();
+            } else {
+                current.push(ch);
+            };
+        }
+
+        parts.push(current);
+        return parts;
+    }
+
+    // Returns a new string with all characters converted to uppercase.
+    public fn to_uppercase(self): String {
+        let result = String.new();
+
+        for (let i = 0; i < self.length(); i += 1) {
+            let ch = self.get(i);
+            if (ch >= 'a' && ch <= 'z') {
+                result.push((ch as int - ('a' as int) + ('A' as int)) as char);
+            } else {
+                result.push(ch);
+            };
+        }
+
+        return result;
+    }
+
+    // Returns a new string with all characters converted to lowercase.
+    public fn to_lowercase(self): String {
+        let result = String.new();
+
+        for (let i = 0; i < self.length(); i += 1) {
+            let ch = self.get(i);
+            if (ch >= 'A' && ch <= 'Z') {
+                result.push((ch as int - ('A' as int) + ('a' as int)) as char);
+            } else {
+                result.push(ch);
+            };
+        }
+
+        return result;
+    }
+
+    // Trims leading and trailing whitespace.
+    public fn trim(self): String {
+        let start = 0;
+        let end = self.length();
+
+        while (start < end && self.get(start) <= ' ') {
+            start += 1;
+        }
+
+        while (end > start && self.get(end - 1) <= ' ') {
+            end -= 1;
+        }
+
+        return self.slice(start, end);
+    }
+
+    // Joins a vector of strings with a separator.
+    public fn join(strings: Vec<String>, separator: String): String {
+        let result = String.new();
+
+        for (let i = 0; i < strings.length(); i += 1) {
+            result.push_string(strings.get(i));
+            if (i < strings.length() - 1) {
+                result.push_string(separator);
+            };
+        }
+
+        return result;
+    }
+
+    // Repeats the string n times.
+    public fn repeat(self, n: int): String {
+        let result = String.new();
+
+        for (let i = 0; i < n; i += 1) {
+            result.push_string(self);
+        }
+
+        return result;
+    }
 }
 
 impl Add<char> for String {
@@ -86,6 +277,110 @@ impl AddAssign<char> for String {
 impl AddAssign<String> for String {
     fn add_assign(self, other: String) {
         self.push_string(other);
+    }
+}
+
+impl Equivalence<String> for String {
+    type Output = bool;
+    fn equivalence(self, other: String): bool {
+        if (self.length() != other.length()) {
+            return false;
+        };
+
+        for (let i = 0; i < self.length(); i += 1) {
+            if (self.get(i) != other.get(i)) {
+                return false;
+            };
+        }
+
+        return true;
+    }
+}
+
+impl NotEqual<String> for String {
+    type Output = bool;
+    fn not_equal(self, other: String): bool {
+        !(self == other)
+    }
+}
+
+impl GreaterThan<String> for String {
+    type Output = bool;
+    fn greater_than(self, other: String): bool {
+        let min_len = if (self.length() < other.length()) { self.length() } else { other.length() };
+
+        for (let i = 0; i < min_len; i += 1) {
+            if (self.get(i) > other.get(i)) {
+                return true;
+            } else if (self.get(i) < other.get(i)) {
+                return false;
+            };
+        }
+
+        return self.length() > other.length();
+    }
+}
+
+impl GreaterThanOrEqual<String> for String {
+    type Output = bool;
+    fn greater_than_or_equal(self, other: String): bool {
+        self > other || self == other
+    }
+}
+
+impl LessThan<String> for String {
+    type Output = bool;
+    fn less_than(self, other: String): bool {
+        let min_len = if (self.length() < other.length()) { self.length() } else { other.length() };
+
+        for (let i = 0; i < min_len; i += 1) {
+            if (self.get(i) < other.get(i)) {
+                return true;
+            } else if (self.get(i) > other.get(i)) {
+                return false;
+            };
+        }
+
+        return self.length() < other.length();
+    }
+}
+
+impl LessThanOrEqual<String> for String {
+    type Output = bool;
+    fn less_than_or_equal(self, other: String): bool {
+        self < other || self == other
+    }
+}
+
+impl Subtract<String> for String {
+    type Output = String;
+
+    fn subtract(self, other: String): String {
+        if (other.length() == 0) {
+            return self;
+        };
+
+        let i = 0;
+        while (i <= self.length() - other.length()) {
+            let matched = true;
+
+            for (let j = 0; j < other.length(); j += 1) {
+                if (self.get(i + j) != other.get(j)) {
+                    matched = false;
+                    break;
+                };
+            }
+
+            if (matched) {
+                let before = self.slice(0, i);
+                let after = self.slice(i + other.length(), self.length());
+                return before + after;
+            };
+
+            i += 1;
+        }
+
+        self
     }
 }
 
