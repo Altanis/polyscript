@@ -232,6 +232,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module.add_function("strlen", fn_type, None)
     }
 
+    fn get_c_pow(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("pow") {
+            return func;
+        }
+
+        let f64_type = self.context.f64_type();
+        let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        self.module.add_function("pow", fn_type, Some(Linkage::External))
+    }
+
     fn get_c_getchar(&self) -> FunctionValue<'ctx> {
         if let Some(func) = self.module.get_function("getchar") {
             return func;
@@ -1116,6 +1126,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Operation::Plus => self.builder.build_float_add(l, r, "add").unwrap().into(),
                 Operation::Minus => self.builder.build_float_sub(l, r, "sub").unwrap().into(),
                 Operation::Mul => self.builder.build_float_mul(l, r, "mul").unwrap().into(),
+                Operation::Exp => {
+                    let pow_fn = self.get_c_pow();
+                    let call = self.builder.build_call(pow_fn, &[l.into(), r.into()], "powf_call").unwrap();
+                    call.try_as_basic_value().left().unwrap()
+                },
                 Operation::Div => self.builder.build_float_div(l, r, "div").unwrap().into(),
                 Operation::Mod => self.builder.build_float_rem(l, r, "rem").unwrap().into(),
                 Operation::Equivalence => self.builder.build_float_compare(FloatPredicate::OEQ, l, r, "eq").unwrap().into(),
@@ -1150,6 +1165,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let result_struct = self.builder.build_call(mul_fn, &[l.into(), r.into()], "smul_overflow").unwrap()
                         .try_as_basic_value().left().unwrap().into_struct_value();
                     self.build_overflow_check(result_struct, "multiplication").into()
+                },
+                Operation::Exp => {
+                    let l_float = self.builder.build_signed_int_to_float(l, self.context.f64_type(), "l_as_float").unwrap();
+                    let r_float = self.builder.build_signed_int_to_float(r, self.context.f64_type(), "r_as_float").unwrap();
+                    
+                    let pow_fn = self.get_c_pow();
+                    let pow_float = self.builder.build_call(pow_fn, &[l_float.into(), r_float.into()], "powi_call").unwrap()
+                        .try_as_basic_value().left().unwrap().into_float_value();
+
+                    self.builder.build_float_to_signed_int(pow_float, self.context.i64_type(), "pow_as_int").unwrap().into()
                 },
                 Operation::Div | Operation::Mod => {
                     let function = self.current_function.unwrap();
