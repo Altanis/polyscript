@@ -2107,7 +2107,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "getchar" => {
                         let func = self.get_c_getchar();
                         let call = self.builder.build_call(func, &[], "getchar_call").unwrap();
-                        call.try_as_basic_value().left()
+                        let i32_val = call.try_as_basic_value().left().unwrap().into_int_value();
+                        let i8_type = self.context.i8_type();
+                        let truncated_val = self.builder.build_int_truncate(i32_val, i8_type, "getchar_char").unwrap();
+                        Some(truncated_val.into())
                     },
                     "drop" => {
                         let value_to_drop_node = &arguments[0];

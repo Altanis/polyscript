@@ -39,11 +39,8 @@ fn read_line(): String {
     let s = String.new();
     while (true) {
         let c = getchar();
+        if (c == '\n') { break; };
         s.push(c);
-
-        if (c == '\n') {
-            break;
-        };
     }
 
     s

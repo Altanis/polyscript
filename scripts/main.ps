@@ -10,14 +10,8 @@
 // maybe add prelude system
 
 
-import {print_char,getchar} from "@intrinsics";
-let c = getchar();
-print_char(c);
-print_char('\n');
+import { read_line, println } from "stdlib/io.ps";
 
-/*import { println, read_char, read_line } from "stdlib/io.ps";
-import { String } from "stdlib/string.ps";
-
-let c = read_char();
+let s = read_line();
 println("");
-println(String.from_str("Read char: ") + c);*/
+println(s);

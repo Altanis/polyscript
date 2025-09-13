@@ -80,6 +80,15 @@ impl SemanticAnalyzer {
 
                 Ok((None, None))
             },
+            WhileLoop { condition, body } => {
+                let scope_id = self.symbol_table.enter_scope(ScopeKind::WhileLoop);
+                node.scope_id = Some(scope_id);
+                self.symbol_collector_check_node(condition)?;
+                self.symbol_collector_check_node(body)?;
+                self.symbol_table.exit_scope();
+
+                Ok((None, None))
+            },
             Block(_) => self.collect_block_symbols(node),
             _ => {
                 for child in node.children_mut() {
