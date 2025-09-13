@@ -1,9 +1,10 @@
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::intrinsics::Intrinsic;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -788,6 +789,53 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_symbol = self.find_trait_fn_symbol(instance_type, trait_name, fn_name, rhs_type)?;
         self.functions.get(&fn_symbol.id).copied()
     }
+
+    fn build_overflow_check(&self, result_with_overflow: StructValue<'ctx>, op_name: &str) -> IntValue<'ctx> {
+        let result = self.builder.build_extract_value(result_with_overflow, 0, "op_result").unwrap().into_int_value();
+        let overflow_bit = self.builder.build_extract_value(result_with_overflow, 1, "overflow_bit").unwrap().into_int_value();
+
+        let function = self.current_function.unwrap();
+        let overflow_block = self.context.append_basic_block(function, &format!("{}_overflow", op_name));
+        let continue_block = self.context.append_basic_block(function, &format!("{}_continue", op_name));
+
+        self.builder.build_conditional_branch(overflow_bit, overflow_block, continue_block).unwrap();
+
+        self.builder.position_at_end(overflow_block);
+        let fprintf = self.get_c_fprintf();
+        let stderr = self.get_stderr();
+        let error_msg = self.builder
+            .build_global_string_ptr(&format!("runtime error: integer {} overflow\n", op_name), &format!("{}_overflow_err_msg", op_name))
+            .unwrap();
+        self.builder.build_call(fprintf, &[stderr.into(), error_msg.as_pointer_value().into()], "").unwrap();
+        let exit_func = self.get_c_exit();
+        let exit_code = self.context.i32_type().const_int(1, false);
+        self.builder.build_call(exit_func, &[exit_code.into()], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+
+        self.builder.position_at_end(continue_block);
+        result
+    }
+
+    fn build_runtime_error_check(&self, condition: IntValue<'ctx>, error_message: &str) {
+        let function = self.current_function.unwrap();
+        let error_block = self.context.append_basic_block(function, "runtime_error");
+        let continue_block = self.context.append_basic_block(function, "continue");
+
+        self.builder.build_conditional_branch(condition, error_block, continue_block).unwrap();
+
+        self.builder.position_at_end(error_block);
+        let fprintf = self.get_c_fprintf();
+        let stderr = self.get_stderr();
+        let msg_name = format!("{}_err_msg", error_message.chars().take(10).collect::<String>().replace(' ', "_"));
+        let error_msg_ptr = self.builder.build_global_string_ptr(&format!("runtime error: {}\n", error_message), &msg_name).unwrap();
+        self.builder.build_call(fprintf, &[stderr.into(), error_msg_ptr.as_pointer_value().into()], "").unwrap();
+        let exit_func = self.get_c_exit();
+        let exit_code = self.context.i32_type().const_int(1, false);
+        self.builder.build_call(exit_func, &[exit_code.into()], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+
+        self.builder.position_at_end(continue_block);
+    }
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -970,7 +1018,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if is_float {
                     self.builder.build_float_neg(operand.into_float_value(), "neg").unwrap().into()
                 } else {
-                    self.builder.build_int_neg(operand.into_int_value(), "neg").unwrap().into()
+                    let op_int = operand.into_int_value();
+                    let zero = op_int.get_type().const_zero();
+                    
+                    let sub_intrinsic = Intrinsic::find("llvm.ssub.with.overflow").unwrap();
+                    let sub_fn = sub_intrinsic.get_declaration(self.module, &[op_int.get_type().into()]).unwrap();
+                    let result_struct = self.builder.build_call(sub_fn, &[zero.into(), op_int.into()], "ssub_overflow_neg").unwrap()
+                        .try_as_basic_value().left().unwrap().into_struct_value();
+                        
+                    self.build_overflow_check(result_struct, "negation").into()
                 }
             },
             Operation::Not => {
@@ -1064,9 +1120,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let l = left.into_int_value();
             let r = right.into_int_value();
             match operator {
-                Operation::Plus => self.builder.build_int_add(l, r, "add").unwrap().into(),
-                Operation::Minus => self.builder.build_int_sub(l, r, "sub").unwrap().into(),
-                Operation::Mul => self.builder.build_int_mul(l, r, "mul").unwrap().into(),
+                Operation::Plus => {
+                    let add_intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.sadd.with.overflow").unwrap();
+                    let add_fn = add_intrinsic.get_declaration(self.module, &[l.get_type().into()]).unwrap();
+                    let result_struct = self.builder.build_call(add_fn, &[l.into(), r.into()], "sadd_overflow").unwrap()
+                        .try_as_basic_value().left().unwrap().into_struct_value();
+                    self.build_overflow_check(result_struct, "addition").into()
+                },
+                Operation::Minus => {
+                    let sub_intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.ssub.with.overflow").unwrap();
+                    let sub_fn = sub_intrinsic.get_declaration(self.module, &[l.get_type().into()]).unwrap();
+                    let result_struct = self.builder.build_call(sub_fn, &[l.into(), r.into()], "ssub_overflow").unwrap()
+                        .try_as_basic_value().left().unwrap().into_struct_value();
+                    self.build_overflow_check(result_struct, "subtraction").into()
+                },
+                Operation::Mul => {
+                    let mul_intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.smul.with.overflow").unwrap();
+                    let mul_fn = mul_intrinsic.get_declaration(self.module, &[l.get_type().into()]).unwrap();
+                    let result_struct = self.builder.build_call(mul_fn, &[l.into(), r.into()], "smul_overflow").unwrap()
+                        .try_as_basic_value().left().unwrap().into_struct_value();
+                    self.build_overflow_check(result_struct, "multiplication").into()
+                },
                 Operation::Div | Operation::Mod => {
                     let function = self.current_function.unwrap();
 
@@ -1089,17 +1163,41 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder.build_unreachable().unwrap();
 
                     self.builder.position_at_end(non_zero_block);
+
+                    let min_int = l.get_type().const_int(i64::MIN as u64, true);
+                    let neg_one = l.get_type().const_int(-1i64 as u64, true);
+                    
+                    let is_min_int = self.builder.build_int_compare(IntPredicate::EQ, l, min_int, "is_min_int").unwrap();
+                    let is_neg_one = self.builder.build_int_compare(IntPredicate::EQ, r, neg_one, "is_neg_one").unwrap();
+                    let is_overflow = self.builder.build_and(is_min_int, is_neg_one, "is_div_overflow").unwrap();
+                    
+                    self.build_runtime_error_check(is_overflow, "integer division overflow");
+
                     if operator == Operation::Div {
                         self.builder.build_int_signed_div(l, r, "div").unwrap().into()
                     } else {
                         self.builder.build_int_signed_rem(l, r, "rem").unwrap().into()
                     }
                 },
+                Operation::LeftBitShift | Operation::RightBitShift => {
+                    let bitwidth = l.get_type().const_int(l.get_type().get_bit_width() as u64, false);
+                    let zero = r.get_type().const_zero();
+
+                    let is_negative = self.builder.build_int_compare(IntPredicate::SLT, r, zero, "is_shift_negative").unwrap();
+                    let is_too_large = self.builder.build_int_compare(IntPredicate::SGE, r, bitwidth, "is_shift_too_large").unwrap();
+                    let is_invalid_shift = self.builder.build_or(is_negative, is_too_large, "is_invalid_shift").unwrap();
+
+                    self.build_runtime_error_check(is_invalid_shift, "invalid shift amount");
+                    
+                    if operator == Operation::LeftBitShift {
+                        self.builder.build_left_shift(l, r, "shl").unwrap().into()
+                    } else {
+                        self.builder.build_right_shift(l, r, true, "shr").unwrap().into()
+                    }
+                },
                 Operation::BitwiseAnd => self.builder.build_and(l, r, "and").unwrap().into(),
                 Operation::BitwiseOr => self.builder.build_or(l, r, "or").unwrap().into(),
                 Operation::BitwiseXor => self.builder.build_xor(l, r, "xor").unwrap().into(),
-                Operation::LeftBitShift => self.builder.build_left_shift(l, r, "shl").unwrap().into(),
-                Operation::RightBitShift => self.builder.build_right_shift(l, r, true, "shr").unwrap().into(),
                 Operation::Equivalence => self.builder.build_int_compare(IntPredicate::EQ, l, r, "eq").unwrap().into(),
                 Operation::NotEqual => self.builder.build_int_compare(IntPredicate::NE, l, r, "ne").unwrap().into(),
                 Operation::GreaterThan => self.builder.build_int_compare(IntPredicate::SGT, l, r, "gt").unwrap().into(),
