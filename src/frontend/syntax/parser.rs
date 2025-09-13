@@ -1392,7 +1392,7 @@ impl Parser {
                     unreachable!();
                 };
 
-                if parser.peek().get_token_kind() == TokenKind::Operator(Operation::Assign) {
+                if parser.match_token(TokenKind::Operator(Operation::Assign)) {
                     let expr = parser.parse_expression()?;
                     let AstNodeKind::IntegerLiteral(num) = expr.kind else {
                         return Err(parser.generate_error(ErrorKind::ExpectedInteger, parser.create_span_from_current_token()));
