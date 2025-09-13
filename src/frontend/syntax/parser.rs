@@ -321,18 +321,29 @@ impl Parser {
                     ));
                 }
 
-                let _ = self.advance();
+                self.advance();
+
+                if operator == Operation::Plus {
+                    return self.parse_binding_power(Operation::Not.binding_power().0);
+                }
+
+                let final_operator = if operator == Operation::Minus {
+                    Operation::Neg
+                } else {
+                    operator
+                };
+
                 let operand = boxed!(self.parse_binding_power(Operation::Not.binding_power().0)?);
 
-                Ok(AstNode {
+                return Ok(AstNode {
                     span: span.set_end_from_span(operand.span),
-                    kind: AstNodeKind::UnaryOperation { operator, operand },
+                    kind: AstNodeKind::UnaryOperation { operator: final_operator, operand },
                     type_id: None,
                     value_id: None,
                     scope_id: None,
                     id: self.get_next_node_id()
-                })
-            }
+                });
+            },
             TokenKind::NumberLiteral(_) => {
                 let token = self.advance();
                 let numeric_literal: String = token.get_value().to_string();
