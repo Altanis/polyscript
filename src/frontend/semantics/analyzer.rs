@@ -334,6 +334,7 @@ impl SymbolTable {
         self.current_scope_id = self.intrinsics_scope_id;
 
         let int_type = Type::from_no_args(self.find_type_symbol("int").unwrap().id);
+        let float_type = Type::from_no_args(self.find_type_symbol("float").unwrap().id);
         let char_type = Type::from_no_args(self.find_type_symbol("char").unwrap().id);
         let str_type = Type::from_no_args(self.find_type_symbol("str").unwrap().id);
         let void_type = Type::from_no_args(self.find_type_symbol("void").unwrap().id);
@@ -387,6 +388,19 @@ impl SymbolTable {
         add_intrinsic("strlen", vec![str_type.clone()], int_type.clone());
         add_intrinsic("strget", vec![str_type.clone(), int_type.clone()], char_type.clone());
         add_intrinsic("getchar", vec![], char_type.clone());
+
+        let unary_float_fns = [
+            "ln_", "log2_", "log10_", "sin_", "cos_", "tan_", "asin_", "acos_", "atan_",
+            "sinh_", "cosh_", "tanh_", "asinh_", "acosh_", "atanh_"
+        ];
+
+        for &name in unary_float_fns.iter() {
+            add_intrinsic(name, vec![float_type.clone()], float_type.clone());
+        }
+
+        add_intrinsic("atan2_", vec![float_type.clone(), float_type.clone()], float_type.clone());
+        add_intrinsic("random_", vec![], float_type.clone());
+
         let t_generic_id = self.add_type_symbol("#T_intrinsic_drop", TypeSymbolKind::Generic(vec![]), vec![], QualifierKind::Public, None).unwrap();
         let t_type = Type::from_no_args(t_generic_id);
 

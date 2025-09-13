@@ -1,4 +1,4 @@
-import { _ln, _log2, _log10, _sin, _cos, _tan, _asin, _acos, _atan, _atan2, _sinh, _cosh, _tanh, _asinh, _acosh, _atanh, _random } from "@intrinsics";
+import { ln_, log2_, log10_, sin_, cos_, tan_, asin_, acos_, atan_, atan2_, sinh_, cosh_, tanh_, asinh_, acosh_, atanh_, random_ } from "@intrinsics";
 
 const PI: float = 3.141592653589793;
 const TAU: float = 6.283185307179586;
@@ -12,23 +12,23 @@ const FRAC_1_PI: float = 0.3183098861837907;
 const FRAC_2_PI: float = 0.6366197723675814;
 const FRAC_1_SQRT_2: float = 0.7071067811865476;
 
-fn ln(x: float): float { ln(x) }
-fn log2(x: float): float { log2(x) }
-fn log10(x: float): float { log10(x) }
-fn sin(x: float): float { sin(x) }
-fn cos(x: float): float { cos(x) }
-fn tan(x: float): float { tan(x) }
-fn asin(x: float): float { asin(x) }
-fn acos(x: float): float { acos(x) }
-fn atan(x: float): float { atan(x) }
-fn atan2(y: float, x: float): float { atan2(y, x) }
-fn sinh(x: float): float { sinh(x) }
-fn cosh(x: float): float { cosh(x) }
-fn tanh(x: float): float { tanh(x) }
-fn asinh(x: float): float { asinh(x) }
-fn acosh(x: float): float { acosh(x) }
-fn atanh(x: float): float { atanh(x) }
-fn random(): float { random() }
+fn ln(x: float): float { ln_(x) }
+fn log2(x: float): float { log2_(x) }
+fn log10(x: float): float { log10_(x) }
+fn sin(x: float): float { sin_(x) }
+fn cos(x: float): float { cos_(x) }
+fn tan(x: float): float { tan_(x) }
+fn asin(x: float): float { asin_(x) }
+fn acos(x: float): float { acos_(x) }
+fn atan(x: float): float { atan_(x) }
+fn atan2(y: float, x: float): float { atan2_(y, x) }
+fn sinh(x: float): float { sinh_(x) }
+fn cosh(x: float): float { cosh_(x) }
+fn tanh(x: float): float { tanh_(x) }
+fn asinh(x: float): float { asinh_(x) }
+fn acosh(x: float): float { acosh_(x) }
+fn atanh(x: float): float { atanh_(x) }
+fn random(): float { random_() }
 
 export {
     PI, TAU, E, LN_2, LOG2_E, LOG10_E, SQRT_2, FRAC_1_PI, FRAC_2_PI, FRAC_1_SQRT_2,

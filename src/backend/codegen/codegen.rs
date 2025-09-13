@@ -242,6 +242,56 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module.add_function("pow", fn_type, Some(Linkage::External))
     }
 
+    fn get_c_float_unary_fn(&self, name: &str) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function(name) {
+            return func;
+        }
+
+        let f64_type = self.context.f64_type();
+        let fn_type = f64_type.fn_type(&[f64_type.into()], false);
+        self.module.add_function(name, fn_type, Some(Linkage::External))
+    }
+
+    fn get_c_atan2(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("atan2") {
+            return func;
+        }
+
+        let f64_type = self.context.f64_type();
+        let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        self.module.add_function("atan2", fn_type, Some(Linkage::External))
+    }
+
+    fn get_c_srand(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("srand") {
+            return func;
+        }
+
+        let i32_type = self.context.i32_type();
+        let fn_type = self.context.void_type().fn_type(&[i32_type.into()], false);
+        self.module.add_function("srand", fn_type, Some(Linkage::External))
+    }
+
+    fn get_c_rand(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("rand") {
+            return func;
+        }
+
+        let i32_type = self.context.i32_type();
+        let fn_type = i32_type.fn_type(&[], false);
+        self.module.add_function("rand", fn_type, Some(Linkage::External))
+    }
+
+    fn get_c_time(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("time") {
+            return func;
+        }
+
+        let i64_ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = self.context.i64_type().fn_type(&[i64_ptr_type.into()], false);
+        self.module.add_function("time", fn_type, Some(Linkage::External))
+    }
+
     fn get_c_getchar(&self) -> FunctionValue<'ctx> {
         if let Some(func) = self.module.get_function("getchar") {
             return func;
@@ -1993,6 +2043,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Some(aggregate.into())
     }
 
+    fn compile_intrinsic_float_unary_op(&mut self, c_fn_name: &str, compiled_args: &[BasicValueEnum<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
+        let func = self.get_c_float_unary_fn(c_fn_name);
+        let call = self.builder.build_call(func, &[compiled_args[0].into()], &format!("{}_call", c_fn_name)).unwrap();
+        call.try_as_basic_value().left()
+    }
+
     fn compile_function_call(&mut self, function: &BoxedMIRNode, arguments: &[MIRNode]) -> Option<BasicValueEnum<'ctx>> {
         if let Some(fn_symbol) = function.value_id.and_then(|id| self.analyzer.symbol_table.get_value_symbol(id)) {
             if fn_symbol.is_intrinsic {
@@ -2136,6 +2192,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let i8_type = self.context.i8_type();
                         let truncated_val = self.builder.build_int_truncate(i32_val, i8_type, "getchar_char").unwrap();
                         Some(truncated_val.into())
+                    },
+                    "ln_" => self.compile_intrinsic_float_unary_op("log", &compiled_args),
+                    "log2_" => self.compile_intrinsic_float_unary_op("log2", &compiled_args),
+                    "log10_" => self.compile_intrinsic_float_unary_op("log10", &compiled_args),
+                    "sin_" => self.compile_intrinsic_float_unary_op("sin", &compiled_args),
+                    "cos_" => self.compile_intrinsic_float_unary_op("cos", &compiled_args),
+                    "tan_" => self.compile_intrinsic_float_unary_op("tan", &compiled_args),
+                    "asin_" => self.compile_intrinsic_float_unary_op("asin", &compiled_args),
+                    "acos_" => self.compile_intrinsic_float_unary_op("acos", &compiled_args),
+                    "atan_" => self.compile_intrinsic_float_unary_op("atan", &compiled_args),
+                    "sinh_" => self.compile_intrinsic_float_unary_op("sinh", &compiled_args),
+                    "cosh_" => self.compile_intrinsic_float_unary_op("cosh", &compiled_args),
+                    "tanh_" => self.compile_intrinsic_float_unary_op("tanh", &compiled_args),
+                    "asinh_" => self.compile_intrinsic_float_unary_op("asinh", &compiled_args),
+                    "acosh_" => self.compile_intrinsic_float_unary_op("acosh", &compiled_args),
+                    "atanh_" => self.compile_intrinsic_float_unary_op("atanh", &compiled_args),
+                    "atan2_" => {
+                        let func = self.get_c_atan2();
+                        let y = compiled_args[0];
+                        let x = compiled_args[1];
+                        let call = self.builder.build_call(func, &[y.into(), x.into()], "atan2_call").unwrap();
+                        call.try_as_basic_value().left()
+                    },
+                    "random_" => {
+                        let rand_fn = self.get_c_rand();
+                        let rand_max_val = self.context.i32_type().const_int(2147483647, false); // RAND_MAX on most systems
+                        let rand_val_i32 = self.builder.build_call(rand_fn, &[], "rand_call").unwrap()
+                            .try_as_basic_value().left().unwrap().into_int_value();
+                        
+                        let rand_val_f64 = self.builder.build_signed_int_to_float(rand_val_i32, self.context.f64_type(), "rand_f64").unwrap();
+                        let rand_max_f64 = self.builder.build_signed_int_to_float(rand_max_val, self.context.f64_type(), "rand_max_f64").unwrap();
+    
+                        let result = self.builder.build_float_div(rand_val_f64, rand_max_f64, "random_float").unwrap();
+                        Some(result.into())
                     },
                     "drop" => {
                         let value_to_drop_node = &arguments[0];
@@ -2343,6 +2433,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let entry = self.context.append_basic_block(main_fn, "entry");
         self.builder.position_at_end(entry);
     
+        let time_fn = self.get_c_time();
+        let srand_fn = self.get_c_srand();
+        let null_ptr = self.context.ptr_type(AddressSpace::default()).const_null();
+        let time_val = self.builder.build_call(time_fn, &[null_ptr.into()], "time").unwrap()
+            .try_as_basic_value().left().unwrap().into_int_value();
+        let time_val_i32 = self.builder.build_int_truncate(time_val, self.context.i32_type(), "time_i32").unwrap();
+        self.builder.build_call(srand_fn, &[time_val_i32.into()], "").unwrap();
+
         for stmt in stmts.iter() {
             match &stmt.kind {
                 MIRNodeKind::Function {..} | MIRNodeKind::StructDeclaration {..} |
