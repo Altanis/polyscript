@@ -28,15 +28,17 @@ Numeric literals may be expressed in four ways (binary, `0b01`; octal, `0o0172`;
 
 ### String Literals
 String literals are enclosed in double quotes (`"`) and character literals in single quotes (`'`). They support common escape sequences.
-`\n`: Newline
-`\r`: Carriage return
-`\t`: Tab
-`\\`: Backslash
-`\'`: Single quote
-`\"`: Double quote
-`\0`: Null character
-`\xHH`: 2-digit hex escape (e.g., `\x41` is `A`)
-`\u{...}`: Unicode escape up to 6 hex digits (e.g., `'\u{1F600}'` is `😀`)
+| Escape Sequence | Meaning                                                      |
+|-----------------|--------------------------------------------------------------|
+| `\n`            | Newline                                                      |
+| `\r`            | Carriage return                                              |
+| `\t`            | Tab                                                          |
+| `\\`            | Backslash                                                    |
+| `\'`            | Single quote                                                 |
+| `\"`            | Double quote                                                 |
+| `\0`            | Null character                                               |
+| `\xHH`          | 2-digit hex escape (e.g., `\x41` is `A`)                     |
+| `\u{...}`       | Unicode escape up to 6 hex digits (e.g., `'\u{1F600}'` is 😀) |
 
 ## Operators
 
