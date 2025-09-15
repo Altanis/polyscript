@@ -2309,6 +2309,25 @@ impl SemanticAnalyzer {
             | StringLiteral(_)
             | CharLiteral(_) => Ok(()),
 
+            UnaryOperation { operator, operand } => {
+                if *operator == Operation::Neg {
+                    match operand.kind {
+                        IntegerLiteral(_) | FloatLiteral(_) => Ok(()),
+                        _ => Err(self.create_error(
+                            ErrorKind::NonConstantInitializer(name, "negation can only be applied to numeric literals in a constant context".to_string()),
+                            operand.span,
+                            &[operand.span],
+                        )),
+                    }
+                } else {
+                    Err(self.create_error(
+                        ErrorKind::NonConstantInitializer(name, format!("unary operator '{}' is not supported in constant expressions", operator)),
+                        node.span,
+                        &[node.span],
+                    ))
+                }
+            },
+
             _ => Err(self.create_error(
                 ErrorKind::NonConstantInitializer(name, "expression cannot be evaluated at compile time".to_string(),),
                 node.span,

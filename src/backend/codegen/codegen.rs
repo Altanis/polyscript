@@ -2465,6 +2465,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::BooleanLiteral(v) => Some(self.compile_bool_literal(*v)),
             MIRNodeKind::CharLiteral(v) => Some(self.compile_char_literal(*v)),
             MIRNodeKind::StringLiteral(v) => Some(self.compile_string_literal(v)),
+            MIRNodeKind::UnaryOperation { operator, operand } => {
+                if *operator == Operation::Neg {
+                    match operand.kind {
+                        MIRNodeKind::IntegerLiteral(val) => {
+                            let int_val = self.context.i64_type().const_int(val as u64, true);
+                            Some(int_val.const_neg().into())
+                        },
+                        MIRNodeKind::FloatLiteral(val) => Some(self.context.f64_type().const_float(-val).into()),
+                        _ => None
+                    }
+                } else {
+                    None // Other unary ops are not constant
+                }
+            },
             _ => {
                 None
             }
