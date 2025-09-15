@@ -7,7 +7,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum UsageKind {
     NoUsage,
-    ByValue
+    ByValue,
+    ByMutableReference,
 }
 
 pub fn init(program: &mut MIRNode, analyzer: &SemanticAnalyzer) {
@@ -29,6 +30,7 @@ fn analyze_node_for_closures(node: &mut MIRNode, analyzer: &SemanticAnalyzer) {
                 let capture_id = capture.value_id.unwrap();
                 let usage = capture_usages.get(&capture_id).copied().unwrap_or(UsageKind::NoUsage);
                 *strategy = match usage {
+                    UsageKind::ByMutableReference => CaptureStrategy::MutableReference,
                     UsageKind::ByValue | UsageKind::NoUsage => CaptureStrategy::Copy
                 }
             }
@@ -49,14 +51,10 @@ fn find_variable_usage(node: &MIRNode, target_id: usize, analyzer: &SemanticAnal
 
     let current_node_usage = match &node.kind {
         MIRNodeKind::BinaryOperation { operator, left, .. } if operator.is_assignment() => {
-            if get_base_variable(left) == Some(target_id) { UsageKind::ByValue } else { UsageKind::NoUsage }
+            if get_base_variable(left) == Some(target_id) { UsageKind::ByMutableReference } else { UsageKind::NoUsage }
         },
         MIRNodeKind::UnaryOperation { operand, .. } => {
-            if get_base_variable(operand) == Some(target_id) {
-                UsageKind::ByValue
-            } else {
-                UsageKind::NoUsage
-            }
+            if get_base_variable(operand) == Some(target_id) { UsageKind::ByValue } else { UsageKind::NoUsage }
         }
         MIRNodeKind::Identifier(_) if node.value_id == Some(target_id) => UsageKind::ByValue,
         MIRNodeKind::FunctionCall { function, arguments } => {

@@ -1294,7 +1294,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_binary_operation(&mut self, operator: Operation, left_node: &BoxedMIRNode, right_node: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_binary_operation(&mut self, operator: Operation, left_node: &BoxedMIRNode, right_node: &BoxedMIRNode, parent_node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
         if operator == Operation::Assign {
             let target_ptr = self.compile_place_expression(left_node).unwrap();
             
@@ -1433,19 +1433,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
         
         let result_data = self.compile_core_binary_op(operator, left_data, right_data, is_float);
+        
+        let final_result_type = parent_node.type_id.as_ref().unwrap();
 
-        let result_type = if operator.is_conditional() {
-            &Type::from_no_args(self.analyzer.get_primitive_type(PrimitiveKind::Bool))
+        let final_result_data = if self.is_heap_type(final_result_type) {
+            self.build_rc_wrap(result_data, final_result_type).as_basic_value_enum()
         } else {
-            left_type
+            let llvm_final_type = self.map_semantic_type(final_result_type).unwrap();
+            if result_data.get_type() != llvm_final_type {
+                if result_data.is_int_value() && llvm_final_type.is_int_type() {
+                    self.builder.build_int_cast_sign_flag(
+                        result_data.into_int_value(),
+                        llvm_final_type.into_int_type(),
+                        true,
+                        "op_result_cast"
+                    ).unwrap().into()
+                } else {
+                    result_data
+                }
+            } else {
+                result_data
+            }
         };
 
-        if self.is_heap_type(result_type) {
-            let result_ptr = self.build_rc_wrap(result_data, result_type);
-            Some(result_ptr.as_basic_value_enum())
-        } else {
-            Some(result_data)
-        }
+        Some(final_result_data)
     }
 
     fn compile_conditional_operation(&mut self, operator: Operation, left: &BoxedMIRNode, right: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
@@ -2578,7 +2589,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             MIRNodeKind::UnaryOperation { operator, operand }
                 => self.compile_unary_operation(*operator, operand, stmt),
             MIRNodeKind::BinaryOperation { operator, left, right }
-                => self.compile_binary_operation(*operator, left, right),
+                => self.compile_binary_operation(*operator, left, right, stmt),
             MIRNodeKind::ConditionalOperation { operator, left, right }
                 => self.compile_conditional_operation(*operator, left, right),
             MIRNodeKind::Block(stmts) => self.compile_block(stmts, stmt.scope_id),

@@ -340,13 +340,14 @@ impl Operation {
 
             Char => match self {
                 Equivalence | NotEqual | GreaterThan | Geq | LessThan | Leq => Some(Bool),
+                Minus => Some(Int),
 
-                Neg | Plus | Minus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq | ModEq | ExpEq
-                | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq | BitwiseXorEq
-                | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
+                Neg | Plus | Mul | Div | Mod | Exp | PlusEq | MinusEq | MulEq | DivEq
+                | ModEq | ExpEq | BitwiseAnd | BitwiseOr | BitwiseXor | BitwiseAndEq | BitwiseOrEq
+                | BitwiseXorEq | RightBitShift | LeftBitShift | RightBitShiftEq | LeftBitShiftEq | Not | BitwiseNegate
                 | And | Or | Assign | FieldAccess | FunctionCall | As => None,
             },
-
+            
             Void | Never => None,
         }
     }
