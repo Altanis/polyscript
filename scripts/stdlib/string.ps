@@ -1,4 +1,4 @@
-import { strlen, strget, eprint, eprint_char } from "@intrinsics";
+import { strlen, strget } from "@intrinsics";
 import { Vec } from "stdlib/vec.ps";
 
 // A structure representing a mutable, extensible String.
@@ -288,10 +288,6 @@ impl Equivalence<String> for String {
         };
 
         for (let i = 0; i < self.length(); i += 1) {
-            eprint_char(self.get(i));
-            eprint_char(other.get(i));
-            eprint_char('\n');
-
             if (self.get(i) != other.get(i)) {
                 return false;
             };
@@ -304,16 +300,7 @@ impl Equivalence<String> for String {
 impl Equivalence<str> for String {
     type Output = bool;
     fn equivalence(self, other: str): bool {
-        eprint_char(self.get(0));
-        eprint(other);
-        eprint(" brkk\n");
-
         let s = String.from_str(other);
-
-        eprint_char(self.get(0));
-        eprint(other);
-        eprint(" brkk\n");
-        
         [String as Equivalence<String>].equivalence(self, s)
     }
 }

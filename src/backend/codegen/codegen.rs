@@ -413,30 +413,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_scope_drop(&mut self, scope_id: ScopeId, moved_var_id: Option<ValueSymbolId>) {
-        let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
-        for &value_id in scope.values.values() {
-            if moved_var_id == Some(value_id) {
-                continue;
-            }
+    fn compile_scope_drop(&mut self, _: ScopeId, _: Option<ValueSymbolId>) {}
 
-            let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
-            let ty = symbol.type_id.as_ref().unwrap();
+    // fn compile_scope_drop(&mut self, scope_id: ScopeId, moved_var_id: Option<ValueSymbolId>) {
+    //     let scope = self.analyzer.symbol_table.get_scope(scope_id).unwrap();
+    //     for &value_id in scope.values.values() {
+    //         if moved_var_id == Some(value_id) {
+    //             continue;
+    //         }
 
-            if !self.is_heap_type(ty) {
-                continue;
-            }
+    //         let symbol = self.analyzer.symbol_table.get_value_symbol(value_id).unwrap();
+    //         let ty = symbol.type_id.as_ref().unwrap();
 
-            if let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
-                let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
-                let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
-                let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, &format!("{}_rc_ptr", name)).unwrap();
+    //         if !self.is_heap_type(ty) {
+    //             continue;
+    //         }
 
-                let decref_fn = self.get_decref();
-                self.builder.build_call(decref_fn, &[rc_ptr.into()], &format!("decref_{}", name)).unwrap();
-            }
-        }
-    }
+    //         if let Some(ptr_to_rc_ptr) = self.variables.get(&value_id) {
+    //             let name = self.analyzer.symbol_table.get_value_name(symbol.name_id);
+    //             let rc_ptr_type = self.context.ptr_type(AddressSpace::default());
+    //             let rc_ptr = self.builder.build_load(rc_ptr_type, *ptr_to_rc_ptr, &format!("{}_rc_ptr", name)).unwrap();
+
+    //             let decref_fn = self.get_decref();
+    //             self.builder.build_call(decref_fn, &[rc_ptr.into()], &format!("decref_{}", name)).unwrap();
+    //         }
+    //     }
+    // }
 
     fn mangle_monomorph_name<I>(&self, id: TypeSymbolId, concrete_types: I) -> String
     where

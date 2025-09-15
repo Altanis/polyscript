@@ -21,7 +21,7 @@ use crate::mir::ir_node::MIRNode;
 use crate::utils::error::{BoxedError, ErrorKind};
 use crate::utils::kind::{Span, Token};
 
-pub const DEBUG: bool = true;
+pub const DEBUG: bool = false;
 const FILE_EXTENSION: &str = "ps";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,8 +90,11 @@ impl Compiler {
 
         while let Some(current_path) = file_queue.pop_front() {
             let file_path = current_path.as_os_str().to_str().map(|f| f.to_string());
-            // let trusted = self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path));
-            let trusted = true;
+            let trusted = if DEBUG {
+                true
+            } else {
+                self.config.stdlib_path.as_ref().is_some_and(|stdlib_path| current_path.starts_with(stdlib_path))
+            };
 
             if !visited_for_discovery.insert(current_path.clone()) {
                 continue;

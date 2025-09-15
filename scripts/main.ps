@@ -2,13 +2,3 @@
 // private field and public fn of same name throws err
 // default traits such as Drop, Clone, Default, ToString
 // maybe add prelude system
-
-import { print_int } from "@intrinsics";
-
-let x = 4;
-fn mutation(y: int) {
-    x = y;
-}
-
-mutation(7);
-print_int(x);
