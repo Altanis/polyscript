@@ -1,0 +1,165 @@
+import { print, println } from "stdlib/io.ps";
+import { INT_MIN } from "stdlib/consts.ps";
+import { Vec } from "stdlib/vec.ps";
+
+enum Cell { X = -1, O = 1, Empty = 0 }
+impl Cell {
+    fn to_symbol(self): str {
+        if (self == Cell.X) { "X" }
+        else if (self == Cell.O) { "O" }
+        else { "." }
+    }
+}
+
+enum Player { X = -1, O = 1 }
+impl Player {
+    fn to_cell(self): Cell {
+        if (self == Player.X) { Cell.X }
+        else if (self == Player.O) { Cell.O }
+    }
+
+    fn opponent(self): Self {
+        if (self == Player.X) { Player.O }
+        else if (self == Player.O) { Player.X }
+    }
+}
+
+struct Board {
+    cells: Vec<Cell>;
+}
+
+struct Vector3D {
+    x1: int;
+    x2: int;
+    x3: int;
+}
+
+impl Board {
+    fn new(): Self {
+        Self { cells: [Vec<Cell>].from_capacity(9) }
+    }
+
+    fn print(self) {
+        for (let r = 0; r < 3; r += 1) {
+            for (let c = 0; c < 3; c += 1) {
+                print(self.cells.get(r * 3 + c).to_symbol());
+                print(" ");
+            }
+
+            println("");
+        }
+
+        println("");
+    }
+
+    fn is_full(self): bool {
+        for (let r = 0; r < 3; r += 1) {
+            for (let c = 0; c < 3; c += 1) {
+                if (self.cells.get(r * 3 + c) == Cell.Empty) {
+                    return false;
+                };
+            }
+        }
+
+        true
+    }
+
+    fn winner(self): int {
+        let lines = [Vec<Vector3D>].from_capacity(8);
+        lines.push(Vector3D { x1: 0, x2: 1, x3: 2 });
+        lines.push(Vector3D { x1: 3, x2: 4, x3: 5 });
+        lines.push(Vector3D { x1: 6, x2: 7, x3: 8 });
+        lines.push(Vector3D { x1: 0, x2: 3, x3: 6 });
+        lines.push(Vector3D { x1: 1, x2: 4, x3: 7 });
+        lines.push(Vector3D { x1: 2, x2: 5, x3: 8 });
+        lines.push(Vector3D { x1: 0, x2: 4, x3: 8 });
+        lines.push(Vector3D { x1: 2, x2: 4, x3: 6 });
+
+        for (let i = 0; i < lines.length(); i += 1) {
+            let vector = lines.get(i);
+
+            if (self.cells.get(vector.x1) != Cell.Empty
+                && self.cells.get(vector.x1) == self.cells.get(vector.x2)
+                && self.cells.get(vector.x2) == self.cells.get(vector.x3)
+            ) {
+                return self.cells.get(vector.x1) as int;
+            };
+        }
+
+        0
+    }
+
+    fn make_move(self, idx: int, player: Player) {
+        self.cells.replace(idx, player.to_cell());
+    }
+
+    fn undo(self, idx: int) {
+        self.cells.replace(idx, Cell.Empty);
+    }
+
+    fn available_moves(self): Vec<int> {
+        let vec = [Vec<int>].from_capacity(9);
+        
+        for (let i = 0; i < 9; i += 1) {
+            if (self.cells.get(i) == Cell.Empty) {
+                vec.push(i);
+            };
+        }
+
+        vec
+    }
+}
+
+impl Board {
+    fn negamax(self, player: Player): int {
+        let potential_winner = self.winner();
+        if (potential_winner != 0) {
+            return if (winner == player as int) { 1 } else { -1 };
+        };
+
+        if (self.is_full()) { return 0; };
+
+        let best = INT_MIN + 1;
+        let moves = self.available_moves();
+
+        for (let i = 0; i < moves.length(); i += 1) {
+            let move = moves.get(i);
+            
+            self.play(move, player);
+            let score = -self.negamax(player.opponent());
+            self.undo(move);
+
+            if (score > best) {
+                best = score;
+                if (best == 1) {
+                    return best;
+                }
+            }
+        }
+
+        best
+    }
+
+    fn best_move(player: Player): int {
+        let best_score = INT_MIN + 1;
+        let best_move = -1;
+
+        let moves = self.available_moves();
+
+        for (let i = 0; i < moves.length(); i += 1) {
+            let move = moves.get(i);
+            
+            self.play(move, player);
+            let score = -self.negamax(player.opponent());
+            self.undo(move);
+
+            if (score > best_score) {
+                best_score = score;
+                best_move = move;
+            }
+        }
+
+        best_move
+    }
+}
+

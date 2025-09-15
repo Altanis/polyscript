@@ -20,3 +20,7 @@ The language specification is divided into several parts:
 7.  [**Standard Library**](./DOCS/08-stdlib.md): Extra features provided by the native standard library.
 8.  [**Memory Model**](./DOCS/09-memory-model.md): A deep dive into Polyscript's stack, heap, and reference counting system.
 9.  [**Compiler Internals**](./DOCS/10-compiler-internals.md): An explanation of the compiler's architecture and compilation pipeline.
+
+## Usage
+
+After compiling the compiler into an executable `./polyscriptcc`, running `./polyscriptcc --help` will give further instructions as to how to compile a Polyscript program. The native standard library is provided [here](./scripts/stdlib).

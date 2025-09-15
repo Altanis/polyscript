@@ -1405,8 +1405,23 @@ impl Parser {
 
                 if parser.match_token(TokenKind::Operator(Operation::Assign)) {
                     let expr = parser.parse_expression()?;
-                    let AstNodeKind::IntegerLiteral(num) = expr.kind else {
-                        return Err(parser.generate_error(ErrorKind::ExpectedInteger, parser.create_span_from_current_token()));
+                    
+                    let num = match expr.kind {
+                        AstNodeKind::IntegerLiteral(num) => num,
+                        AstNodeKind::UnaryOperation { operator, operand } => {
+                            if operator == Operation::Neg {
+                                if let AstNodeKind::IntegerLiteral(val) = operand.kind {
+                                    -val
+                                } else {
+                                    return Err(parser.generate_error(ErrorKind::ExpectedInteger, operand.span));
+                                }
+                            } else {
+                                return Err(parser.generate_error(ErrorKind::ExpectedInteger, expr.span));
+                            }
+                        },
+                        _ => {
+                            return Err(parser.generate_error(ErrorKind::ExpectedInteger, expr.span));
+                        }
                     };
 
                     variants.insert(name.clone(), (variant, Some(num)));
