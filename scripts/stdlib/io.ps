@@ -31,6 +31,10 @@ fn panic<T: ToString>(data: T): never {
     exit(1);
 }
 
+fn unreachable<T: ToString>(data: T): never {
+    panic(data);
+}
+
 fn read_char(): char {
     getchar()
 }
@@ -46,4 +50,4 @@ fn read_line(): String {
     s
 }
 
-export { print, eprint, println, eprintln, panic, read_char, read_line };
+export { print, eprint, println, eprintln, panic, unreachable, read_char, read_line };

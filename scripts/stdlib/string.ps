@@ -297,6 +297,14 @@ impl Equivalence<String> for String {
     }
 }
 
+impl Equivalence<str> for String {
+    type Output = bool;
+    fn equivalence(self, other: str): bool {
+        let s = String.from_str(other);
+        [String as Equivalence<String>].equivalence(self, s)
+    }
+}
+
 impl NotEqual<String> for String {
     type Output = bool;
     fn not_equal(self, other: String): bool {

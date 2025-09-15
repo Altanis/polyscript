@@ -1568,14 +1568,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
             if last_stmt_is_expr
                 && let Some(last_expr) = stmts.last()
-                && let Some(base_var_id) = get_base_variable(last_expr)
+                && let Some(expr_type) = last_expr.type_id.as_ref()
+                && self.is_heap_type(expr_type) && !self.is_rvalue(last_expr)
             {
-                let symbol = self.analyzer.symbol_table.get_value_symbol(base_var_id).unwrap();
-                if self.is_heap_type(symbol.type_id.as_ref().unwrap()) {
-                    let val = last_val.unwrap();
-                    let incref = self.get_incref();
-                    self.builder.build_call(incref, &[val.into()], "block_expr.incref").unwrap();
-                }
+                let val = last_val.unwrap();
+                let incref = self.get_incref();
+                self.builder.build_call(incref, &[val.into()], "block_expr.incref").unwrap();
             }
             
             self.compile_scope_drop(scope_id, moved_var_id);
@@ -1816,7 +1814,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             (Some(CastableKind::Int), Some(CastableKind::Int))
             | (Some(CastableKind::Char), Some(CastableKind::Int))
             | (Some(CastableKind::Int), Some(CastableKind::Char))
-            | (Some(CastableKind::Enum), Some(CastableKind::Int)) => {
+            | (Some(CastableKind::Enum), Some(CastableKind::Int))
+            | (Some(CastableKind::Int), Some(CastableKind::Enum)) => {
                 return Some(self.builder.build_int_cast_sign_flag(
                     source_val.into_int_value(),
                     llvm_target_type.into_int_type(),
@@ -2476,7 +2475,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         _ => None
                     }
                 } else {
-                    None // Other unary ops are not constant
+                    None
                 }
             },
             _ => {
