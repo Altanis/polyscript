@@ -329,7 +329,9 @@ impl SemanticAnalyzer {
 
         self.collect_uvs(body)?;
 
-        let return_type = if condition.kind == AstNodeKind::BooleanLiteral(true) {
+        let has_break = body.contains_break();
+
+        let return_type = if condition.kind == AstNodeKind::BooleanLiteral(true) && !has_break {
             Type::from_no_args(self.get_primitive_type(PrimitiveKind::Never))
         } else {
             Type::from_no_args(self.get_primitive_type(PrimitiveKind::Void))

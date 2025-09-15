@@ -1563,6 +1563,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         for stmt in stmts {
             last_val = self.compile_node(stmt);
+            if self.builder.get_insert_block().is_none_or(|b| b.get_terminator().is_some()) {
+                break;
+            }
         }
 
         if self.builder.get_insert_block().and_then(|b| b.get_terminator()).is_none() {
@@ -1682,7 +1685,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         None
     }
 
-    fn compile_while_loop(&mut self, condition: &BoxedMIRNode, body: &BoxedMIRNode) -> Option<BasicValueEnum<'ctx>> {
+    fn compile_while_loop(&mut self, node: &MIRNode) -> Option<BasicValueEnum<'ctx>> {
+        let MIRNodeKind::WhileLoop { condition, body } = &node.kind else { unreachable!() };
         let function = self.current_function.unwrap();
 
         let cond_block = self.context.append_basic_block(function, "while.cond");
@@ -1705,6 +1709,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         self.builder.position_at_end(after_block);
+
+        if let Some(ty) = &node.type_id {
+            let type_symbol = self.analyzer.symbol_table.get_type_symbol(ty.symbol).unwrap();
+            if let TypeSymbolKind::Primitive(PrimitiveKind::Never) = type_symbol.kind && after_block.get_terminator().is_none() {
+                self.builder.build_unreachable().unwrap();
+            }
+        }
         
         self.continue_blocks.pop();
         self.break_blocks.pop();
@@ -2349,6 +2360,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_type = self.map_semantic_fn_type(callee_type, is_closure);
         let call = self.builder.build_indirect_call(fn_type, fn_ptr, &final_args, "call").unwrap();
 
+        let return_type_symbol = self.analyzer.symbol_table.get_type_symbol(return_type.symbol).unwrap();
+        if let TypeSymbolKind::Primitive(PrimitiveKind::Never) = return_type_symbol.kind {
+            self.builder.build_unreachable().unwrap();
+            return None;
+        }
+
         if use_rvo {
             let loaded_val = self.builder.build_load(self.map_semantic_type(return_type).unwrap(), return_ptr.unwrap(), "rvo.load").unwrap();
             Some(loaded_val)
@@ -2617,7 +2634,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 else_if_branches,
                 else_branch,
             } => self.compile_if_statement(condition, then_branch, else_if_branches, else_branch, stmt.type_id.as_ref()),
-            MIRNodeKind::WhileLoop { condition, body } => self.compile_while_loop(condition, body),
+            MIRNodeKind::WhileLoop { .. } => self.compile_while_loop(stmt),
             MIRNodeKind::ForLoop { initializer, condition, increment, body }
                 => self.compile_for_loop(initializer, condition, increment, body),
             MIRNodeKind::Break => {

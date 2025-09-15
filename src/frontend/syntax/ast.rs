@@ -256,6 +256,24 @@ impl AstNode {
             _ => None,
         }
     }
+
+    pub fn contains_break(&self) -> bool {
+        if let AstNodeKind::Break = self.kind {
+            return true;
+        }
+    
+        if let AstNodeKind::ForLoop { .. } | AstNodeKind::WhileLoop { .. } | AstNodeKind::Function { .. } = self.kind {
+            return false;
+        }
+    
+        for child in self.children() {
+            if child.contains_break() {
+                return true;
+            }
+        }
+    
+        false
+    }
 }
 
 impl std::fmt::Display for AstNode {
